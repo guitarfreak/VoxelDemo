@@ -136,10 +136,10 @@ void loadFunctions() {
 
 const char* vertexShaderQuad = GLSL (
 	const vec2 quad[] = vec2[] (
-	  vec2( -1.0, -1.0 ),
-	  vec2(  1.0, -1.0 ),
-	  vec2( -1.0,  1.0 ),
-	  vec2(  1.0,  1.0 )
+	  vec2( -0.5f, -0.5f ),
+	  vec2(  0.5f, -0.5f ),
+	  vec2( -0.5f,  0.5f ),
+	  vec2(  0.5f,  0.5f )
 	);
 
 	const ivec2 quad_uv[] = ivec2[] (
@@ -160,7 +160,7 @@ const char* vertexShaderQuad = GLSL (
 
 	void main() {
 		ivec2 pos = quad_uv[gl_VertexID];
-		uv = vec2(setUV[pos.x], setUV[2 + pos.y]);
+		uv = vec2(setUV[pos.x], 1-setUV[2 + pos.y]);
 		Color = setColor;
 
 		vec2 model = quad[gl_VertexID]*mod.zw + mod.xy;
@@ -215,19 +215,24 @@ struct Mesh {
 	uint id;
 };
 
-uint loadTexture(char* path, int mipLevels, int internalFormat, int channelType, int channelFormat) {
+uint loadTexture(unsigned char* buffer, int w, int h, int mipLevels, int internalFormat, int channelType, int channelFormat) {
+	uint textureId;
+	glCreateTextures(GL_TEXTURE_2D, 1, &textureId);
+	glTextureStorage2D(textureId, mipLevels, internalFormat, w, h);
+	glTextureSubImage2D(textureId, 0, 0, 0, w, h, channelType, channelFormat, buffer);
+	glGenerateTextureMipmap(textureId);
+
+	return textureId;
+}
+
+uint loadTextureFile(char* path, int mipLevels, int internalFormat, int channelType, int channelFormat) {
 	int x,y,n;
 	unsigned char* stbData = stbi_load(path, &x, &y, &n, 0);
 
-	uint textureId;
-	glCreateTextures(GL_TEXTURE_2D, 1, &textureId);
-	glTextureStorage2D(textureId, mipLevels, internalFormat, x, y);
-	glTextureSubImage2D(textureId, 0, 0, 0, x, y, channelType, channelFormat, stbData);
-	glGenerateTextureMipmap(textureId);
-
+	int result = loadTexture(stbData, x, y, mipLevels, internalFormat, channelType, channelFormat);
 	stbi_image_free(stbData);	
 
-	return textureId;
+	return result;
 }
 
 uint createShader(const char* vertexShaderString, const char* fragmentShaderString, uint* vId, uint* fId) {
@@ -263,7 +268,12 @@ struct AppData {
 	WindowSettings wSettings;
 	Vec3 camera;
 	float aspectRatio;
+
+	stbtt_bakedchar cdata[96]; // ASCII 32..126 is 95 glyphs
 };
+
+
+
 
 MemoryBlock* globalMemory;
 
@@ -321,8 +331,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glCreateVertexArrays(1, &vao);
 		glBindVertexArray(vao);
 
-		appData->textures[0] = loadTexture("..\\data\\white.png", 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
-		appData->textures[1] = loadTexture("..\\data\\rect.png", 2, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+		appData->textures[0] = loadTextureFile("..\\data\\white.png", 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+		appData->textures[1] = loadTextureFile("..\\data\\rect.png", 2, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
 
 		// glTextureParameteri(textureId, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
 		// glTextureParameteri(textureId, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -342,10 +352,36 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		GLenum glError = glGetError(); printf("GLError: %i\n", glError);
 
-		appData->camera = vec3(0,0,10);
-
+		appData->camera = vec3(0,0,200);
 
 		// LiberationMono.ttf
+
+
+		// STBTT_DEF int stbtt_BakeFontBitmap(const unsigned char *data, int offset,  // font location (use offset=0 for plain .ttf)
+		//                                 float pixel_height,                     // height of font in pixels
+		//                                 unsigned char *pixels, int pw, int ph,  // bitmap to be filled in
+		//                                 int first_char, int num_chars,          // characters to bake
+		//                                 stbtt_bakedchar *chardata);             // you allocate this, it's num_chars long
+
+
+		char* ttfBuffer = (char*)getTMemory(fileSize("..\\data\\LiberationMono.ttf") + 1);
+		readFileToBuffer(ttfBuffer, "..\\data\\LiberationMono.ttf");
+		int fw = 512, fh = 512;
+		unsigned char* fontBitmapBuffer = (unsigned char*)getTMemory(fw*fh);
+		unsigned char* fontBitmap = (unsigned char*)getPMemory(fw*fh*4);
+		
+		stbtt_BakeFontBitmap((unsigned char*)ttfBuffer, 0, 64, fontBitmapBuffer, fw, fh, 32,96, appData->cdata);
+		for(int i = 0; i < fw*fh; i++) {
+			fontBitmap[i*4] = fontBitmapBuffer[i];
+			fontBitmap[i*4+1] = fontBitmapBuffer[i];
+			fontBitmap[i*4+2] = fontBitmapBuffer[i];
+			fontBitmap[i*4+3] = fontBitmapBuffer[i];
+		}
+		// appData->textures[2] = loadTexture(fontBitmap, fw, fh, 1, GL_R8, GL_RED, GL_UNSIGNED_BYTE);
+		appData->textures[2] = loadTexture(fontBitmap, fw, fh, 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+
+
+		int bla = 2;
 	}
 
 	if(reload) {
@@ -384,11 +420,30 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	glBindProgramPipeline(appData->programs[0]);
 
-	for(int i = 0; i < 10; i++) {
-		for(int j = 0; j < 10; j++) {
-			drawRect(appData->pipelineIds, vec2(i,j), vec2(0.4f,0.4f), rect(0,1,0,1), vec4(0.1f*i,0.1f*j,1,1), 1);
-		}
+	// for(int i = 0; i < 10; i++) {
+	// 	for(int j = 0; j < 10; j++) {
+	// 		drawRect(appData->pipelineIds, vec2(i,j), vec2(0.4f,0.4f), rect(0,1,0,1), vec4(0.1f*i,0.1f*j,1,1), 1);
+	// 	}
+	// }
+
+	// drawRect(appData->pipelineIds, vec2(0,0), vec2(5,5), rect(0,1,0,1), vec4(1,1,1,1), appData->textures[2]);
+	// drawRect(appData->pipelineIds, vec2(0,0), vec2(2,2), rect(0,1,0,1), vec4(1,1,1,1), 2);
+
+
+	char* text = "ABCDEFG";
+	int length = strLen(text);
+	float x = 0; float y = 0;
+	for(int i = 0; i < length; i++) {
+		char t = text[i];
+		stbtt_aligned_quad q;
+		stbtt_GetBakedQuad(appData->cdata, 512, 512, t-32, &x, &y, &q, 1);
+
+		Rect r = rectGetCenDim(rect(q.x0, q.y0, q.x1, q.y1));
+		drawRect(appData->pipelineIds, r.cen, r.dim, rect(q.s0,q.t0,q.s1,q.t1), vec4(1,1,1,1), appData->textures[2]);
 	}
+	drawRect(appData->pipelineIds, vec2(0,0), vec2(5,5), rect(0,1,0,1), vec4(1,1,1,1), appData->textures[2]);
+
+
 
 	swapBuffers(&appData->systemData);
 	glFinish();
