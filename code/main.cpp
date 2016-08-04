@@ -10,7 +10,7 @@ MemoryBlock* globalMemory;
 int CALLBACK WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR commandLine, int showCode) {
 
 	globalMemory = (MemoryBlock*)malloc(sizeof(MemoryBlock));
-	initMemorySizes(globalMemory, megaBytes(10), megaBytes(10), megaBytes(10), kiloBytes(1));
+	initMemorySizes(globalMemory, megaBytes(100), megaBytes(100), megaBytes(100), kiloBytes(10));
 	initMemory(globalMemory);
 
 	HotloadDll hotloadDll;

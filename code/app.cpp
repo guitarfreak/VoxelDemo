@@ -78,7 +78,9 @@
 		GLOP(void, TextureParameteri, GLuint texture, GLenum pname, GLint param) \
 		GLOP(void, ProgramUniform4f, GLuint program, GLint location, GLfloat v0, GLfloat v1, GLfloat v2,GLfloat v3) \
 		GLOP(GLint, GetUniformLocation, GLuint program, const GLchar *name) \
-		GLOP(void, ProgramUniform2f, GLuint program, GLint location, GLfloat v0, GLfloat v1) 
+		GLOP(void, ProgramUniform3f, GLuint program, GLint location, GLfloat v0, GLfloat v1, GLfloat v2) \
+		GLOP(void, ProgramUniform2f, GLuint program, GLint location, GLfloat v0, GLfloat v1) \
+		GLOP(void, ProgramUniform1f, GLuint program, GLint location, GLfloat v0) 
 
 		
 
@@ -133,6 +135,68 @@ void loadFunctions() {
 
 
 
+const char* vertexShaderCube = GLSL (
+	const vec3 cube[] = vec3[] (
+	    vec3(-0.5, -0.5,  0.5), // 1  left    First Strip
+	    vec3(-0.5,  0.5,  0.5), // 3
+	    vec3(-0.5, -0.5, -0.5), // 0
+	    vec3(-0.5,  0.5, -0.5), // 2
+	    vec3( 0.5, -0.5, -0.5), // 4  back
+	    vec3( 0.5,  0.5, -0.5), // 6
+	    vec3( 0.5, -0.5,  0.5), // 5  right
+	    vec3( 0.5,  0.5,  0.5), // 7
+	    vec3( 0.5,  0.5, -0.5), // 6  top     Second Strip
+	    vec3(-0.5,  0.5, -0.5), // 2
+	    vec3( 0.5,  0.5,  0.5), // 7
+	    vec3(-0.5,  0.5,  0.5), // 3
+	    vec3( 0.5, -0.5,  0.5), // 5  front
+	    vec3(-0.5, -0.5,  0.5), // 1
+	    vec3( 0.5, -0.5, -0.5), // 4  bottom
+	    vec3(-0.5, -0.5, -0.5)  // 0
+	);
+
+	uniform vec3 a;
+
+	out gl_PerVertex { vec4 gl_Position; };
+	out vec4 Color;
+
+	void main() {
+		// ivec2 pos = quad_uv[gl_VertexID];
+		// uv = vec2(setUV[pos.x], setUV[2 + pos.y]);
+		float c = gl_VertexID;
+		c = c/16;
+		Color = vec4(c,0.5f,c,1);
+
+		// float angle = 2;
+
+		mat3x3 rot = mat3x3(cos(a.y)*cos(a.z), cos(a.z)*sin(a.x)*sin(a.y)-cos(a.x)*sin(a.z), cos(a.x)*cos(a.z)*sin(a.x)*sin(a.z),
+			   				cos(a.y)*sin(a.z), cos(a.x)*cos(a.z)+sin(a.x)*sin(a.y)*sin(a.z), -cos(a.z)*sin(a.x)+cos(a.x)*sin(a.y)*sin(a.z),
+			   				-sin(a.y), cos(a.y)*sin(a.x), cos(a.x)*cos(a.y));
+		vec3 pos = rot*cube[gl_VertexID];
+
+		gl_Position = vec4(pos, 1);
+		// gl_Position = vec4(cube[gl_VertexID], 1);
+	}
+);
+
+const char* fragmentShaderCube = GLSL (
+	layout(binding = 0) uniform sampler2D s;
+
+	// smooth in vec2 uv;
+	in vec4 Color;
+
+	layout(depth_less) out float gl_FragDepth;
+	out vec4 color;
+
+	void main() {
+		// color = texture(s, uv) * Color;
+		color = Color;
+	}
+);
+
+
+
+
 
 const char* vertexShaderQuad = GLSL (
 	const vec2 quad[] = vec2[] (
@@ -162,18 +226,8 @@ const char* vertexShaderQuad = GLSL (
 		ivec2 pos = quad_uv[gl_VertexID];
 		uv = vec2(setUV[pos.x], setUV[2 + pos.y]);
 		Color = setColor;
-
 		vec2 model = quad[gl_VertexID]*mod.zw + mod.xy;
-
-		// vec2 wh = vec2(camera.z - camera.x, camera.w - camera.y);
-		// vec2 xy = vec2(camera.x + wh.x/2.0f, camera.y + wh.y/2.0f);
-		// vec2 view = model/(camera.zw*0.5f) + 1/camera.xy;
-		// vec2 view = model/(camera.zw*0.5f) + xy/camera.zw;
-		// vec2 endXY = camera.xy;
-		// if(camera.xy != vec2(0,0)) endXY = 1/endXY;
-		// vec2 view = model/(camera.zw*0.5f) + endXY;
 		vec2 view = model/(camera.zw*0.5f) - camera.xy/(camera.zw*0.5f);
-		// vec2 view = model/(camera.zw*0.5f) + camera.xy;
 		gl_Position = vec4(view, 0, 1);
 	}
 );
@@ -202,6 +256,14 @@ struct PipelineIds {
 	uint quadVertexUV;
 	uint quadVertexColor;
 	uint quadVertexCamera;
+
+
+	uint programCube;
+
+	uint cubeVertex;
+	uint cubeFragment;
+
+	uint cubeVertexAngle;
 };
 
 void drawRect(PipelineIds ids, Rect r, Rect uv, Vec4 color, int texture) {
@@ -246,13 +308,15 @@ uint loadTextureFile(char* path, int mipLevels, int internalFormat, int channelT
 }
 
 uint createShader(const char* vertexShaderString, const char* fragmentShaderString, uint* vId, uint* fId) {
-	uint vertexShaderId = glCreateShaderProgramv(GL_VERTEX_SHADER, 1, &vertexShaderString);
-	uint fragmentShaderId = glCreateShaderProgramv(GL_FRAGMENT_SHADER, 1, &fragmentShaderString);
+	*vId = glCreateShaderProgramv(GL_VERTEX_SHADER, 1, &vertexShaderString);
+	*fId = glCreateShaderProgramv(GL_FRAGMENT_SHADER, 1, &fragmentShaderString);
 
 	uint shaderId;
 	glCreateProgramPipelines(1, &shaderId);
-	glUseProgramStages(shaderId, GL_VERTEX_SHADER_BIT, vertexShaderId);
-	glUseProgramStages(shaderId, GL_FRAGMENT_SHADER_BIT, fragmentShaderId);
+	glUseProgramStages(shaderId, GL_VERTEX_SHADER_BIT, *vId);
+	GLenum glError = glGetError(); printf("GLError: %i\n", glError);
+	glUseProgramStages(shaderId, GL_FRAGMENT_SHADER_BIT, *fId);
+	glError = glGetError(); printf("GLError: %i\n", glError);
 
 	return shaderId;
 }
@@ -260,6 +324,37 @@ uint createShader(const char* vertexShaderString, const char* fragmentShaderStri
 void ortho(PipelineIds* ids, Rect r) {
 	r = rectGetCenDim(r);
 	glProgramUniform4f(1, ids->quadVertexCamera, r.cen.x, r.cen.y, r.dim.w, r.dim.h);
+}
+
+struct Font {
+	char* fileBuffer;
+	Vec2i size;
+	int glyphStart, glyphCount;
+	stbtt_bakedchar* cData;
+	uint texId;
+	int height;
+};
+
+void drawText(PipelineIds* ids, Vec2 pos, char* text, Font* font, int vAlign, int hAlign) {
+	int length = strLen(text);
+	Vec2 textDim = stbtt_GetTextDim(font->cData, font->height, font->glyphStart, text);
+	pos.x -= vAlign*0.5f*textDim.w;
+	pos.y -= hAlign*0.5f*textDim.h;
+
+	Vec2 startPos = pos;
+	for(int i = 0; i < length; i++) {
+		char t = text[i];
+
+		if(t == '\n') {
+			pos.y -= font->height;
+			pos.x = startPos.x;
+			continue;
+		}
+
+		stbtt_aligned_quad q;
+		stbtt_GetBakedQuad(font->cData, font->size.w, font->size.h, t-font->glyphStart, &pos.x, &pos.y, &q, 1);
+		drawRect(*ids, rect(q.x0, q.y0, q.x1, q.y1), rect(q.s0,q.t0,q.s1,q.t1), vec4(1,1,1,1), 3);
+	}
 }
 
 struct Texture {
@@ -278,13 +373,14 @@ struct AppData {
 	PipelineIds pipelineIds;
 	uint programs[16];
 	uint textures[16];
+	int texCount;
 	uint samplers[16];
 
 	WindowSettings wSettings;
 	Vec3 camera;
 	float aspectRatio;
 
-	stbtt_bakedchar cdata[96]; // ASCII 32..126 is 95 glyphs
+	Font fontArial;
 };
 
 
@@ -347,8 +443,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glCreateVertexArrays(1, &vao);
 		glBindVertexArray(vao);
 
-		appData->textures[0] = loadTextureFile("..\\data\\white.png", 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
-		appData->textures[1] = loadTextureFile("..\\data\\rect.png", 2, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+		appData->textures[appData->texCount++] = loadTextureFile("..\\data\\white.png", 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+		appData->textures[appData->texCount++] = loadTextureFile("..\\data\\rect.png", 2, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
 
 		// glTextureParameteri(textureId, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
 		// glTextureParameteri(textureId, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -363,39 +459,41 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ids->quadVertexUV = glGetUniformLocation(1, "setUV");
 		ids->quadVertexColor = glGetUniformLocation(1, "setColor");
 		ids->quadVertexCamera = glGetUniformLocation(1, "camera");
-
 		appData->programs[0] = ids->programQuad;
 
-		GLenum glError = glGetError(); printf("GLError: %i\n", glError);
+		ids->programCube = createShader(vertexShaderCube, fragmentShaderCube, &ids->cubeVertex, &ids->cubeFragment);
+		ids->cubeVertexAngle = glGetUniformLocation(ids->cubeVertex, "a");
+		appData->programs[1] = ids->programCube;
+
+		// GLenum glError = glGetError(); printf("GLError: %i\n", glError);
 
 		appData->camera = vec3(0,0,10);
 
-		// LiberationMono.ttf
 
 
-		// STBTT_DEF int stbtt_BakeFontBitmap(const unsigned char *data, int offset,  // font location (use offset=0 for plain .ttf)
-		//                                 float pixel_height,                     // height of font in pixels
-		//                                 unsigned char *pixels, int pw, int ph,  // bitmap to be filled in
-		//                                 int first_char, int num_chars,          // characters to bake
-		//                                 stbtt_bakedchar *chardata);             // you allocate this, it's num_chars long
-
-
-		char* path = "..\\data\\arial.ttf";
-		char* ttfBuffer = (char*)getTMemory(fileSize(path) + 1);
-		readFileToBuffer(ttfBuffer, path);
-		int fw = 512, fh = 512;
-		unsigned char* fontBitmapBuffer = (unsigned char*)getTMemory(fw*fh);
-		unsigned char* fontBitmap = (unsigned char*)getPMemory(fw*fh*4);
+		Font font;
+		char* path = "..\\data\\LiberationMono.ttf";
+		font.fileBuffer = (char*)getPMemory(fileSize(path) + 1);
+		readFileToBuffer(font.fileBuffer, path);
+		font.size = vec2i(512,512);
+		unsigned char* fontBitmapBuffer = (unsigned char*)getTMemory(font.size.x*font.size.y);
+		unsigned char* fontBitmap = (unsigned char*)getTMemory(font.size.x*font.size.y*4);
 		
-		stbtt_BakeFontBitmap((unsigned char*)ttfBuffer, 0, 70, fontBitmapBuffer, fw, fh, 32,96, appData->cdata);
-		for(int i = 0; i < fw*fh; i++) {
+		font.height = 30;
+		font.glyphStart = 32;
+		font.glyphCount = 95;
+		font.cData = (stbtt_bakedchar*)getPMemory(sizeof(stbtt_bakedchar)*font.glyphCount);
+		stbtt_BakeFontBitmap((unsigned char*)font.fileBuffer, 0, font.height, fontBitmapBuffer, font.size.w, font.size.h, font.glyphStart, font.glyphCount, font.cData);
+		for(int i = 0; i < font.size.w*font.size.h; i++) {
 			fontBitmap[i*4] = fontBitmapBuffer[i];
 			fontBitmap[i*4+1] = fontBitmapBuffer[i];
 			fontBitmap[i*4+2] = fontBitmapBuffer[i];
 			fontBitmap[i*4+3] = fontBitmapBuffer[i];
 		}
-		// appData->textures[2] = loadTexture(fontBitmap, fw, fh, 1, GL_R8, GL_RED, GL_UNSIGNED_BYTE);
-		appData->textures[2] = loadTexture(fontBitmap, fw, fh, 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+		uint texId = loadTexture(fontBitmap, font.size.w, font.size.h, 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+		appData->textures[appData->texCount++] = texId;
+		font.texId = texId;
+		appData->fontArial = font;
 
 	}
 
@@ -413,15 +511,16 @@ extern "C" APPMAINFUNCTION(appMain) {
 	getWindowProperties(windowHandle, &wSettings->currentRes.x, &wSettings->currentRes.y,0,0,0,0);
 	appData->aspectRatio = wSettings->currentRes.x / (float)wSettings->currentRes.y;
 
+	Vec3* cam = &appData->camera;	
 	if(input->mouseButtonDown[0]) {
-		appData->camera.x += input->mouseDeltaX/(float)1000;
-		appData->camera.y -= (input->mouseDeltaY/(float)1000) * appData->aspectRatio;
+		cam->x += input->mouseDeltaX*(cam->z/wSettings->currentRes.w);
+		cam->y -= input->mouseDeltaY*((cam->z/wSettings->currentRes.h)/appData->aspectRatio);
 	}
 
 	if(input->mouseWheel) {
-		float zoom = appData->camera.z;
+		float zoom = cam->z;
 		zoom -= input->mouseWheel/(float)1;
-		appData->camera.z = zoom;
+		cam->z = zoom;
 	}
 
 	if(input->keysPressed[VK_F1]) {
@@ -431,84 +530,43 @@ extern "C" APPMAINFUNCTION(appMain) {
 		setWindowMode(windowHandle, wSettings, mode);
 	}
 
-	Vec3 cam = appData->camera;
-	ortho(&appData->pipelineIds, rectCenDim(cam.x,cam.y, cam.z, cam.z/appData->aspectRatio));
 
 	glViewport(0,0, wSettings->currentRes.x, wSettings->currentRes.y);
 	glClearColor(0.3f, 0.1f, 0.1f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-	
+
+		
+	glBindProgramPipeline(appData->programs[1]);
+	// glEnable(GL_DEPTH_TEST);
+	// drawRect(appData->pipelineIds, rectCenDim(2,2,3,3), rect(0,0,1,1), vec4(1,1,0.2f,1), appData->textures[0]);
+
+	static float dt = 0;
+	dt += 0.01f;
+	glProgramUniform3f(appData->pipelineIds.cubeVertex, appData->pipelineIds.cubeVertexAngle, dt, dt, dt);
+
+	// void drawRect(PipelineIds ids, Rect r, Rect uv, Vec4 color, int texture) {
+	// uint uniformLocation;
+	// Rect cd = rectGetCenDim(r);
+	// glProgramUniform4f(1, ids.quadVertexMod, cd.min.x, cd.min.y, cd.max.x, cd.max.y);
+	// glProgramUniform4f(1, ids.quadVertexUV, uv.min.x, uv.max.x, uv.max.y, uv.min.y);
+	// glProgramUniform4f(1, ids.quadVertexColor, color.r, color.g, color.b, color.a);
+	// glBindTexture(GL_TEXTURE_2D, texture);
+	glDrawArraysInstancedBaseInstance(GL_TRIANGLE_STRIP, 0, 16, 1, 0);
+
+
+
+	ortho(&appData->pipelineIds, rectCenDim(cam->x,cam->y, cam->z, cam->z/appData->aspectRatio));
 	glBindProgramPipeline(appData->programs[0]);
 
+	drawRect(appData->pipelineIds, rectCenDim(0, 0, 0.01f, 100), rect(0,0,1,1), vec4(0.4f,1,0.4f,1), appData->textures[0]);
+	drawRect(appData->pipelineIds, rectCenDim(0, 0, 100, 0.01f), rect(0,0,1,1), vec4(0.4f,0.4f,1,1), appData->textures[0]);
 
-	// for(int i = 0; i < 10; i++) {
-	// 	for(int j = 0; j < 10; j++) {
-	// 		drawRect(appData->pipelineIds, vec2(i,j), vec2(0.4f,0.4f), rect(0,1,0,1), vec4(0.1f*i,0.1f*j,1,1), 1);
-	// 	}
-	// }
-
-	// drawRect(appData->pipelineIds, vec2(0,0), vec2(5,5), rect(0,1,0,1), vec4(1,1,1,1), appData->textures[2]);
-	// drawRect(appData->pipelineIds, vec2(0,0), vec2(2,2), rect(0,1,0,1), vec4(1,1,1,1), 2);
-
-
-	// char* text = "ABCDEFG";
-	// int length = strLen(text);
-	// float x = 0; float y = 0;
-	// for(int i = 0; i < length; i++) {
-	// 	char t = text[i];
-	// 	stbtt_aligned_quad q;
-	// 	stbtt_GetBakedQuad(appData->cdata, 512, 512, t-32, &x, &y, &q, 1);
-
-	// 	Rect r = rectGetCenDim(rect(q.x0, q.y0, q.x1, q.y1));
-	// 	drawRect(appData->pipelineIds, r.cen, r.dim, rect(q.s0,q.t0,q.s1,q.t1), vec4(1,1,1,1), appData->textures[2]);
-	// }
-
-	// glProgramUniform4f(1, appData->pipelineIds.quadVertexCamera, 0, 0, wSettings->currentRes.w, wSettings->currentRes.h);
-	drawRect(appData->pipelineIds, rectCenDim(0, 0, 2, 2), rect(0,0,1,1), vec4(1,1,1,1), appData->textures[2]);
-
-	// glProgramUniform4f(1, appData->pipelineIds.quadVertexCamera, wSettings->currentRes.w/2, wSettings->currentRes.h/2, wSettings->currentRes.w, wSettings->currentRes.w/appData->aspectRatio);
-	// glProgramUniform4f(1, appData->pipelineIds.quadVertexCamera, 0, -wSettings->currentRes.h, wSettings->currentRes.w, 0);
-
-	// glProgramUniform4f(1, appData->pipelineIds.quadVertexCamera, 0, 0, wSettings->currentRes.w, wSettings->currentRes.h);
-	// ortho(&appData->pipelineIds, rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0));
-	// ortho(&appData->pipelineIds, rect(-wSettings->currentRes.w/2, -wSettings->currentRes.h/2, wSettings->currentRes.w/2, wSettings->currentRes.h/2));
-	// ortho(&appData->pipelineIds, rect(-wSettings->currentRes.w/2, -wSettings->currentRes.h/2, wSettings->currentRes.w/2, wSettings->currentRes.h/2));
-	// ortho(&appData->pipelineIds, rectCenDim(5,5,10,10));
-	// ortho(&appData->pipelineIds, rect(0,0,10,10));
 	ortho(&appData->pipelineIds, rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0));
 
-	// ortho(&appData->pipelineIds, rectCenDim(-5,-5,10,10));
-	// ortho(&appData->pipelineIds, rect(0,0,100,100));
-	// ortho(&appData->pipelineIds, rect(vec2(-4,-4),vec2(6,6)));
-
-	// drawRect(appData->pipelineIds, rectCenDim(-25, -25, 5,5), rect(0,0,1,1), vec4(1,1,1,1), appData->textures[0]);
-	drawRect(appData->pipelineIds, rectCenDim(100,-100,10,10), rect(0,0,1,1), vec4(0,1,1,1), appData->textures[0]);
-
-
-
-	char* text = "fr#T#$tsdGw3zW\n34zwesrg3423$3$4$$%#4\n23432rweQQQWE";
-	int length = strLen(text);
-	float x = 100; float y = 100;
-	float xStart = x;
-	for(int i = 0; i < length; i++) {
-		char t = text[i];
-
-		if(t == '\n') {
-			y += 70;
-			x = xStart;
-			continue;
-		}
-
-		stbtt_aligned_quad q;
-		stbtt_GetBakedQuad(appData->cdata, 512, 512, t-32, &x, &y, &q, 1);
-		drawRect(appData->pipelineIds, rect(q.x0, -q.y1, q.x1, -q.y0), rect(q.s0,q.t0,q.s1,q.t1), vec4(1,1,1,1), appData->textures[2]);
-	}
-
-	// drawRect(appData->pipelineIds, vec2(0,0), vec2(500,500), rect(0.1f,0.1f,0.9f,0.9f), vec4(1,1,1,1), appData->textures[2]);
-	// drawRect(appData->pipelineIds, vec2(0,0), vec2(500,500), rect(0,0,1,1), vec4(1,1,1,1), appData->textures[2]);
-
-	// s0 0.55 s1 0.632 t0 0.107 t1 0.181
+	drawText(&appData->pipelineIds, vec2(0,0), "Text_123...", &appData->fontArial, 0, 2);
 
 	swapBuffers(&appData->systemData);
 	glFinish();
+
+	clearTMemory();
 }
