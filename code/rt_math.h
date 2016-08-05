@@ -825,7 +825,21 @@ union Vec4 {
 	float e[4];
 };
 
-union Matrix4 {
+union Mat4 {
+	struct {
+		float x1, x2, x3, x4;
+		float y1, y2, y3, y4;
+		float z1, z2, z3, z4;
+		float w1, w2, w3, w4;
+	};
+
+	struct {
+		float xa, ya, za, wa;
+		float xb, yb, zb, wb;
+		float xc, yc, zc, wc;
+		float xd, yd, zd, wd;
+	};
+
 	float e[16];
 };
 
@@ -1453,6 +1467,10 @@ inline bool operator!=(Vec3 a, Vec3 b) {
 	return !(a==b);
 }
 
+inline float dot(Vec3 a, Vec3 b) {
+	return a.x*b.x + a.y*b.y + a.z*b.z;
+}
+
 inline Vec3 cross(Vec3 a, Vec3 b) {
 	Vec3 result;
 	result.x = a.y*b.z - a.z*b.y;
@@ -1469,6 +1487,12 @@ inline Vec3 toVec3(Vec2 a) {
 	result.z = 0;
 
 	return result;
+}
+
+inline Vec3 normVec3(Vec3 a) {
+	float sqrlen = dot(a,a);
+	if(sqrlen > 0) sqrlen = 1.0f/sqrt(sqrlen);
+	return a*sqrlen;
 }
 
 //
@@ -1500,6 +1524,14 @@ inline Vec4 vec4(float a) {
 	vec.z = a;
 	vec.w = a;
 	return vec;
+}
+
+//
+//
+//
+
+inline Mat4 operator*(Mat4 a, Mat4 b) {
+	// a[0]*b[0]
 }
 
 //
@@ -1774,8 +1806,8 @@ Vec2 ellipseNormal(Vec2 pos, float width, float height, Vec2 point) {
 	return dir;
 }
 
-Matrix4 orthographicProjection(float left, float right, float bottom, float top, float nearr, float farr) {
-	Matrix4 mat;
+Mat4 orthographicProjection(float left, float right, float bottom, float top, float nearr, float farr) {
+	Mat4 mat;
 	float v[16] = { 2/(right-left), 0, 0, 0, 
 					0, 2/(top-bottom), 0, 0, 
 					0, 0, (-2)/(farr-nearr), 0, 
