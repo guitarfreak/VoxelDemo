@@ -827,20 +827,22 @@ union Vec4 {
 
 union Mat4 {
 	struct {
-		float x1, x2, x3, x4;
-		float y1, y2, y3, y4;
-		float z1, z2, z3, z4;
-		float w1, w2, w3, w4;
+		float xa, xb, xc, xd;
+		float ya, yb, yc, yd;
+		float za, zb, zc, zd;
+		float wa, wb, wc, wd;
 	};
 
 	struct {
-		float xa, ya, za, wa;
-		float xb, yb, zb, wb;
-		float xc, yc, zc, wc;
-		float xd, yd, zd, wd;
+		float x1, y1, z1, w1;
+		float x2, y2, z2, w2;
+		float x3, y3, z3, w3;
+		float x4, y4, z4, w4;
 	};
 
 	float e[16];
+
+	float e2[4][4];
 };
 
 union Rect{
@@ -1458,6 +1460,13 @@ inline Vec3 operator/(Vec3 a, float b) {
 	return a;
 }
 
+inline Vec3 operator-(Vec3 a) {
+	a.x = -a.x;
+	a.y = -a.y;
+	a.z = -a.z;
+	return a;
+}
+
 inline bool operator==(Vec3 a, Vec3 b) {
 	bool equal = (a.x == b.x) && (a.y == b.y) && (a.z == b.z);
 	return equal;
@@ -1531,7 +1540,160 @@ inline Vec4 vec4(float a) {
 //
 
 inline Mat4 operator*(Mat4 a, Mat4 b) {
-	// a[0]*b[0]
+	Mat4 r;
+	int i = 0;
+	for(int y = 0; y < 16; y += 4) {
+		for(int x = 0; x < 4; x++) {
+			r.e[i++] = a.e[y]*b.e[x] + a.e[y+1]*b.e[x+4] + a.e[y+2]*b.e[x+8] + a.e[y+3]*b.e[x+12];
+		}
+	}
+	return r;
+}
+
+inline void rowToColumn(Mat4* m) {
+	for(int y = 0; y < 4; y++) {
+		for(int x = 0; x < 4; x++) {
+			float temp = m->e2[y][x];
+			m->e2[y][x] = m->e2[x][y];
+			m->e2[x][y] = temp;
+		}
+	}
+}
+
+inline void scaleMatrix(Mat4* m, Vec3 a) {
+	*m = {};
+	m->x1 = a.x;
+	m->y2 = a.y;
+	m->z3 = a.z;
+	m->w4 = 1;
+}
+
+inline void rotationMatrix(Mat4* m, Vec3 a) {
+	*m = {	cos(a.y)*cos(a.z), cos(a.z)*sin(a.x)*sin(a.y)-cos(a.x)*sin(a.z), cos(a.x)*cos(a.z)*sin(a.x)+sin(a.x)*sin(a.z), 0,
+			cos(a.y)*sin(a.z), cos(a.x)*cos(a.z)+sin(a.x)*sin(a.y)*sin(a.z), -cos(a.z)*sin(a.x)+cos(a.x)*sin(a.y)*sin(a.z), 0,
+			-sin(a.y), 		   cos(a.y)*sin(a.x), 							 cos(a.x)*cos(a.y), 0,
+			0, 0, 0, 1};
+}
+
+inline void rotationMatrixX(Mat4* m, float a) {
+	float ca = cos(a);
+	float sa = sin(a);
+	*m = {	1, 0, 0, 0,
+			0, ca, sa, 0,
+			0, -sa, ca, 0,
+			0, 0, 0, 1};
+}
+
+inline void rotationMatrixY(Mat4* m, float a) {
+	float ca = cos(a);
+	float sa = sin(a);
+	*m = {	ca, 0, -sa, 0,
+			0, 1, 0, 0,
+			sa, 0, ca, 0,
+			0, 0, 0, 1};
+}
+
+inline void rotationMatrixZ(Mat4* m, float a) {
+	float ca = cos(a);
+	float sa = sin(a);
+	*m = {	ca, sa, 0, 0,
+			-sa, ca, 0, 0,
+			0, 0, 1, 0,
+			0, 0, 0, 1};
+}
+
+inline void translationMatrix(Mat4* m, Vec3 a) {
+	*m = {};
+	m->x1 = 1;
+	m->y2 = 1;
+	m->z3 = 1;
+	m->w4 = 1;
+
+	m->w1 = a.x;
+	m->w2 = a.y;
+	m->w3 = a.z;
+}
+
+inline void viewMatrix(Mat4* m, Vec3 cPos, Vec3 cLook, Vec3 cUp) {
+	Vec3 cRight = cross(cUp,cLook);
+	*m = {	cRight.x, cRight.y, cRight.z, -(dot(cPos,cRight)), 
+			cUp.x, 	  cUp.y, 	cUp.z,    -(dot(cPos,cUp)), 
+			cLook.x,  cLook.y,  cLook.z,  -(dot(cPos,cLook)), 
+			0, 		  0, 		0, 		  1 };
+}
+
+inline void projMatrix(Mat4* m, float fov, float ar, float n, float f) {
+	*m = { 	1/(ar*tan(fov*0.5f)), 0, 0, 0,
+			0, 1/(tan(fov*0.5f)), 0, 0,
+			0, 0, -((f+n)/(f-n)), -((2*f*n)/(f-n)),
+			0, 0, -1, 0 };
+}
+
+//
+//
+//
+
+union Quat {
+	struct {
+		float w, x, y, z;
+	};
+
+	float e[4];
+};
+
+Quat quat() {
+	Quat r = {1,0,0,0};
+	return r;
+}
+
+Quat quat(float w, float x, float y, float z) {
+	Quat r = {w,x,y,z};
+	return r;
+}
+
+Quat quat(float a, Vec3 axis) {
+	Quat r;
+	r.w = cos(a*0.5f);
+	r.x = axis.x * sin(a*0.5f);
+	r.y = axis.y * sin(a*0.5f);
+	r.z = axis.z * sin(a*0.5f);
+	return r;
+}
+
+float quatMagnitude(Quat q) {
+	float result = sqrt(q.w*q.w + q.x*q.x + q.y*q.y + q.z*q.z);
+	return result;
+}
+
+Quat normQuat(Quat q) {
+	Quat result;
+	float m = quatMagnitude(q);
+	result = quat(q.w/m, q.x/m, q.y/m, q.z/m);
+	return result;
+}
+
+Quat operator*(Quat a, Quat b) {
+	Quat r;
+	r.w = (a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z);
+	r.x = (a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y);
+	r.y = (a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x);
+	r.z = (a.w*b.z + a.x*b.y - a.y*b.x + a.z*b.w);
+	return r;
+}
+
+void quatRotationMatrix(Mat4* m, Quat q) {
+	float w = q.w, x = q.x, y = q.y, z = q.z;
+	float x2 = x*x, y2 = y*y, z2 = z*z;
+	// *m = {	1-2*y2-2*z2, 2*x*y-2*w*z, 2*x*z+2*w*y, 0,
+	// 		2*x*y+2*w*z, 1-2*x2-2*z2, 2*y*z+2*w*x, 0,
+	// 		2*x*z-2*w*y, 2*y*z-2*w*x, 1-2*x2-2*y2, 0,
+	// 		0, 			 0, 		  0, 		   1};
+
+	float w2 = w*w;
+	*m = {	w2+x2-y2-z2, 2*x*y-2*w*z, 2*x*z+2*w*y, 0,
+			2*x*y+2*w*z, w2-x2+y2-z2, 2*y*z-2*w*x, 0,
+			2*x*z-2*w*y, 2*y*z+2*w*x, w2-x2-y2+z2, 0,
+			0, 			 0, 		  0, 		   1};
 }
 
 //

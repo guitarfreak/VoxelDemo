@@ -197,11 +197,7 @@ const char* vertexShaderCube = GLSL (
 	    vec3(0.5f,-0.5f, 0.5f)	
 	);
 
-	uniform vec3 scale;
-	uniform mat3x3 rot;
-	uniform vec3 trans;
-
-	// uniform mat4x4 model;
+	uniform mat4x4 model;
 	uniform mat4x4 view;
 	uniform mat4x4 proj;
 
@@ -212,71 +208,10 @@ const char* vertexShaderCube = GLSL (
 		float c = gl_VertexID;
 		// Color = vec4(1/(c/36),1/(c/7),1/(c/2),1);
 		Color = vec4(c/36,c/36,c/36,1);
-		// Color = vec4(1,1,1,1);
-
-		// vec4 vec = vec3(cube[gl_VertexID], 1);
-
-		vec3 vec = vec3(cube[gl_VertexID]);
-		vec = vec*scale;
-		vec = rot*vec;
-		vec = vec+trans;
-
-		vec4 pos = vec4(vec, 1);
-
-		// vec = model*vec;
-		pos = view*pos;
-		pos = proj*pos;
-
-		gl_Position = pos;
-
-
-
-
-
-
-
-
-
-
-
-
-
-		// float c = gl_VertexID;
-		// // Color = vec4(1/(c/36),1/(c/7),1/(c/2),1);
-		// Color = vec4(c/36,c/36,c/36,1);
-
-		// vec3 vec = cube[gl_VertexID];
-		// vec = scale*vec;
-
-		// vec3 a = rot;
-		// mat3x3 rotMat = mat3x3(cos(a.y)*cos(a.z), cos(a.z)*sin(a.x)*sin(a.y)-cos(a.x)*sin(a.z), cos(a.x)*cos(a.z)*sin(a.x)*sin(a.z),
-		// 	   				cos(a.y)*sin(a.z), cos(a.x)*cos(a.z)+sin(a.x)*sin(a.y)*sin(a.z), -cos(a.z)*sin(a.x)+cos(a.x)*sin(a.y)*sin(a.z),
-		// 	   				-sin(a.y), cos(a.y)*sin(a.x), cos(a.x)*cos(a.y));
-		// vec = rotMat*vec;
-		// vec = trans+vec;
-
-		// float l = proj[0];
-		// float b = proj[1];
-		// float r = proj[2];
-		// float t = proj[3];
-		// float n = t/(tan(proj[4]/2));
-		// float f = proj[5];
-
-		// // vec.x = (n*vec.x)/-vec.z;
-		// // vec.y = (n*vec.y)/-vec.z;
-
-		// // vec.x = (1*vec.x)/-vec.z;
-		// // vec.y = (1*vec.y)/-vec.z;
-
-		// vec4 pos = vec4(vec, 1);
-
-		// mat4x4 projMat = mat4x4((2*n)/(r-l), 0, (r+l)/(r-l), 0,
-		// 					 0, (2*n)/(t-b), (t+b)/(t-b), 0,
-		// 					 0, 0, -((f+n)/(f-n)), -((2*f*n)/(f-n)),
-		// 					 0, 0, -1, 0);
-		// // pos = projMat*pos;
-
-		// gl_Position = pos;
+	
+		vec4 pos = vec4(cube[gl_VertexID], 1);
+	
+		gl_Position = proj*view*model*pos;
 	}
 );
 
@@ -364,10 +299,10 @@ struct PipelineIds {
 	uint cubeVertex;
 	uint cubeFragment;
 
-	uint cubeVertexScale;
-	uint cubeVertexRot;
-	uint cubeVertexTrans;
-	// uint cubeVertexModel;
+	// uint cubeVertexScale;
+	// uint cubeVertexRot;
+	// uint cubeVertexTrans;
+	uint cubeVertexModel;
 	uint cubeVertexView;
 	uint cubeVertexProj;
 };
@@ -487,6 +422,7 @@ struct AppData {
 	Vec3 camPos;
 	Vec3 camLook;
 	Vec3 camUp;
+	Vec3 camRight;
 	float aspectRatio;
 
 	Font fontArial;
@@ -499,17 +435,17 @@ MemoryBlock* globalMemory;
 
 extern "C" APPMAINFUNCTION(appMain) {
 	globalMemory = memoryBlock;
-	AppData* appData = (AppData*)memoryBlock->permanent;
-	Input* input = &appData->input;
-	SystemData* systemData = &appData->systemData;
+	AppData* ad = (AppData*)memoryBlock->permanent;
+	Input* input = &ad->input;
+	SystemData* systemData = &ad->systemData;
 	HWND windowHandle = systemData->windowHandle;
-	WindowSettings* wSettings = &appData->wSettings;
+	WindowSettings* wSettings = &ad->wSettings;
 
 	if(init) {
 		getPMemory(sizeof(AppData));
-		*appData = {};
+		*ad = {};
 
-		initInput(&appData->input);
+		initInput(&ad->input);
 		
 		wSettings->res.w = 1920;
 		wSettings->res.h = 1080;
@@ -552,8 +488,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glCreateVertexArrays(1, &vao);
 		glBindVertexArray(vao);
 
-		appData->textures[appData->texCount++] = loadTextureFile("..\\data\\white.png", 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
-		appData->textures[appData->texCount++] = loadTextureFile("..\\data\\rect.png", 2, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+		ad->textures[ad->texCount++] = loadTextureFile("..\\data\\white.png", 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+		ad->textures[ad->texCount++] = loadTextureFile("..\\data\\rect.png", 2, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
 
 		// glTextureParameteri(textureId, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
 		// glTextureParameteri(textureId, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -562,32 +498,34 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// glTextureParameteri(textureId, GL_TEXTURE_WRAP_S, GL_REPEAT);
 		// glTextureParameteri(textureId, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
-		PipelineIds* ids = &appData->pipelineIds;
+		PipelineIds* ids = &ad->pipelineIds;
 		ids->programQuad = createShader(vertexShaderQuad, fragmentShaderQuad, &ids->quadVertex, &ids->quadFragment);
 		ids->quadVertexMod = glGetUniformLocation(ids->quadVertex, "mod");
 		ids->quadVertexUV = glGetUniformLocation(ids->quadVertex, "setUV");
 		ids->quadVertexColor = glGetUniformLocation(ids->quadVertex, "setColor");
 		ids->quadVertexCamera = glGetUniformLocation(ids->quadVertex, "camera");
-		appData->programs[0] = ids->programQuad;
+		ad->programs[0] = ids->programQuad;
 
 		ids->programCube = createShader(vertexShaderCube, fragmentShaderCube, &ids->cubeVertex, &ids->cubeFragment);
 
-		ids->cubeVertexScale = glGetUniformLocation(ids->cubeVertex, "scale");
-		ids->cubeVertexRot = glGetUniformLocation(ids->cubeVertex, "rot");
-		ids->cubeVertexTrans = glGetUniformLocation(ids->cubeVertex, "trans");
-		// ids->cubeVertexModel = glGetUniformLocation(ids->cubeVertex, "model");
+		// ids->cubeVertexScale = glGetUniformLocation(ids->cubeVertex, "scale");
+		// ids->cubeVertexRot = glGetUniformLocation(ids->cubeVertex, "rot");
+		// ids->cubeVertexTrans = glGetUniformLocation(ids->cubeVertex, "trans");
+		ids->cubeVertexModel = glGetUniformLocation(ids->cubeVertex, "model");
 		ids->cubeVertexView = glGetUniformLocation(ids->cubeVertex, "view");
 		ids->cubeVertexProj = glGetUniformLocation(ids->cubeVertex, "proj");
 
-		appData->programs[1] = ids->programCube;
+		ad->programs[1] = ids->programCube;
 
 		// GLenum glError = glGetError(); printf("GLError: %i\n", glError);
 
-		appData->camera = vec3(0,0,10);
+		ad->camera = vec3(0,0,10);
 
-		appData->camPos = vec3(0,0,1);
-		appData->camLook = vec3(0,0,1);
-		appData->camUp = vec3(0,1,0);
+		ad->camPos = vec3(0,0,1);
+		ad->camLook = vec3(0,0,1);
+		ad->camUp = vec3(0,1,0);
+		ad->camRight;
+
 
 
 
@@ -611,9 +549,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 			fontBitmap[i*4+3] = fontBitmapBuffer[i];
 		}
 		uint texId = loadTexture(fontBitmap, font.size.w, font.size.h, 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
-		appData->textures[appData->texCount++] = texId;
+		ad->textures[ad->texCount++] = texId;
 		font.texId = texId;
-		appData->fontArial = font;
+		ad->fontArial = font;
 
 	}
 
@@ -627,14 +565,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 		setWindowMode(windowHandle, wSettings, WINDOW_MODE_FULLBORDERLESS);
 	}
 
-	updateInput(&appData->input, isRunning, windowHandle);
+	updateInput(&ad->input, isRunning, windowHandle);
 	getWindowProperties(windowHandle, &wSettings->currentRes.x, &wSettings->currentRes.y,0,0,0,0);
-	appData->aspectRatio = wSettings->currentRes.x / (float)wSettings->currentRes.y;
+	ad->aspectRatio = wSettings->currentRes.x / (float)wSettings->currentRes.y;
 
-	Vec3* cam = &appData->camera;	
+	Vec3* cam = &ad->camera;	
 	if(input->mouseButtonDown[0]) {
 		cam->x += input->mouseDeltaX*(cam->z/wSettings->currentRes.w);
-		cam->y -= input->mouseDeltaY*((cam->z/wSettings->currentRes.h)/appData->aspectRatio);
+		cam->y -= input->mouseDeltaY*((cam->z/wSettings->currentRes.h)/ad->aspectRatio);
 	}
 
 	if(input->mouseWheel) {
@@ -650,75 +588,83 @@ extern "C" APPMAINFUNCTION(appMain) {
 		setWindowMode(windowHandle, wSettings, mode);
 	}
 
+	#define VK_W 0x57
+	#define VK_A 0x41
+	#define VK_S 0x53
+	#define VK_D 0x44
+
+	ad->camRight = cross(ad->camUp, ad->camLook);
+
+	if( input->keysDown[VK_W] || input->keysDown[VK_A] || input->keysDown[VK_S] || 
+		input->keysDown[VK_D] || input->keysDown[VK_SHIFT] || input->keysDown[VK_CONTROL]) {
+
+		Vec3 dir;
+		if(input->keysDown[VK_W]) 			dir = -normVec3(ad->camLook);
+		else if(input->keysDown[VK_A]) 		dir = -normVec3(ad->camRight);
+		else if(input->keysDown[VK_S]) 		dir = normVec3(ad->camLook);
+		else if(input->keysDown[VK_D]) 		dir = normVec3(ad->camRight);
+		else if(input->keysDown[VK_SHIFT]) 	dir = normVec3(ad->camUp);
+		else if(input->keysDown[VK_CONTROL])dir = -normVec3(ad->camUp);
+
+		float speed = 0.1f;
+		ad->camPos += dir*speed;
+	}
+
+	if(input->mouseButtonDown[1]) {
+		Vec3 l = ad->camLook;
+		float dt = 0.005f * input->mouseDeltaX;
+		ad->camLook = vec3(l.x*cos(dt)+l.z*sin(dt), l.y, l.x*-sin(dt)+l.z*cos(dt));
+	}
+
+	
+
 
 	glViewport(0,0, wSettings->currentRes.x, wSettings->currentRes.y);
 	glClearColor(0.3f, 0.1f, 0.1f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 		
-	glBindProgramPipeline(appData->programs[1]);
-	glDepthRange(-1.0,1.0);
+	glBindProgramPipeline(ad->programs[1]);
+	// glDepthRange(-1.0,1.0);
 
-	// glEnable(GL_DEPTH_TEST);
-	// drawRect(appData->pipelineIds, rectCenDim(2,2,3,3), rect(0,0,1,1), vec4(1,1,0.2f,1), appData->textures[0]);
+	glEnable(GL_DEPTH_TEST);
+	// drawRect(ad->pipelineIds, rectCenDim(2,2,3,3), rect(0,0,1,1), vec4(1,1,0.2f,1), ad->textures[0]);
 
 	// float c[9] = {0,1,0, 0,0,-1, 1,0,0};
-	// glProgramUniform1fv(appData->pipelineIds.cubeVertex, appData->pipelineIds.cubeVertexCam, 9, c);
+	// glProgramUniform1fv(ad->pipelineIds.cubeVertex, ad->pipelineIds.cubeVertexCam, 9, c);
+
+
+	// glProgramUniform3f(ad->pipelineIds.cubeVertex, ad->pipelineIds.cubeVertexTrans, 0.2f,0.2f,0);
+	// glProgramUniform3f(ad->pipelineIds.cubeVertex, ad->pipelineIds.cubeVertexTrans, 0.2f,0.2f,0);
+
+	// glProgramUniform1fv(ad->pipelineIds.cubeVertex, ad->pipelineIds.cubeVertexProj, 6, proj);
+// GLOP(void, ProgramUniformMatrix4x3fv, GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) 
+
+	Mat4 view;
+	viewMatrix(&view, ad->camPos, ad->camLook, ad->camUp);
+	Mat4 proj;
+	projMatrix(&proj, degreeToRadian(45), ad->aspectRatio, 0.1f, 20);
+	glProgramUniformMatrix4fv(ad->pipelineIds.cubeVertex, ad->pipelineIds.cubeVertexView, 1, 1, view.e);
+	glProgramUniformMatrix4fv(ad->pipelineIds.cubeVertex, ad->pipelineIds.cubeVertexProj, 1, 1, proj.e);
 
 	static float dt = 0;
 	dt += 0.01f;
-	// glProgramUniform3f(appData->pipelineIds.cubeVertex, appData->pipelineIds.cubeVertexTrans, 0.2f,0.2f,0);
-	// glProgramUniform3f(appData->pipelineIds.cubeVertex, appData->pipelineIds.cubeVertexTrans, 0.2f,0.2f,0);
 
-	// glProgramUniform1fv(appData->pipelineIds.cubeVertex, appData->pipelineIds.cubeVertexProj, 6, proj);
-// GLOP(void, ProgramUniformMatrix4x3fv, GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) 
+	Mat4 sm, rm, tm, model;
+	scaleMatrix(&sm, vec3(5,2,1));
 
-	Vec3 sVec = vec3(1,1,1);
-	float scale[16] = {sVec.x, 0, 0, 0,
-					   0, sVec.y, 0, 0,
-					   0, 0, sVec.z, 0,
-					   0, 0, 0, 1};
+	Quat total = quat();
+	Quat xRot = quat(dt, vec3(1,0,0));
+	Quat yRot = quat(dt, vec3(0,1,0));
+	Quat zRot = quat(dt, vec3(0,0,1));
+	quatRotationMatrix(&rm, zRot*yRot*xRot*total);
 
-	Vec3 a = vec3(dt,dt,dt);
-	float rot[9] = {cos(a.y)*cos(a.z), cos(a.z)*sin(a.x)*sin(a.y)-cos(a.x)*sin(a.z), cos(a.x)*cos(a.z)*sin(a.x)*sin(a.z),
-		   				cos(a.y)*sin(a.z), cos(a.x)*cos(a.z)+sin(a.x)*sin(a.y)*sin(a.z), -cos(a.z)*sin(a.x)+cos(a.x)*sin(a.y)*sin(a.z),
-		   				-sin(a.y), cos(a.y)*sin(a.x), cos(a.x)*cos(a.y)};
+	translationMatrix(&tm, vec3(0,0,-7));
+	model = tm*rm*sm;
 
-	Vec3 tVec = vec3(0,0,-1.7f);
-	float trans[16] = {1, 0, 0, tVec.x, 
-					   0, 1, 0, tVec.y, 
-					   0, 0, 1, tVec.z, 
-					   0, 0, 0, 1 };
+	glProgramUniformMatrix4fv(ad->pipelineIds.cubeVertex, ad->pipelineIds.cubeVertexModel, 1, 1, model.e);
 
-	// Vec3 right = vec3(1,0,0);
-	Vec3 up = vec3(0,1,0);
-	Vec3 look = vec3(0,0,1);
-	Vec3 right = cross(up,look);
-	Vec3 pos = vec3(0,0,1);
-	float view[16] = { right.x, up.x, look.x, 0, 
-					   right.y, up.y, look.y, 0, 
-					   right.z, up.z, look.z, 0, 
-					   -(dot(pos,right)), -(dot(pos,up)), -(dot(pos,look)), 1 };
-
-	float fov = degreeToRadian(45);
-	float ar = appData->aspectRatio;
-	float n = 1;
-	float f = 20;
-	float proj[16] = { 1/(ar*tan(fov/2)), 0, 0, 0,
-					   0, 1/(tan(fov/2)), 0, 0,
-					   0, 0, -((f+n)/(f-n)), -((2*f*n)/(f-n)),
-					   0, 0, -1, 0 };		
-
-	glProgramUniform3f(appData->pipelineIds.cubeVertex, appData->pipelineIds.cubeVertexScale, sVec.x, sVec.y, sVec.z);
-	glProgramUniformMatrix3fv(appData->pipelineIds.cubeVertex, appData->pipelineIds.cubeVertexRot, 1, 0, rot);
-	glProgramUniform3f(appData->pipelineIds.cubeVertex, appData->pipelineIds.cubeVertexTrans, tVec.x, tVec.y, tVec.z);
-
-	glProgramUniformMatrix4fv(appData->pipelineIds.cubeVertex, appData->pipelineIds.cubeVertexView, 1, 0, view);
-	glProgramUniformMatrix4fv(appData->pipelineIds.cubeVertex, appData->pipelineIds.cubeVertexProj, 1, 0, proj);
-
-
-
-	// glProgramUniformMatrix4fv(appData->pipelineIds.cubeVertex, appData->pipelineIds.cubeVertexModel, 1, 0, matrix);
+	// glProgramUniformMatrix4fv(ad->pipelineIds.cubeVertex, ad->pipelineIds.cubeVertexModel, 1, 0, matrix);
 
 	// void drawRect(PipelineIds ids, Rect r, Rect uv, Vec4 color, int texture) {
 	// uint uniformLocation;
@@ -732,17 +678,17 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-	ortho(&appData->pipelineIds, rectCenDim(cam->x,cam->y, cam->z, cam->z/appData->aspectRatio));
-	glBindProgramPipeline(appData->programs[0]);
+	ortho(&ad->pipelineIds, rectCenDim(cam->x,cam->y, cam->z, cam->z/ad->aspectRatio));
+	glBindProgramPipeline(ad->programs[0]);
 
-	// drawRect(appData->pipelineIds, rectCenDim(0, 0, 0.01f, 100), rect(0,0,1,1), vec4(0.4f,1,0.4f,1), appData->textures[0]);
-	// drawRect(appData->pipelineIds, rectCenDim(0, 0, 100, 0.01f), rect(0,0,1,1), vec4(0.4f,0.4f,1,1), appData->textures[0]);
+	// drawRect(ad->pipelineIds, rectCenDim(0, 0, 0.01f, 100), rect(0,0,1,1), vec4(0.4f,1,0.4f,1), ad->textures[0]);
+	// drawRect(ad->pipelineIds, rectCenDim(0, 0, 100, 0.01f), rect(0,0,1,1), vec4(0.4f,0.4f,1,1), ad->textures[0]);
 
-	ortho(&appData->pipelineIds, rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0));
+	ortho(&ad->pipelineIds, rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0));
 
-	drawText(&appData->pipelineIds, vec2(0,0), "Text_123...", &appData->fontArial, 0, 2);
+	drawText(&ad->pipelineIds, vec2(0,0), "Text_123...", &ad->fontArial, 0, 2);
 
-	swapBuffers(&appData->systemData);
+	swapBuffers(&ad->systemData);
 	glFinish();
 
 	clearTMemory();

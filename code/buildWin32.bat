@@ -12,7 +12,7 @@ set INCLUDES=
 set LIBS=
 set LINKER_INCLUDES=
 
-set LINKER_LIBS= -DEFAULTLIB:Opengl32.lib -DEFAULTLIB:ws2_32.lib -DEFAULTLIB:Shell32.lib -DEFAULTLIB:user32.lib -DEFAULTLIB:Gdi32.lib -DEFAULTLIB:Dwmapi.lib -DEFAULTLIB:Shlwapi.lib
+set LINKER_LIBS= -DEFAULTLIB:Opengl32.lib -DEFAULTLIB:ws2_32.lib -DEFAULTLIB:Shell32.lib -DEFAULTLIB:user32.lib -DEFAULTLIB:Gdi32.lib -DEFAULTLIB:Shlwapi.lib
 
 set INCLUDES=%INCLUDES% -I"C:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\include"
 set LINKER_INCLUDES=%LINKER_INCLUDES% -LIBPATH:"C:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\amd64"
