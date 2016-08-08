@@ -19,12 +19,15 @@ int CALLBACK WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR commandLi
 	WindowsData wData = windowsData(instance, prevInstance, commandLine, showCode);
 
     bool firstFrame = true;
+    bool secondFrame = false;
     bool isRunning = true;
     while(isRunning) {
         bool reload = updateDll(&hotloadDll);
      	platform_appMain = (appMainType*)getDllFunction(&hotloadDll, "appMain");
-        platform_appMain(firstFrame, reload, &isRunning, globalMemory, wData);
+        platform_appMain(firstFrame, secondFrame, reload, &isRunning, globalMemory, wData);
 
+        secondFrame = false;
+        if(firstFrame) secondFrame = true;
         firstFrame = false;
     }
 

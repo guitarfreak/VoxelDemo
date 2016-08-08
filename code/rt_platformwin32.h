@@ -415,11 +415,19 @@ struct WindowSettings {
 	Vec2i currentRes;
 };
 
+void setWindowStyle(HWND hwnd, DWORD dwStyle) {
+	SetWindowLong(hwnd, GWL_STYLE, dwStyle);
+}
+
+DWORD getWindowStyle(HWND hwnd) {
+	return GetWindowLong(hwnd, GWL_STYLE);
+}
+
 void setWindowMode(HWND hwnd, WindowSettings* wSettings, int mode) {
 	if(mode == WINDOW_MODE_FULLBORDERLESS && !wSettings->fullscreen) {
 		wSettings->g_wpPrev = {};
 
-		DWORD dwStyle = GetWindowLong(hwnd, GWL_STYLE);
+		DWORD dwStyle = getWindowStyle(hwnd);
 		if (dwStyle & WS_OVERLAPPEDWINDOW) {
 		  MONITORINFO mi = { sizeof(mi) };
 		  if (GetWindowPlacement(hwnd, &wSettings->g_wpPrev) &&
@@ -427,6 +435,8 @@ void setWindowMode(HWND hwnd, WindowSettings* wSettings, int mode) {
 		                     MONITOR_DEFAULTTOPRIMARY), &mi)) {
 		    SetWindowLong(hwnd, GWL_STYLE,
 		                  dwStyle & ~WS_OVERLAPPEDWINDOW);
+			setWindowStyle(hwnd, dwStyle & ~WS_OVERLAPPEDWINDOW);
+
 		    SetWindowPos(hwnd, HWND_TOP,
 		                 mi.rcMonitor.left, mi.rcMonitor.top,
 		                 mi.rcMonitor.right - mi.rcMonitor.left,
@@ -437,8 +447,7 @@ void setWindowMode(HWND hwnd, WindowSettings* wSettings, int mode) {
 
 		wSettings->fullscreen = true;
 	} else if(mode == WINDOW_MODE_WINDOWED && wSettings->fullscreen) {
-		SetWindowLong(hwnd, GWL_STYLE,
-		              wSettings->style);
+		setWindowStyle(hwnd, wSettings->style);
 		SetWindowPlacement(hwnd, &wSettings->g_wpPrev);
 		SetWindowPos(hwnd, NULL, 0,0, wSettings->res.w, wSettings->res.h, SWP_NOZORDER | SWP_NOMOVE |SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
 

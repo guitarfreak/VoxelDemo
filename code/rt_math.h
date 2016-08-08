@@ -63,6 +63,10 @@ inline float clamp(float n, float min, float max) {
 	return result;
 };
 
+inline void clamp(float* n, float min, float max) {
+	*n = clampMax(clampMin(min, *n), max);
+};
+
 inline bool valueBetween(float v, float min, float max) {
 	bool result = (v >= min && v <= max);
 	return result;
@@ -1638,6 +1642,11 @@ union Quat {
 		float w, x, y, z;
 	};
 
+	struct {
+		float w;
+		Vec3 xyz;
+	};
+
 	float e[4];
 };
 
@@ -1684,16 +1693,26 @@ Quat operator*(Quat a, Quat b) {
 void quatRotationMatrix(Mat4* m, Quat q) {
 	float w = q.w, x = q.x, y = q.y, z = q.z;
 	float x2 = x*x, y2 = y*y, z2 = z*z;
-	// *m = {	1-2*y2-2*z2, 2*x*y-2*w*z, 2*x*z+2*w*y, 0,
-	// 		2*x*y+2*w*z, 1-2*x2-2*z2, 2*y*z+2*w*x, 0,
-	// 		2*x*z-2*w*y, 2*y*z-2*w*x, 1-2*x2-2*y2, 0,
-	// 		0, 			 0, 		  0, 		   1};
-
 	float w2 = w*w;
 	*m = {	w2+x2-y2-z2, 2*x*y-2*w*z, 2*x*z+2*w*y, 0,
 			2*x*y+2*w*z, w2-x2+y2-z2, 2*y*z-2*w*x, 0,
 			2*x*z-2*w*y, 2*y*z+2*w*x, w2-x2-y2+z2, 0,
 			0, 			 0, 		  0, 		   1};
+}
+
+Vec3 operator*(Quat q, Vec3 v) {
+	Quat r = q*quat(0, v.x, v.y, v.z);
+	return r.xyz;
+}
+
+Vec3 rotateVec3(Vec3 v, float a, Vec3 axis) {
+	Vec3 r = quat(a, axis)*v;
+	return normVec3(r);
+}
+
+void rotateVec3(Vec3* v, float a, Vec3 axis) {
+	*v = quat(a, axis)*(*v);
+	*v = normVec3(*v);
 }
 
 //

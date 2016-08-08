@@ -74,6 +74,6 @@ WindowsData windowsData(HINSTANCE instance, HINSTANCE prevInstance, LPSTR comman
 	return wData;
 }
 
-#define APPMAINFUNCTION(name) void name(bool init, bool reload, bool* isRunning, MemoryBlock* memoryBlock, WindowsData windowsData)
+#define APPMAINFUNCTION(name) void name(bool init, int second, bool reload, bool* isRunning, MemoryBlock* memoryBlock, WindowsData windowsData)
 typedef APPMAINFUNCTION(appMainType);
 appMainType* platform_appMain;
