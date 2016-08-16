@@ -75,7 +75,7 @@ void threadQueueAdd(ThreadQueue* queue, void (*function)(void*), void* data) {
     job->function = function;
     job->data = data;
     InterlockedIncrement(&queue->completionGoal);
-    _ReadWriteBarrier();
+    _ReadWriteBarrier(); // doesn't work on 32 bit?
     InterlockedExchange(&queue->writeIndex, newWriteIndex);
     ReleaseSemaphore(queue->semaphore, 1, 0);
 }
