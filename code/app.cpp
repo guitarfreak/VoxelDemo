@@ -139,7 +139,8 @@
 		GLOP(GLint, GetAttribLocation, GLuint program, const GLchar *name) \
 		GLOP(void, GenSamplers, GLsizei n​, GLuint *samplers​) \
 		GLOP(void, BindSampler, GLuint unit, GLuint sampler​) \
-		GLOP(void, BindTextureUnit, GLuint unit, GLuint texture)
+		GLOP(void, BindTextureUnit, GLuint unit, GLuint texture) \
+		GLOP(void, NamedBufferSubData, GLuint buffer, GLintptr offset, GLsizei size, const void *data)
 
 
 
@@ -577,8 +578,13 @@ struct AppData {
 	uint voxelFragment;
 	uint bufferId;
 	char* meshBuffer;
+	int meshBufferSize;
 	GLuint voxelSamplers[2];	
 	GLuint voxelTextures[2];
+
+	int bx, by, bz;
+	unsigned char* voxelBlocks;
+
 };
 
 
@@ -658,9 +664,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		ids->programCube = createShader(vertexShaderCube, fragmentShaderCube, &ids->cubeVertex, &ids->cubeFragment);
 
-		// ids->cubeVertexScale = glGetUniformLocation(ids->cubeVertex, "scale");
-		// ids->cubeVertexRot = glGetUniformLocation(ids->cubeVertex, "rot");
-		// ids->cubeVertexTrans = glGetUniformLocation(ids->cubeVertex, "trans");
 		ids->cubeVertexModel = glGetUniformLocation(ids->cubeVertex, "model");
 		ids->cubeVertexView = glGetUniformLocation(ids->cubeVertex, "view");
 		ids->cubeVertexProj = glGetUniformLocation(ids->cubeVertex, "proj");
@@ -701,22 +704,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-
-
-
-		stbvox_mesh_maker mm;
-		stbvox_init_mesh_maker(&mm);
-		stbvox_input_description* inputDesc = stbvox_get_input_description(&mm);
-		*inputDesc = {};
-
-		int bCount = stbvox_get_buffer_count(&mm);
-
-
-		ad->meshBuffer = (char*)getPMemory(megaBytes(1));
-		stbvox_set_buffer(&mm, 0, 0, ad->meshBuffer, megaBytes(1));
-		int count = stbvox_get_buffer_count(&mm);
-		int perQuad = stbvox_get_buffer_size_per_quad(&mm, 0);
-
+		ad->shader = createShader(stbvox_get_vertex_shader(), stbvox_get_fragment_shader(), &ad->voxelVertex, &ad->voxelFragment);
 
 		glCreateSamplers(2, ad->voxelSamplers);
 		// glSamplerParameteri(ad->samplers[0], GL_TEXTURE_WRAP_S, GL_REPEAT);
@@ -732,42 +720,52 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		glCreateTextures(GL_TEXTURE_2D_ARRAY, 2, ad->voxelTextures);
 
-		uint format = GL_RGB;
-		uint internalFormat = GL_RGB8;
-		int texCount = 3;
+
+		char** files = (char**)getTMemory(sizeof(char*)*1024);
+
+		int index = 0;
+		int skip = 0;
+		WIN32_FIND_DATA data;
+		HANDLE handle = FindFirstFile("..\\data\\minecraft textures\\*", &data);
+		if(handle) {
+			while(FindNextFile(handle, &data)) {
+				skip--;
+				if(skip > 0) continue;
+
+				char* name = data.cFileName;
+				if(strLen(name) < 5) continue;
+
+				files[index] = getTString(strLen(name)+1);
+				strClear(files[index]);
+
+				strCpy(files[index++], name);
+			}
+		}
+		FindClose(handle);
+
+
+		uint format = GL_RGBA;
+		uint internalFormat = GL_RGBA8;
+		int texCount = index;
 		int x = 32;
 		int y = 32;
+
+		char* p = getTString(34);
+		strClear(p);
+		strAppend(p, "..\\data\\minecraft textures\\");
+
+		char* fullPath = getTString(234);
 
 		texId = ad->voxelTextures[0];
 		glTextureStorage3D(texId, 1, internalFormat, x, y, texCount);
 		for(int tc = 0; tc < texCount; tc++) {
 			unsigned char* stbData;
 			int x,y,n;
-			if(tc == 0) stbData = stbi_load("..\\data\\minecraft textures\\stone_slab_top.png", &x, &y, &n, 0);
-			if(tc == 1) stbData = stbi_load("..\\data\\minecraft textures\\anvil_base.png", &x, &y, &n, 0);
-			if(tc == 2) stbData = stbi_load("..\\data\\minecraft textures\\brick_slab_side3.png", &x, &y, &n, 0);
-			
-			glTextureSubImage3D(texId, 0, 0, 0, tc, x, y, 1, format, GL_UNSIGNED_BYTE, stbData);
 
-			stbi_image_free(stbData);
-		}
-
-		glTextureParameteri(texId, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
-		glTextureParameteri(texId, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-		glTextureParameteri(texId, GL_TEXTURE_WRAP_S, GL_REPEAT);
-		glTextureParameteri(texId, GL_TEXTURE_WRAP_T, GL_REPEAT);
-
-
-
-		texId = ad->voxelTextures[1];
-		glTextureStorage3D(texId, 1, internalFormat, x, y, texCount);
-		for(int tc = 0; tc < texCount; tc++) {
-			unsigned char* stbData;
-			int x,y,n;
-			if(tc == 0) stbData = stbi_load("..\\data\\minecraft textures\\beacon_top.png", &x, &y, &n, 0);
-			if(tc == 1) stbData = stbi_load("..\\data\\minecraft textures\\bed_feet_bottom.png", &x, &y, &n, 0);
-			if(tc == 2) stbData = stbi_load("..\\data\\minecraft textures\\cobblestone.png", &x, &y, &n, 0);
-
+			strClear(fullPath);
+			strAppend(fullPath, p);
+			strAppend(fullPath, files[tc]);
+			stbData = stbi_load(fullPath, &x, &y, &n, 4);
 			glTextureSubImage3D(texId, 0, 0, 0, tc, x, y, 1, format, GL_UNSIGNED_BYTE, stbData);
 
 			stbi_image_free(stbData);
@@ -782,62 +780,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-		// unsigned char tex1[] = {0,0,1,2};
-		// inputDesc->block_tex1 = (unsigned char*)tex1;
-		unsigned char tex2[] = {0,0,1,2};
-		inputDesc->block_tex2 = (unsigned char*)tex2;
-
-
-
-		const int bx = 32+2;
-		const int by = 128;
-		const int bz = 32+2;
-		int size = bz*by*bx;
-
-		unsigned char* voxelBlocks = (unsigned char*)getPMemory(size);
-		zeroMemory(voxelBlocks, size);
-		// unsigned char* voxelLights = (unsigned char*)getPMemory(size);
-		// zeroMemory(voxelLights, size);
-
-		inputDesc->blocktype = voxelBlocks + 1*by*bx + 1*bx + 1;
-		// inputDesc->lighting = voxelLights + 1*by*bx + 1*bx + 1;
-
-		stbvox_set_input_stride(&mm, bx*by,bx);
-		stbvox_set_input_range(&mm, 1,1,1, bx-1,by-1,bz-1);
-
-		for(int z = 2; z < bz-2; z++) {
-			for(int y = 2; y < 3; y++) {
-				for(int x = 2; x < bx-2; x++) {
-					voxelBlocks[z*by*bx + y*bx + x] = 1;
-				}
-			}
-		}
-
-		for(int z = 2; z < 12; z++) {
-			for(int x = 2; x < 12; x++) {
-				voxelBlocks[z*by*bx + 3*bx + x] = 2;
-			}
-		}
-
-		for(int z = 14; z < 17; z++) {
-			for(int x = 14; x < 17; x++) {
-				voxelBlocks[z*by*bx + 3*bx + x] = 3;
-			}
-		}
-
-		stbvox_set_default_mesh(&mm, 0);
-
-		int success = stbvox_make_mesh(&mm);
-
-		stbvox_set_mesh_coordinates(&mm, 0,0,0);
-		stbvox_get_transform(&mm, ad->transform);
-		float bounds [2][3]; stbvox_get_bounds(&mm, bounds);
-		ad->quadCount = stbvox_get_quad_count(&mm, 0);
-
-		ad->shader = createShader(stbvox_get_vertex_shader(), stbvox_get_fragment_shader(), &ad->voxelVertex, &ad->voxelFragment);
+		ad->meshBufferSize = megaBytes(1);
+		ad->meshBuffer = (char*)getPMemory(ad->meshBufferSize);
 
 		glCreateBuffers(1, &ad->bufferId);
-		glNamedBufferData(ad->bufferId, ad->quadCount*4*sizeof(uint)*2, ad->meshBuffer, GL_STATIC_DRAW_ARB);
+		// glNamedBufferData(ad->bufferId, ad->quadCount*4*sizeof(uint)*2, ad->meshBuffer, GL_STATIC_DRAW_ARB);
+		int bufferSize = megaBytes(10);
+		glNamedBufferData(ad->bufferId, bufferSize, ad->meshBuffer, GL_STREAM_DRAW);
 		glBindBuffer(GL_ARRAY_BUFFER, ad->bufferId);
 
 		// interleaved buffer - 2 uints in a row -> 8 bytes stride
@@ -848,11 +797,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glVertexAttribIPointer(fLoc, 4, GL_UNSIGNED_BYTE, 8, (void*)4);
 		glEnableVertexAttribArray(fLoc);
 
-
-
-
-
-
+		ad->bx = 34;
+		ad->by = 128;
+		ad->bz = 34;
+		int vBlocksSize = ad->bz*ad->by*ad->bx;
+		ad->voxelBlocks = (unsigned char*)getPMemory(vBlocksSize);
+		zeroMemory(ad->voxelBlocks, vBlocksSize);
 
 		return; // window operations only work after first frame?
 	}
@@ -939,6 +889,84 @@ extern "C" APPMAINFUNCTION(appMain) {
 	if(second) {
 		GLenum glError = glGetError(); printf("GLError: %i\n", glError);
 	}
+
+
+
+
+
+
+
+
+
+
+
+	int bx = ad->bx;
+	int by = ad->by;
+	int bz = ad->bz;
+	unsigned char* vbs = ad->voxelBlocks;
+	zeroMemory(vbs, bx*by*bz);
+
+	for(int z = 2; z < bz-2; z++) {
+		for(int y = 2; y < 3; y++) {
+			for(int x = 2; x < bx-2; x++) {
+				vbs[z*by*bx + y*bx + x] = 1;
+			}
+		}
+	}
+
+	// for(int z = 2; z < 12; z++) {
+	// 	for(int x = 2; x < 12; x++) {
+	// 		vbs[z*by*bx + 3*bx + x] = 2;
+	// 	}
+	// }
+
+	int height = 14;
+
+	static float dt = 0;
+	dt += 0.1f;
+
+	for(int i = 0; i < height; i++) {
+		for(int z = 17-i; z < 18+i; z++) {
+			for(int x = 17-i; x < 18+i; x++) {
+				// vbs[z*by*bx + ((height+3)-i)*bx + x] = i+1;
+				vbs[z*by*bx + ((height+3)-i)*bx + x] = (i+(int)dt)%256;
+			}
+		}
+	}
+
+
+
+
+	stbvox_mesh_maker mm;
+	stbvox_init_mesh_maker(&mm);
+	stbvox_input_description* inputDesc = stbvox_get_input_description(&mm);
+	*inputDesc = {};
+
+	stbvox_set_buffer(&mm, 0, 0, ad->meshBuffer, ad->meshBufferSize);
+	int count = stbvox_get_buffer_count(&mm);
+	int perQuad = stbvox_get_buffer_size_per_quad(&mm, 0);
+
+	// unsigned char tex1[] = {0,0,1,2};
+	// inputDesc->block_tex1 = (unsigned char*)tex1;
+	unsigned char tex2[256];
+	// tex2[0] = 0;
+	for(int i = 0; i < arrayCount(tex2)-1; i++) tex2[1+i] = i;
+
+	inputDesc->block_tex2 = (unsigned char*)tex2;
+
+	stbvox_set_input_stride(&mm, bx*by,bx);
+	stbvox_set_input_range(&mm, 1,1,1, bx-1,by-1,bz-1);
+	inputDesc->blocktype = ad->voxelBlocks + 1*by*bx + 1*bx + 1;
+
+	stbvox_set_default_mesh(&mm, 0);
+	int success = stbvox_make_mesh(&mm);
+
+	stbvox_set_mesh_coordinates(&mm, 0,0,0);
+	stbvox_get_transform(&mm, ad->transform);
+	float bounds [2][3]; stbvox_get_bounds(&mm, bounds);
+	ad->quadCount = stbvox_get_quad_count(&mm, 0);
+
+	glNamedBufferSubData(ad->bufferId, 0, ad->meshBufferSize, ad->meshBuffer);
 
 
 
@@ -1065,6 +1093,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glBindTextures(0,2,ad->voxelSamplers);
 
 	glBindProgramPipeline(ad->shader);
+	glBindBuffer(GL_ARRAY_BUFFER, ad->bufferId);
 	glDrawArrays(GL_QUADS, 0, ad->quadCount*4);
 
 
