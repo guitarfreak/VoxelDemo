@@ -20,7 +20,9 @@
 #include "stb_truetype.h"
 
 #define STB_VOXEL_RENDER_IMPLEMENTATION
-#define STBVOX_CONFIG_MODE 0
+#define STBVOX_CONFIG_LIGHTING_SIMPLE
+// #define STBVOX_CONFIG_MODE 0
+#define STBVOX_CONFIG_MODE 1
 #include "stb_voxel_render.h"
 
 
@@ -140,8 +142,8 @@
 		GLOP(void, GenSamplers, GLsizei n​, GLuint *samplers​) \
 		GLOP(void, BindSampler, GLuint unit, GLuint sampler​) \
 		GLOP(void, BindTextureUnit, GLuint unit, GLuint texture) \
-		GLOP(void, NamedBufferSubData, GLuint buffer, GLintptr offset, GLsizei size, const void *data)
-
+		GLOP(void, NamedBufferSubData, GLuint buffer, GLintptr offset, GLsizei size, const void *data) \
+		GLOP(void, GetUniformiv, GLuint program, GLint location, GLint * params)
 
 
 
@@ -539,12 +541,33 @@ void drawCube(PipelineIds* ids, Vec3 trans, Vec3 scale, float degrees, Vec3 rot)
 	glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 36, 1, 0);
 }
 
+uint createSampler(int wrapS, int wrapT, int magF, int minF) {
+	uint result;
+	glCreateSamplers(1, &result);
+
+	glSamplerParameteri(result, GL_TEXTURE_WRAP_S, wrapS);
+	glSamplerParameteri(result, GL_TEXTURE_WRAP_T, wrapT);
+	glSamplerParameteri(result, GL_TEXTURE_MAG_FILTER, magF);
+	glSamplerParameteri(result, GL_TEXTURE_MIN_FILTER, minF);
+
+	return result;
+}
+
 struct Texture {
 	int id;
 	int width;
 	int height;
 	int channels;
 	int levels;
+};
+
+struct VoxelMesh {
+	// bool generated;
+	bool init;
+
+	Vec3i coord;
+	uint voxels;
+	char* mesh;
 };
 
 struct AppData {
@@ -579,12 +602,21 @@ struct AppData {
 	uint bufferId;
 	char* meshBuffer;
 	int meshBufferSize;
-	GLuint voxelSamplers[2];	
-	GLuint voxelTextures[2];
+	GLuint voxelSamplers[3];
+	GLuint voxelTextures[3];
 
 	int bx, by, bz;
 	unsigned char* voxelBlocks;
 
+	GLuint voxelFaceTextures;
+	GLuint voxelFaceSamplers;
+
+	uint texBufferId;
+	char* texBuffer;
+	int texBufferSize;
+
+	GLuint textureUnits[16];
+	GLuint samplerUnits[16];
 };
 
 
@@ -704,22 +736,22 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
+
+
+
+
+
+		GLenum glError = glGetError(); printf("GLError: %i\n", glError);
+
 		ad->shader = createShader(stbvox_get_vertex_shader(), stbvox_get_fragment_shader(), &ad->voxelVertex, &ad->voxelFragment);
 
-		glCreateSamplers(2, ad->voxelSamplers);
-		// glSamplerParameteri(ad->samplers[0], GL_TEXTURE_WRAP_S, GL_REPEAT);
-		// glSamplerParameteri(ad->samplers[0], GL_TEXTURE_WRAP_T, GL_REPEAT);
-		// glSamplerParameteri(ad->samplers[0], GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		// glSamplerParameteri(ad->samplers[0], GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-		// glSamplerParameteri(ad->samplers[1], GL_TEXTURE_WRAP_S, GL_REPEAT);
-		// glSamplerParameteri(ad->samplers[1], GL_TEXTURE_WRAP_T, GL_REPEAT);
-		// glSamplerParameteri(ad->samplers[1], GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		// glSamplerParameteri(ad->samplers[1], GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+		ad->voxelSamplers[0] = createSampler(GL_REPEAT, GL_REPEAT, GL_NEAREST, GL_NEAREST_MIPMAP_NEAREST);
+		ad->voxelSamplers[1] = createSampler(GL_REPEAT, GL_REPEAT, GL_NEAREST, GL_NEAREST_MIPMAP_NEAREST);
+		ad->voxelSamplers[2] = createSampler(GL_REPEAT, GL_REPEAT, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
 
 
 
 		glCreateTextures(GL_TEXTURE_2D_ARRAY, 2, ad->voxelTextures);
-
 
 		char** files = (char**)getTMemory(sizeof(char*)*1024);
 
@@ -747,8 +779,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 		uint format = GL_RGBA;
 		uint internalFormat = GL_RGBA8;
 		int texCount = index;
-		int x = 32;
-		int y = 32;
+		// int texCount = 90;
+		int width = 32;
+		int height = 32;
 
 		char* p = getTString(34);
 		strClear(p);
@@ -757,7 +790,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		char* fullPath = getTString(234);
 
 		texId = ad->voxelTextures[0];
-		glTextureStorage3D(texId, 1, internalFormat, x, y, texCount);
+		glTextureStorage3D(texId, 1, internalFormat, width, height, texCount);
 		for(int tc = 0; tc < texCount; tc++) {
 			unsigned char* stbData;
 			int x,y,n;
@@ -766,15 +799,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 			strAppend(fullPath, p);
 			strAppend(fullPath, files[tc]);
 			stbData = stbi_load(fullPath, &x, &y, &n, 4);
-			glTextureSubImage3D(texId, 0, 0, 0, tc, x, y, 1, format, GL_UNSIGNED_BYTE, stbData);
+
+			if(x == width && y == height) {
+				glTextureSubImage3D(texId, 0, 0, 0, tc, x, y, 1, format, GL_UNSIGNED_BYTE, stbData);
+			}
 
 			stbi_image_free(stbData);
 		}
-
-		glTextureParameteri(texId, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
-		glTextureParameteri(texId, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-		glTextureParameteri(texId, GL_TEXTURE_WRAP_S, GL_REPEAT);
-		glTextureParameteri(texId, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
 
 
@@ -789,13 +820,40 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glNamedBufferData(ad->bufferId, bufferSize, ad->meshBuffer, GL_STREAM_DRAW);
 		glBindBuffer(GL_ARRAY_BUFFER, ad->bufferId);
 
-		// interleaved buffer - 2 uints in a row -> 8 bytes stride
-		int vaLoc = glGetAttribLocation(ad->voxelVertex, "attr_vertex");
-		glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 8, (void*)0);
-		glEnableVertexAttribArray(vaLoc);
-		int fLoc = glGetAttribLocation(ad->voxelVertex, "attr_face");
-		glVertexAttribIPointer(fLoc, 4, GL_UNSIGNED_BYTE, 8, (void*)4);
-		glEnableVertexAttribArray(fLoc);
+
+		if(STBVOX_CONFIG_MODE == 0) {
+			// interleaved buffer - 2 uints in a row -> 8 bytes stride
+			int vaLoc = glGetAttribLocation(ad->voxelVertex, "attr_vertex");
+			glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 8, (void*)0);
+			glEnableVertexAttribArray(vaLoc);
+			int fLoc = glGetAttribLocation(ad->voxelVertex, "attr_face");
+			glVertexAttribIPointer(fLoc, 4, GL_UNSIGNED_BYTE, 8, (void*)4);
+			glEnableVertexAttribArray(fLoc);
+
+		} else {
+			int vaLoc = glGetAttribLocation(ad->voxelVertex, "attr_vertex");
+			glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 4, (void*)0);
+			glEnableVertexAttribArray(vaLoc);
+
+			ad->texBufferSize = megaBytes(1);
+			ad->texBuffer = (char*)getPMemory(ad->texBufferSize);
+			bufferSize = megaBytes(10);
+
+			glCreateBuffers(1, &ad->texBufferId);
+			glNamedBufferData(ad->texBufferId, bufferSize, ad->texBuffer, GL_STREAM_DRAW);
+
+			glCreateTextures(GL_TEXTURE_BUFFER, 1, &ad->voxelTextures[2]);
+
+			glTextureBuffer(ad->voxelTextures[2], GL_RGBA8UI, ad->texBufferId);
+		}
+
+		ad->textureUnits[0] = ad->voxelTextures[0];
+		ad->textureUnits[1] = ad->voxelTextures[1];
+		ad->textureUnits[2] = ad->voxelTextures[2];
+
+		ad->samplerUnits[0] = ad->voxelSamplers[0];
+		ad->samplerUnits[1] = ad->voxelSamplers[1];
+		ad->samplerUnits[2] = ad->voxelSamplers[2];
 
 		ad->bx = 34;
 		ad->by = 128;
@@ -886,12 +944,42 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glEnable(GL_DEPTH_TEST);
 
 
-	if(second) {
-		GLenum glError = glGetError(); printf("GLError: %i\n", glError);
-	}
 
 
+	// for(int z = 2; z < bz-2; z++) {
+	// 	for(int y = 2; y < 3; y++) {
+	// 		for(int x = 2; x < bx-2; x++) {
+	// 			vbs[z*by*bx + y*bx + x] = 1;
+	// 		}
+	// 	}
+	// }
 
+	// // for(int z = 2; z < 12; z++) {
+	// // 	for(int x = 2; x < 12; x++) {
+	// // 		vbs[z*by*bx + 3*bx + x] = 2;
+	// // 	}
+	// // }
+
+	// int height = 14;
+
+	// static float dt = 0;
+	// dt += 0.1f;
+
+	// for(int i = 0; i < height; i++) {
+	// 	for(int z = 17-i; z < 18+i; z++) {
+	// 		for(int x = 17-i; x < 18+i; x++) {
+	// 			vbs[z*by*bx + ((height+3)-i)*bx + x] = 10;
+	// 			// vbs[z*by*bx + ((height+3)-i)*bx + x] = (i+(int)dt)%256;
+	// 		}
+	// 	}
+	// }
+
+	// for(int z = 14; z < 21; z++) {
+	// 	for(int x = 14; x < 21; x++) {
+	// 		vbs[z*by*bx + 18*bx + x] = 10;
+	// 		// vbs[z*by*bx + ((height+3)-i)*bx + x] = (i+(int)dt)%256;
+	// 	}
+	// }
 
 
 
@@ -928,9 +1016,16 @@ extern "C" APPMAINFUNCTION(appMain) {
 	for(int i = 0; i < height; i++) {
 		for(int z = 17-i; z < 18+i; z++) {
 			for(int x = 17-i; x < 18+i; x++) {
-				// vbs[z*by*bx + ((height+3)-i)*bx + x] = i+1;
-				vbs[z*by*bx + ((height+3)-i)*bx + x] = (i+(int)dt)%256;
+				vbs[z*by*bx + ((height+3)-i)*bx + x] = 10;
+				// vbs[z*by*bx + ((height+3)-i)*bx + x] = (i+(int)dt)%256;
 			}
+		}
+	}
+
+	for(int z = 14; z < 21; z++) {
+		for(int x = 14; x < 21; x++) {
+			vbs[z*by*bx + 18*bx + x] = 10;
+			// vbs[z*by*bx + ((height+3)-i)*bx + x] = (i+(int)dt)%256;
 		}
 	}
 
@@ -943,15 +1038,16 @@ extern "C" APPMAINFUNCTION(appMain) {
 	*inputDesc = {};
 
 	stbvox_set_buffer(&mm, 0, 0, ad->meshBuffer, ad->meshBufferSize);
+
+	if(STBVOX_CONFIG_MODE == 1) {
+		stbvox_set_buffer(&mm, 0, 1, ad->texBuffer, ad->meshBufferSize/4);
+	}
+
 	int count = stbvox_get_buffer_count(&mm);
 	int perQuad = stbvox_get_buffer_size_per_quad(&mm, 0);
 
-	// unsigned char tex1[] = {0,0,1,2};
-	// inputDesc->block_tex1 = (unsigned char*)tex1;
 	unsigned char tex2[256];
-	// tex2[0] = 0;
 	for(int i = 0; i < arrayCount(tex2)-1; i++) tex2[1+i] = i;
-
 	inputDesc->block_tex2 = (unsigned char*)tex2;
 
 	stbvox_set_input_stride(&mm, bx*by,bx);
@@ -967,6 +1063,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 	ad->quadCount = stbvox_get_quad_count(&mm, 0);
 
 	glNamedBufferSubData(ad->bufferId, 0, ad->meshBufferSize, ad->meshBuffer);
+
+	if(STBVOX_CONFIG_MODE == 1) {
+		glNamedBufferSubData(ad->texBufferId, 0, ad->meshBufferSize/4, ad->texBuffer);
+	}
 
 
 
@@ -995,6 +1095,20 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	float camera_pos[4] = {ad->camPos.x, ad->camPos.y, ad->camPos.z, 1};
 	int tex_unit[2];
+	GLuint faceSampler;
+
+	float a = dt/(float)10;
+	// Vec3 li = normVec3(vec3(cos(a),sin(a),0));
+	Vec3 li = normVec3(vec3(0,0.5f,0.5f));
+
+	float ambientLighting[4][4] = {
+	   { li.x, li.y, li.z ,0 }, // reversed lighting direction
+	   // { 0.8,0.3,0.8,0 }, // directional color
+	   // { 0.2,0.7,0.3,0 }, // constant color
+	   { 0.5,0.5,0.5,0 }, // directional color
+	   { 0.5,0.5,0.5,0 }, // constant color
+	   { 0.5,0.5,0.5,1.0f/1000.0f/1000.0f }, // fog data for simple_fog
+	};
 
 	int i;
 	for (i=0; i < STBVOX_UNIFORM_count; ++i) {
@@ -1029,17 +1143,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 							data = tex_unit;
 						} break;
 
-						//       case STBVOX_UNIFORM_face_data: {
-						//          // glUniform1i(loc, SAMPLER_YOU_WILL_BIND_PER_MESH_FACE_DATA_TO);
-						   // GLint sampler_unit = 2;
-						//         	   // glUniform1iv(loc, 1, &sampler_unit);
-						//         	   if(loc2 != -1) glProgramUniform1iv(program, loc2, 1, &sampler_unit);
-						//         	   if(loc3 != -1) glProgramUniform1iv(program, loc3, 1, &sampler_unit);
-						//       } break;
+						case STBVOX_UNIFORM_face_data: {
+							faceSampler = 2;
+							data = &faceSampler;
+						} break;
 
-						case STBVOX_UNIFORM_ambient: {	 // you definitely want to override this
-							// float ambient[4][4] = { 1,2,3,4, 1,2,3,4, 1,2,3,4, 1,2,3,4};
-							// glProgramUniform4fv(program, loc3, sui.array_length, sui.default_value);
+						case STBVOX_UNIFORM_ambient: {
+							data = ambientLighting;
 						} break;
 
 						case STBVOX_UNIFORM_color_table: // you might want to override this
@@ -1060,6 +1170,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 			}
 		}
 	}
+
+
+
 
 	GLuint transformUniform1 = glGetUniformLocation(ad->voxelVertex, "transform");
 	glProgramUniform3fv(ad->voxelVertex, transformUniform1, 3, ad->transform[0]);
@@ -1089,12 +1202,17 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-	glBindTextures(0,2,ad->voxelTextures);
-	glBindTextures(0,2,ad->voxelSamplers);
-
-	glBindProgramPipeline(ad->shader);
+	glBindTextures(0,16,ad->textureUnits);
+	glBindSamplers(0,16,ad->samplerUnits);
 	glBindBuffer(GL_ARRAY_BUFFER, ad->bufferId);
+	glBindProgramPipeline(ad->shader);
+
 	glDrawArrays(GL_QUADS, 0, ad->quadCount*4);
+
+
+	if(second) {
+		GLenum glError = glGetError(); printf("GLError: %i\n", glError);
+	}
 
 
 
@@ -1142,13 +1260,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-	ortho(&ad->pipelineIds, rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0));
-	glBindProgramPipeline(ad->pipelineIds.programQuad);
-	drawTextA(&ad->pipelineIds, vec2(0,-30),  vec4(1,1,1,1), &ad->fontArial, 0, 2, "Pos  : (%f,%f,%f)", ad->camPos.x, ad->camPos.y, ad->camPos.z);
-	drawTextA(&ad->pipelineIds, vec2(0,-60),  vec4(1,1,1,1), &ad->fontArial, 0, 2, "Look : (%f,%f,%f)", cLook.x, cLook.y, cLook.z);
-	drawTextA(&ad->pipelineIds, vec2(0,-90),  vec4(1,1,1,1), &ad->fontArial, 0, 2, "Up   : (%f,%f,%f)", cUp.x, cUp.y, cUp.z);
-	drawTextA(&ad->pipelineIds, vec2(0,-120), vec4(1,1,1,1), &ad->fontArial, 0, 2, "Right: (%f,%f,%f)", cRight.x, cRight.y, cRight.z);
-	drawTextA(&ad->pipelineIds, vec2(0,-150), vec4(1,1,1,1), &ad->fontArial, 0, 2, "Rot  : (%f,%f)", ad->camRot.x, ad->camRot.y);
+	// ortho(&ad->pipelineIds, rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0));
+	// glBindProgramPipeline(ad->pipelineIds.programQuad);
+	// drawTextA(&ad->pipelineIds, vec2(0,-30),  vec4(1,1,1,1), &ad->fontArial, 0, 2, "Pos  : (%f,%f,%f)", ad->camPos.x, ad->camPos.y, ad->camPos.z);
+	// drawTextA(&ad->pipelineIds, vec2(0,-60),  vec4(1,1,1,1), &ad->fontArial, 0, 2, "Look : (%f,%f,%f)", cLook.x, cLook.y, cLook.z);
+	// drawTextA(&ad->pipelineIds, vec2(0,-90),  vec4(1,1,1,1), &ad->fontArial, 0, 2, "Up   : (%f,%f,%f)", cUp.x, cUp.y, cUp.z);
+	// drawTextA(&ad->pipelineIds, vec2(0,-120), vec4(1,1,1,1), &ad->fontArial, 0, 2, "Right: (%f,%f,%f)", cRight.x, cRight.y, cRight.z);
+	// drawTextA(&ad->pipelineIds, vec2(0,-150), vec4(1,1,1,1), &ad->fontArial, 0, 2, "Rot  : (%f,%f)", ad->camRot.x, ad->camRot.y);
 
 
 	swapBuffers(&ad->systemData);

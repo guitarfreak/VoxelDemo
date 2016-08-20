@@ -817,6 +817,24 @@ union Vec3 {
 	float e[3];
 };
 
+union Vec3i {
+	struct {
+		int x, y, z;
+	};
+
+	struct {
+		Vec2i xy;
+		int z;
+	};
+
+	struct {
+		int x;
+		Vec2i yz;
+	};
+
+	float e[3];
+};
+
 union Vec4 {
 	struct {
 		float x, y, z, w;
@@ -1506,6 +1524,18 @@ inline Vec3 normVec3(Vec3 a) {
 	float sqrlen = dot(a,a);
 	if(sqrlen > 0) sqrlen = 1.0f/sqrt(sqrlen);
 	return a*sqrlen;
+}
+
+//
+//
+//
+
+inline Vec3i vec3i(int a, int b, int c) {
+	Vec3i vec;
+	vec.x = a;
+	vec.y = b;
+	vec.z = c;
+	return vec;
 }
 
 //
