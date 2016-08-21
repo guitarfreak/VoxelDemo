@@ -841,6 +841,11 @@ union Vec4 {
 	};
 
 	struct {
+		Vec3 xyz;
+		float w;
+	};
+
+	struct {
 		float r, g, b, a;
 	};
 
@@ -1538,6 +1543,10 @@ inline Vec3i vec3i(int a, int b, int c) {
 	return vec;
 }
 
+inline Vec3i vec3i(Vec3 a) {
+	return vec3i(a.x,a.y,a.z);
+}
+
 //
 //
 //
@@ -1566,6 +1575,13 @@ inline Vec4 vec4(float a) {
 	vec.y = a;
 	vec.z = a;
 	vec.w = a;
+	return vec;
+}
+
+inline Vec4 vec4(Vec3 a, float w) {
+	Vec4 vec;
+	vec.xyz = a;
+	vec.w = w;
 	return vec;
 }
 

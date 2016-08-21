@@ -2679,7 +2679,9 @@ void stbvox_make_mesh_for_face(stbvox_mesh_maker *mm, stbvox_rotate rot, int fac
    stbvox_mesh_vertex p1[4] = { 0 };
 
    #if defined(STBVOX_CONFIG_DOWN_TEXLERP_PACKED) && defined(STBVOX_CONFIG_UP_TEXLERP_PACKED)
-      #define STBVOX_USE_PACKED(f) ((f) == STBVOX_FACE_up || (f) == STBVOX_FACE_down)
+      #define 
+
+   (f) ((f) == STBVOX_FACE_up || (f) == STBVOX_FACE_down)
    #elif defined(STBVOX_CONFIG_UP_TEXLERP_PACKED)
       #define STBVOX_USE_PACKED(f) ((f) == STBVOX_FACE_up                           )
    #elif defined(STBVOX_CONFIG_DOWN_TEXLERP_PACKED)

@@ -553,6 +553,70 @@ uint createSampler(int wrapS, int wrapT, int magF, int minF) {
 	return result;
 }
 
+void setupVoxelUniforms(uint vertexShader, uint fragmentShader, Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit, Mat4 ambient) {
+
+	int texUnit[2] = {texUnit1, texUnit2};
+
+	for (int i=0; i < STBVOX_UNIFORM_count; ++i) {
+		stbvox_uniform_info sui;
+		if (stbvox_get_uniform_info(&sui, i)) {
+			if(i == STBVOX_UNIFORM_transform) continue;
+
+			for(int shaderStage = 0; shaderStage < 2; shaderStage++) {
+				GLint location;
+				GLuint program;
+				if(shaderStage == 0) {
+					location = glGetUniformLocation(vertexShader, sui.name);
+					program = vertexShader;
+				} else {
+					location = glGetUniformLocation(fragmentShader, sui.name);
+					program = fragmentShader;
+				}
+
+				if (location != -1) {
+					int arrayLength = sui.array_length;
+					void* data = sui.default_value;
+
+					switch (i) {
+						case STBVOX_UNIFORM_camera_pos: { // only needed for fog
+						   		data = camera.e;
+						   } break;
+
+						case STBVOX_UNIFORM_tex_array: {
+							data = texUnit;
+						} break;
+
+						case STBVOX_UNIFORM_face_data: {
+							data = &faceUnit;
+						} break;
+
+						case STBVOX_UNIFORM_ambient: {
+							data = ambient.e;
+						} break;
+
+						case STBVOX_UNIFORM_color_table: // you might want to override this
+						case STBVOX_UNIFORM_texscale:    // you may want to override this
+						case STBVOX_UNIFORM_normals:     // you never want to override this
+						case STBVOX_UNIFORM_texgen:      // you never want to override this
+							break;
+					}
+
+					switch(sui.type) {
+						case STBVOX_UNIFORM_TYPE_none: // glProgramUniformX(program, loc2, sui.array_length, sui.default_value); break;
+						case STBVOX_UNIFORM_TYPE_sampler: glProgramUniform1iv(program, location, arrayLength, (GLint*)data); break;
+						case STBVOX_UNIFORM_TYPE_vec2: glProgramUniform2fv(program, location, arrayLength, (GLfloat*)data); break;
+						case STBVOX_UNIFORM_TYPE_vec3: glProgramUniform3fv(program, location, arrayLength, (GLfloat*)data); break;
+						case STBVOX_UNIFORM_TYPE_vec4: glProgramUniform4fv(program, location, arrayLength, (GLfloat*)data); break;
+					}
+				}
+			}
+		}
+	}
+
+
+
+}
+
 struct Texture {
 	int id;
 	int width;
@@ -563,11 +627,21 @@ struct Texture {
 
 struct VoxelMesh {
 	// bool generated;
-	bool init;
+	bool upToDate;
 
-	Vec3i coord;
-	uint voxels;
-	char* mesh;
+	Vec2i coord;
+	uchar* voxels;
+
+	float transform[3][3];
+	int quadCount;
+
+	char* meshBuffer;
+	int meshBufferSize;
+	int meshBufferCapacity;
+
+	char* texBuffer;
+	int texBufferSize;
+	int texBufferCapacity;
 };
 
 struct AppData {
@@ -585,8 +659,6 @@ struct AppData {
 	Vec3 camera;
 	Vec3 camPos;
 	Vec3 camLook;
-	// Vec3 camUp;
-	// Vec3 camRight;
 	Vec2 camRot;
 	float aspectRatio;
 
@@ -605,7 +677,7 @@ struct AppData {
 	GLuint voxelSamplers[3];
 	GLuint voxelTextures[3];
 
-	int bx, by, bz;
+	Vec3i ms;
 	unsigned char* voxelBlocks;
 
 	GLuint voxelFaceTextures;
@@ -617,6 +689,9 @@ struct AppData {
 
 	GLuint textureUnits[16];
 	GLuint samplerUnits[16];
+
+	VoxelMesh* vMeshs;
+	int vMeshsSize;
 };
 
 
@@ -703,8 +778,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->programs[1] = ids->programCube;
 
 		ad->camera = vec3(0,0,10);
-		ad->camPos = vec3(0,4,10);
-		ad->camLook = vec3(-1,0,0);
+		ad->camPos = vec3(5,5,5);
+		ad->camLook = vec3(0,0,1);
 		ad->camRot = vec2(0,0);
 
 
@@ -855,12 +930,18 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->samplerUnits[1] = ad->voxelSamplers[1];
 		ad->samplerUnits[2] = ad->voxelSamplers[2];
 
-		ad->bx = 34;
-		ad->by = 128;
-		ad->bz = 34;
-		int vBlocksSize = ad->bz*ad->by*ad->bx;
+		// ad->ms = vec3i(34,128,34);
+		ad->ms = vec3i(12,12,12);
+		int vBlocksSize = ad->ms.z*ad->ms.y*ad->ms.x;
 		ad->voxelBlocks = (unsigned char*)getPMemory(vBlocksSize);
 		zeroMemory(ad->voxelBlocks, vBlocksSize);
+
+
+		int vMeshSize = sizeof(VoxelMesh)*1000;
+		ad->vMeshs = (VoxelMesh*)getPMemory(vMeshSize);
+		zeroMemory(ad->vMeshs, vMeshSize);
+
+		ad->vMeshsSize = 0;
 
 		return; // window operations only work after first frame?
 	}
@@ -906,6 +987,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 	#define VK_A 0x41
 	#define VK_S 0x53
 	#define VK_D 0x44
+	#define VK_E 0x45
+	#define VK_Q 0x51
 
 	if(input->mouseButtonDown[1]) {
 		float dt = 0.005f;
@@ -924,17 +1007,20 @@ extern "C" APPMAINFUNCTION(appMain) {
 	Vec3 cRight = normVec3(cross(gUp, cLook));
 
 	if( input->keysDown[VK_W] || input->keysDown[VK_A] || input->keysDown[VK_S] || 
-		input->keysDown[VK_D] || input->keysDown[VK_SHIFT] || input->keysDown[VK_CONTROL]) {
+		input->keysDown[VK_D] || input->keysDown[VK_E] || input->keysDown[VK_Q]) {
 
 		Vec3 gUp = vec3(0,1,0);
+		Vec3 look = cLook;
+		if(input->keysDown[VK_CONTROL]) look = cross(cRight, gUp);
+
 		float speed = 0.1f;
 		if(input->mouseButtonDown[0]) speed = 0.5f;
-		if(input->keysDown[VK_W]) 		ad->camPos += -normVec3(cLook)*speed;
-		if(input->keysDown[VK_A]) 		ad->camPos += -normVec3(cRight)*speed;
-		if(input->keysDown[VK_S]) 		ad->camPos += normVec3(cLook)*speed;
-		if(input->keysDown[VK_D]) 		ad->camPos += normVec3(cRight)*speed;
-		if(input->keysDown[VK_SHIFT]) 	ad->camPos += normVec3(gUp)*speed;
-		if(input->keysDown[VK_CONTROL])	ad->camPos += -normVec3(gUp)*speed;
+		if(input->keysDown[VK_W]) ad->camPos += -normVec3(look)*speed;
+		if(input->keysDown[VK_A]) ad->camPos += -normVec3(cRight)*speed;
+		if(input->keysDown[VK_S]) ad->camPos += normVec3(look)*speed;
+		if(input->keysDown[VK_D]) ad->camPos += normVec3(cRight)*speed;
+		if(input->keysDown[VK_E]) ad->camPos += normVec3(gUp)*speed;
+		if(input->keysDown[VK_Q]) ad->camPos += -normVec3(gUp)*speed;
 	}
 
 	glViewport(0,0, wSettings->currentRes.x, wSettings->currentRes.y);
@@ -946,131 +1032,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-	// for(int z = 2; z < bz-2; z++) {
-	// 	for(int y = 2; y < 3; y++) {
-	// 		for(int x = 2; x < bx-2; x++) {
-	// 			vbs[z*by*bx + y*bx + x] = 1;
-	// 		}
-	// 	}
-	// }
-
-	// // for(int z = 2; z < 12; z++) {
-	// // 	for(int x = 2; x < 12; x++) {
-	// // 		vbs[z*by*bx + 3*bx + x] = 2;
-	// // 	}
-	// // }
-
-	// int height = 14;
-
-	// static float dt = 0;
-	// dt += 0.1f;
-
-	// for(int i = 0; i < height; i++) {
-	// 	for(int z = 17-i; z < 18+i; z++) {
-	// 		for(int x = 17-i; x < 18+i; x++) {
-	// 			vbs[z*by*bx + ((height+3)-i)*bx + x] = 10;
-	// 			// vbs[z*by*bx + ((height+3)-i)*bx + x] = (i+(int)dt)%256;
-	// 		}
-	// 	}
-	// }
-
-	// for(int z = 14; z < 21; z++) {
-	// 	for(int x = 14; x < 21; x++) {
-	// 		vbs[z*by*bx + 18*bx + x] = 10;
-	// 		// vbs[z*by*bx + ((height+3)-i)*bx + x] = (i+(int)dt)%256;
-	// 	}
-	// }
-
-
-
-
-
-
-
-
-	int bx = ad->bx;
-	int by = ad->by;
-	int bz = ad->bz;
-	unsigned char* vbs = ad->voxelBlocks;
-	zeroMemory(vbs, bx*by*bz);
-
-	for(int z = 2; z < bz-2; z++) {
-		for(int y = 2; y < 3; y++) {
-			for(int x = 2; x < bx-2; x++) {
-				vbs[z*by*bx + y*bx + x] = 1;
-			}
-		}
-	}
-
-	// for(int z = 2; z < 12; z++) {
-	// 	for(int x = 2; x < 12; x++) {
-	// 		vbs[z*by*bx + 3*bx + x] = 2;
-	// 	}
-	// }
-
-	int height = 14;
-
-	static float dt = 0;
-	dt += 0.1f;
-
-	for(int i = 0; i < height; i++) {
-		for(int z = 17-i; z < 18+i; z++) {
-			for(int x = 17-i; x < 18+i; x++) {
-				vbs[z*by*bx + ((height+3)-i)*bx + x] = 10;
-				// vbs[z*by*bx + ((height+3)-i)*bx + x] = (i+(int)dt)%256;
-			}
-		}
-	}
-
-	for(int z = 14; z < 21; z++) {
-		for(int x = 14; x < 21; x++) {
-			vbs[z*by*bx + 18*bx + x] = 10;
-			// vbs[z*by*bx + ((height+3)-i)*bx + x] = (i+(int)dt)%256;
-		}
-	}
-
-
-
-
-	stbvox_mesh_maker mm;
-	stbvox_init_mesh_maker(&mm);
-	stbvox_input_description* inputDesc = stbvox_get_input_description(&mm);
-	*inputDesc = {};
-
-	stbvox_set_buffer(&mm, 0, 0, ad->meshBuffer, ad->meshBufferSize);
-
-	if(STBVOX_CONFIG_MODE == 1) {
-		stbvox_set_buffer(&mm, 0, 1, ad->texBuffer, ad->meshBufferSize/4);
-	}
-
-	int count = stbvox_get_buffer_count(&mm);
-	int perQuad = stbvox_get_buffer_size_per_quad(&mm, 0);
-
-	unsigned char tex2[256];
-	for(int i = 0; i < arrayCount(tex2)-1; i++) tex2[1+i] = i;
-	inputDesc->block_tex2 = (unsigned char*)tex2;
-
-	stbvox_set_input_stride(&mm, bx*by,bx);
-	stbvox_set_input_range(&mm, 1,1,1, bx-1,by-1,bz-1);
-	inputDesc->blocktype = ad->voxelBlocks + 1*by*bx + 1*bx + 1;
-
-	stbvox_set_default_mesh(&mm, 0);
-	int success = stbvox_make_mesh(&mm);
-
-	stbvox_set_mesh_coordinates(&mm, 0,0,0);
-	stbvox_get_transform(&mm, ad->transform);
-	float bounds [2][3]; stbvox_get_bounds(&mm, bounds);
-	ad->quadCount = stbvox_get_quad_count(&mm, 0);
-
-	glNamedBufferSubData(ad->bufferId, 0, ad->meshBufferSize, ad->meshBuffer);
-
-	if(STBVOX_CONFIG_MODE == 1) {
-		glNamedBufferSubData(ad->texBufferId, 0, ad->meshBufferSize/4, ad->texBuffer);
-	}
-
-
-
-
+#if 0
 
 
 
@@ -1093,91 +1055,22 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-	float camera_pos[4] = {ad->camPos.x, ad->camPos.y, ad->camPos.z, 1};
-	int tex_unit[2];
-	GLuint faceSampler;
 
-	float a = dt/(float)10;
-	// Vec3 li = normVec3(vec3(cos(a),sin(a),0));
+
+
 	Vec3 li = normVec3(vec3(0,0.5f,0.5f));
-
-	float ambientLighting[4][4] = {
-	   { li.x, li.y, li.z ,0 }, // reversed lighting direction
-	   // { 0.8,0.3,0.8,0 }, // directional color
-	   // { 0.2,0.7,0.3,0 }, // constant color
-	   { 0.5,0.5,0.5,0 }, // directional color
-	   { 0.5,0.5,0.5,0 }, // constant color
-	   { 0.5,0.5,0.5,1.0f/1000.0f/1000.0f }, // fog data for simple_fog
+	Mat4 ambientLighting = {
+		li.x, li.y, li.z ,0, // reversed lighting direction
+		0.5,0.5,0.5,0, // directional color
+		0.5,0.5,0.5,0, // constant color
+		0.5,0.5,0.5,1.0f/1000.0f/1000.0f, // fog data for simple_fog
 	};
 
-	int i;
-	for (i=0; i < STBVOX_UNIFORM_count; ++i) {
-		stbvox_uniform_info sui;
-		if (stbvox_get_uniform_info(&sui, i)) {
-			if(i == STBVOX_UNIFORM_transform) continue;
-
-			for(int shaderStage = 0; shaderStage < 2; shaderStage++) {
-				GLint location;
-				GLuint program;
-				if(shaderStage == 0) {
-					location = glGetUniformLocation(ad->voxelVertex, sui.name);
-					program = ad->voxelVertex;
-				} else {
-					location = glGetUniformLocation(ad->voxelFragment, sui.name);
-					program = ad->voxelFragment;
-				}
-
-				if (location != -1) {
-					int arrayLength = sui.array_length;
-					void* data = sui.default_value;
-
-					switch (i) {
-						case STBVOX_UNIFORM_camera_pos: { // only needed for fog
-						   		data = camera_pos;
-						   } break;
-
-						case STBVOX_UNIFORM_tex_array: {
-							tex_unit[0] = 0;
-							tex_unit[1] = 0;
-
-							data = tex_unit;
-						} break;
-
-						case STBVOX_UNIFORM_face_data: {
-							faceSampler = 2;
-							data = &faceSampler;
-						} break;
-
-						case STBVOX_UNIFORM_ambient: {
-							data = ambientLighting;
-						} break;
-
-						case STBVOX_UNIFORM_color_table: // you might want to override this
-						case STBVOX_UNIFORM_texscale:    // you may want to override this
-						case STBVOX_UNIFORM_normals:     // you never want to override this
-						case STBVOX_UNIFORM_texgen:      // you never want to override this
-							break;
-					}
-
-					switch(sui.type) {
-						case STBVOX_UNIFORM_TYPE_none: // glProgramUniformX(program, loc2, sui.array_length, sui.default_value); break;
-						case STBVOX_UNIFORM_TYPE_sampler: glProgramUniform1iv(program, location, arrayLength, (GLint*)data); break;
-						case STBVOX_UNIFORM_TYPE_vec2: glProgramUniform2fv(program, location, arrayLength, (GLfloat*)data); break;
-						case STBVOX_UNIFORM_TYPE_vec3: glProgramUniform3fv(program, location, arrayLength, (GLfloat*)data); break;
-						case STBVOX_UNIFORM_TYPE_vec4: glProgramUniform4fv(program, location, arrayLength, (GLfloat*)data); break;
-					}
-				}
-			}
-		}
-	}
+	setupVoxelUniforms(ad->voxelVertex, ad->voxelFragment, vec4(ad->camPos, 1), 0, 0, 2, ambientLighting);
 
 
 
 
-	GLuint transformUniform1 = glGetUniformLocation(ad->voxelVertex, "transform");
-	glProgramUniform3fv(ad->voxelVertex, transformUniform1, 3, ad->transform[0]);
-	GLuint transformUniform2 = glGetUniformLocation(ad->voxelFragment, "transform");
-	glProgramUniform3fv(ad->voxelFragment, transformUniform2, 3, ad->transform[0]);
 
 	// Vec3 trans = vec3(0,0,0);
 	// Vec3 scale = vec3(1, 1, 1);
@@ -1207,7 +1100,139 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glBindBuffer(GL_ARRAY_BUFFER, ad->bufferId);
 	glBindProgramPipeline(ad->shader);
 
-	glDrawArrays(GL_QUADS, 0, ad->quadCount*4);
+
+
+
+
+
+
+
+
+	Vec3i ms = ad->ms;
+	Vec3i msr = vec3i(ms.x-2, ms.y-2, ms.z-2);
+	Vec3i pos = vec3i(ad->camPos);
+	if(pos.x < 0) pos.x -= msr.x;
+	if(pos.z < 0) pos.z -= msr.z;
+	Vec2i playerMeshCoord = vec2i(pos.x/msr.x, pos.z/msr.z);
+
+	int radius = 10;
+	Vec2i min = vec2i(playerMeshCoord.x-radius, playerMeshCoord.y-radius);
+	Vec2i max = vec2i(playerMeshCoord.x+radius, playerMeshCoord.y+radius);
+
+	VoxelMesh* vms = ad->vMeshs;
+	int vmsSize = ad->vMeshsSize;
+	for(int x = min.x; x < max.x+1; x++) {
+		for(int y = min.y; y < max.y+1; y++) {
+			Vec2i coord = vec2i(x,y);
+
+			// find mesh at coordinate
+			int index = -1;
+			for(int i = 0; i < vmsSize; i++) {
+				VoxelMesh* vm = vms + i;
+				if(vm->coord == coord) {
+					index = i;
+					break;
+				}
+			}
+
+			// generate the mesh if not there yet
+			if(index == -1) {
+				index = ad->vMeshsSize++;
+				VoxelMesh* m = vms + index;
+				*m = {};
+				m->coord = coord;
+				m->voxels = (uchar*)getPMemory(ms.x*ms.y*ms.z);
+				zeroMemory(m->voxels, ms.x*ms.y*ms.z);
+
+				// generate voxel world
+				Vec2i min = vec2i(1,1);
+				Vec2i max = vec2i(ms.x,ms.z);
+				for(int z = min.y; z < max.y; z++) {
+					for(int x = min.x; x < max.x; x++) {
+						m->voxels[z*ms.y*ms.x + 2*ms.x + x] = 10;
+					}
+				}
+
+				for(int z = min.y; z < max.y; z++) {
+					for(int y = 3; y < 5; y++) {
+						for(int x = min.x; x < max.x; x++) {
+							// Vec2i p = vec2i(randomInt(min.x, max.x), randomInt(min.y, max.y));
+							if(randomInt(0,10) < 2) m->voxels[z*ms.y*ms.x + y*ms.x + x] = 1;
+							if(randomInt(0,100) < 1) m->voxels[z*ms.y*ms.x + y*ms.x + x] = 8;
+						}
+					}
+				}
+				
+				m->meshBufferCapacity = kiloBytes(200);
+				m->meshBuffer = (char*)getPMemory(m->meshBufferCapacity);
+
+				m->texBufferCapacity = m->meshBufferCapacity/4;
+				m->texBuffer = (char*)getPMemory(m->texBufferCapacity);
+			}
+
+			// make the mesh if out of date
+			VoxelMesh* m = vms + index;
+			if(!m->upToDate) {
+				stbvox_mesh_maker mm;
+				stbvox_init_mesh_maker(&mm);
+				stbvox_input_description* inputDesc = stbvox_get_input_description(&mm);
+				*inputDesc = {};
+
+				stbvox_set_buffer(&mm, 0, 0, m->meshBuffer, m->meshBufferCapacity);
+
+				if(STBVOX_CONFIG_MODE == 1) {
+					stbvox_set_buffer(&mm, 0, 1, m->texBuffer, m->texBufferCapacity);
+				}
+
+				int count = stbvox_get_buffer_count(&mm);
+				int perQuad = stbvox_get_buffer_size_per_quad(&mm, 0);
+
+				unsigned char tex2[256];
+				for(int i = 0; i < arrayCount(tex2)-1; i++) tex2[1+i] = i;
+				inputDesc->block_tex2 = (unsigned char*)tex2;
+
+				stbvox_set_input_stride(&mm, ms.x*ms.y,ms.x);
+				stbvox_set_input_range(&mm, 1,1,1, ms.x-1,ms.y-1,ms.z-1);
+				inputDesc->blocktype = m->voxels + 1*ms.y*ms.x + 1*ms.x + 1;
+
+				stbvox_set_default_mesh(&mm, 0);
+				int success = stbvox_make_mesh(&mm);
+
+				// stbvox_set_mesh_coordinates(&mm, 0,0,0);
+				stbvox_set_mesh_coordinates(&mm, coord.x*msr.x,0,coord.y*msr.z);
+
+				stbvox_get_transform(&mm, m->transform);
+				float bounds [2][3]; stbvox_get_bounds(&mm, bounds);
+				m->quadCount = stbvox_get_quad_count(&mm, 0);
+
+				int bs = stbvox_get_buffer_size_per_quad(&mm, 0);
+				int ts = stbvox_get_buffer_size_per_quad(&mm, 1);
+
+
+				m->upToDate = true;
+			}
+
+			// draw mesh
+			m = vms + index;
+
+			GLuint transformUniform1 = glGetUniformLocation(ad->voxelVertex, "transform");
+			glProgramUniform3fv(ad->voxelVertex, transformUniform1, 3, m->transform[0]);
+			GLuint transformUniform2 = glGetUniformLocation(ad->voxelFragment, "transform");
+			glProgramUniform3fv(ad->voxelFragment, transformUniform2, 3, m->transform[0]);
+
+			glNamedBufferSubData(ad->bufferId, 0, m->quadCount*16, m->meshBuffer);
+
+			if(STBVOX_CONFIG_MODE == 1) {
+				glNamedBufferSubData(ad->texBufferId, 0, m->quadCount*4, m->texBuffer);
+			}
+
+			glDrawArrays(GL_QUADS, 0, m->quadCount*4);
+		}
+	}
+
+
+
+	// glDrawArrays(GL_QUADS, 0, ad->quadCount*4);
 
 
 	if(second) {
@@ -1229,24 +1254,29 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// glDisable(GL_TEXTURE_2D);
 
 
+#endif
 
 
 
-
-	// lookAt(&ad->pipelineIds, ad->camPos, cLook, cUp);
-	// perspective(&ad->pipelineIds, degreeToRadian(60), ad->aspectRatio, 0.1f, 2000);
-	// glBindProgramPipeline(ad->pipelineIds.programCube);
+	lookAt(&ad->pipelineIds, ad->camPos, cLook, cUp);
+	perspective(&ad->pipelineIds, degreeToRadian(60), ad->aspectRatio, 0.1f, 2000);
+	glBindProgramPipeline(ad->pipelineIds.programCube);
 
 	// static float dt = 0;
 	// dt += 0.01f;
 	// drawCube(&ad->pipelineIds, vec3(5,5,-5), vec3(6,2,1), dt, normVec3(vec3(0.9f,0.6f,0.2f)));
 
-	// for(int i = -10; i < 10; i++) 
-	// 	drawCube(&ad->pipelineIds, vec3(i*5,0,0), vec3(1,1,1), 0, normVec3(vec3(0.9f,0.6f,0.2f)));
-	// for(int i = -10; i < 10; i++) 
-	// 	drawCube(&ad->pipelineIds, vec3(0,i*5,0), vec3(1,1,1), 0, normVec3(vec3(0.9f,0.6f,0.2f)));
-	// for(int i = -10; i < 10; i++) 
-	// 	drawCube(&ad->pipelineIds, vec3(0,0,i*5), vec3(1,1,1), 0, normVec3(vec3(0.9f,0.6f,0.2f)));
+	Vec3 off = vec3(0.5f, 0.5f, 0.5f);
+	Vec3 s = vec3(1.01f, 1.01f, 1.01f);
+
+	// for(int i = -10; i < 10; i++) drawCube(&ad->pipelineIds, vec3(i*10,0,0) + off, s, 0, normVec3(vec3(0.9f,0.6f,0.2f)));
+	// for(int i = -10; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,i*10,0) + off, s, 0, normVec3(vec3(0.9f,0.6f,0.2f)));
+	// for(int i = -10; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,0,i*10) + off, s, 0, normVec3(vec3(0.9f,0.6f,0.2f)));
+
+
+	for(int i = 0; i < 2; i++) drawCube(&ad->pipelineIds, vec3(i*10,0,0) + off, s, 0, normVec3(vec3(0.9f,0.6f,0.2f)));
+	for(int i = 0; i < 3; i++) drawCube(&ad->pipelineIds, vec3(0,i*10,0) + off, s, 0, normVec3(vec3(0.9f,0.6f,0.2f)));
+	for(int i = 0; i < 4; i++) drawCube(&ad->pipelineIds, vec3(0,0,i*10) + off, s, 0, normVec3(vec3(0.9f,0.6f,0.2f)));
 
 
 
@@ -1260,13 +1290,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-	// ortho(&ad->pipelineIds, rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0));
-	// glBindProgramPipeline(ad->pipelineIds.programQuad);
-	// drawTextA(&ad->pipelineIds, vec2(0,-30),  vec4(1,1,1,1), &ad->fontArial, 0, 2, "Pos  : (%f,%f,%f)", ad->camPos.x, ad->camPos.y, ad->camPos.z);
-	// drawTextA(&ad->pipelineIds, vec2(0,-60),  vec4(1,1,1,1), &ad->fontArial, 0, 2, "Look : (%f,%f,%f)", cLook.x, cLook.y, cLook.z);
-	// drawTextA(&ad->pipelineIds, vec2(0,-90),  vec4(1,1,1,1), &ad->fontArial, 0, 2, "Up   : (%f,%f,%f)", cUp.x, cUp.y, cUp.z);
-	// drawTextA(&ad->pipelineIds, vec2(0,-120), vec4(1,1,1,1), &ad->fontArial, 0, 2, "Right: (%f,%f,%f)", cRight.x, cRight.y, cRight.z);
-	// drawTextA(&ad->pipelineIds, vec2(0,-150), vec4(1,1,1,1), &ad->fontArial, 0, 2, "Rot  : (%f,%f)", ad->camRot.x, ad->camRot.y);
+	ortho(&ad->pipelineIds, rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0));
+	glBindProgramPipeline(ad->pipelineIds.programQuad);
+	drawTextA(&ad->pipelineIds, vec2(0,-30),  vec4(1,1,1,1), &ad->fontArial, 0, 2, "Pos  : (%f,%f,%f)", ad->camPos.x, ad->camPos.y, ad->camPos.z);
+	drawTextA(&ad->pipelineIds, vec2(0,-60),  vec4(1,1,1,1), &ad->fontArial, 0, 2, "Look : (%f,%f,%f)", cLook.x, cLook.y, cLook.z);
+	drawTextA(&ad->pipelineIds, vec2(0,-90),  vec4(1,1,1,1), &ad->fontArial, 0, 2, "Up   : (%f,%f,%f)", cUp.x, cUp.y, cUp.z);
+	drawTextA(&ad->pipelineIds, vec2(0,-120), vec4(1,1,1,1), &ad->fontArial, 0, 2, "Right: (%f,%f,%f)", cRight.x, cRight.y, cRight.z);
+	drawTextA(&ad->pipelineIds, vec2(0,-150), vec4(1,1,1,1), &ad->fontArial, 0, 2, "Rot  : (%f,%f)", ad->camRot.x, ad->camRot.y);
+	// drawTextA(&ad->pipelineIds, vec2(0,-200), vec4(1,1,1,1), &ad->fontArial, 0, 2, "Coord  : (%f,%f)", (float)playerMeshCoord.x, (float)playerMeshCoord.y);
+	// drawTextA(&ad->pipelineIds, vec2(0,-200), vec4(1,1,1,1), &ad->fontArial, 0, 2, "Coord  : (%i,%i)", 2,3);
 
 
 	swapBuffers(&ad->systemData);
