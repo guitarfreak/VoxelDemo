@@ -1664,8 +1664,7 @@ inline void translationMatrix(Mat4* m, Vec3 a) {
 	m->w3 = a.z;
 }
 
-inline void viewMatrix(Mat4* m, Vec3 cPos, Vec3 cLook, Vec3 cUp) {
-	Vec3 cRight = cross(cUp,cLook);
+inline void viewMatrix(Mat4* m, Vec3 cPos, Vec3 cLook, Vec3 cUp, Vec3 cRight) {
 	*m = {	cRight.x, cRight.y, cRight.z, -(dot(cPos,cRight)), 
 			cUp.x, 	  cUp.y, 	cUp.z,    -(dot(cPos,cUp)), 
 			cLook.x,  cLook.y,  cLook.z,  -(dot(cPos,cLook)), 
@@ -1673,10 +1672,10 @@ inline void viewMatrix(Mat4* m, Vec3 cPos, Vec3 cLook, Vec3 cUp) {
 }
 
 inline void projMatrix(Mat4* m, float fov, float ar, float n, float f) {
-	*m = { 	1/(ar*tan(fov*0.5f)), 0, 0, 0,
-			0, 1/(tan(fov*0.5f)), 0, 0,
-			0, 0, -((f+n)/(f-n)), -((2*f*n)/(f-n)),
-			0, 0, -1, 0 };
+	*m = { 	1/(ar*tan(fov*0.5f)), 0, 				 0, 			 0,
+			0, 					  1/(tan(fov*0.5f)), 0, 			 0,
+			0, 					  0, 				 -((f+n)/(f-n)), -((2*f*n)/(f-n)),
+			0, 					  0, 				 -1, 			 0 };
 }
 
 //

@@ -44,6 +44,13 @@
 - savestates, hotrealoading
 - pre and post functions to appMain
 - memory expansion
+
+//-------------------------------------
+//               BUGS
+//-------------------------------------
+- Font doesn't draw int
+- look has to be negative to work
+
 */
 
 
@@ -432,9 +439,9 @@ void ortho(PipelineIds* ids, Rect r) {
 	glProgramUniform4f(1, ids->quadVertexCamera, r.cen.x, r.cen.y, r.dim.w, r.dim.h);
 }
 
-void lookAt(PipelineIds* ids, Vec3 pos, Vec3 look, Vec3 up) {
+void lookAt(PipelineIds* ids, Vec3 pos, Vec3 look, Vec3 up, Vec3 right) {
 	Mat4 view;
-	viewMatrix(&view, pos, look, up);
+	viewMatrix(&view, pos, look, up, right);
 
 	glProgramUniformMatrix4fv(ids->cubeVertex, ids->cubeVertexView, 1, 1, view.e);
 }
@@ -778,8 +785,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->programs[1] = ids->programCube;
 
 		ad->camera = vec3(0,0,10);
-		ad->camPos = vec3(5,5,5);
-		ad->camLook = vec3(0,0,1);
+
+		ad->camPos = vec3(-10,-10,5);
+		ad->camLook = normVec3(vec3(-1,-1,0));
+		// ad->camLook = vec3(0,0,1);
 		ad->camRot = vec2(0,0);
 
 
@@ -999,26 +1008,27 @@ extern "C" APPMAINFUNCTION(appMain) {
 		clamp(&ad->camRot.y, -M_PI+margin, M_PI-margin);
 	}
 
-	Vec3 gUp = vec3(0,1,0);
+	// Vec3 gUp = vec3(0,1,0);
+	Vec3 gUp = vec3(0,0,1);
 	Vec3 cLook = ad->camLook;
 	rotateVec3(&cLook, ad->camRot.x, gUp);
 	rotateVec3(&cLook, ad->camRot.y, normVec3(cross(gUp, cLook)));
 	Vec3 cUp = normVec3(cross(cLook, normVec3(cross(gUp, cLook))));
 	Vec3 cRight = normVec3(cross(gUp, cLook));
+	cLook = -cLook;
 
 	if( input->keysDown[VK_W] || input->keysDown[VK_A] || input->keysDown[VK_S] || 
 		input->keysDown[VK_D] || input->keysDown[VK_E] || input->keysDown[VK_Q]) {
 
-		Vec3 gUp = vec3(0,1,0);
 		Vec3 look = cLook;
-		if(input->keysDown[VK_CONTROL]) look = cross(cRight, gUp);
+		if(input->keysDown[VK_CONTROL]) look = cross(gUp, cRight);
 
 		float speed = 0.1f;
 		if(input->mouseButtonDown[0]) speed = 0.5f;
-		if(input->keysDown[VK_W]) ad->camPos += -normVec3(look)*speed;
-		if(input->keysDown[VK_A]) ad->camPos += -normVec3(cRight)*speed;
-		if(input->keysDown[VK_S]) ad->camPos += normVec3(look)*speed;
+		if(input->keysDown[VK_W]) ad->camPos += normVec3(look)*speed;
+		if(input->keysDown[VK_S]) ad->camPos += -normVec3(look)*speed;
 		if(input->keysDown[VK_D]) ad->camPos += normVec3(cRight)*speed;
+		if(input->keysDown[VK_A]) ad->camPos += -normVec3(cRight)*speed;
 		if(input->keysDown[VK_E]) ad->camPos += normVec3(gUp)*speed;
 		if(input->keysDown[VK_Q]) ad->camPos += -normVec3(gUp)*speed;
 	}
@@ -1032,7 +1042,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-#if 0
+#if 1
 
 
 
@@ -1084,7 +1094,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// Mat4 model = tm*rm*sm;
 
 	Mat4 view;
-	viewMatrix(&view, ad->camPos, cLook, cUp);
+	viewMatrix(&view, ad->camPos, -cLook, cUp, cRight);
 	Mat4 proj;
 	projMatrix(&proj, degreeToRadian(60), ad->aspectRatio, 0.1f, 2000);
 
@@ -1112,8 +1122,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 	Vec3i msr = vec3i(ms.x-2, ms.y-2, ms.z-2);
 	Vec3i pos = vec3i(ad->camPos);
 	if(pos.x < 0) pos.x -= msr.x;
-	if(pos.z < 0) pos.z -= msr.z;
-	Vec2i playerMeshCoord = vec2i(pos.x/msr.x, pos.z/msr.z);
+	if(pos.y < 0) pos.y -= msr.y;
+	Vec2i playerMeshCoord = vec2i(pos.x/msr.x, pos.y/msr.y);
 
 	int radius = 10;
 	Vec2i min = vec2i(playerMeshCoord.x-radius, playerMeshCoord.y-radius);
@@ -1146,19 +1156,18 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 				// generate voxel world
 				Vec2i min = vec2i(1,1);
-				Vec2i max = vec2i(ms.x,ms.z);
-				for(int z = min.y; z < max.y; z++) {
+				Vec2i max = vec2i(ms.x,ms.y);
+				for(int y = min.y; y < max.y; y++) {
 					for(int x = min.x; x < max.x; x++) {
-						m->voxels[z*ms.y*ms.x + 2*ms.x + x] = 10;
+						m->voxels[x*ms.y*ms.x + y*ms.x + 2] = 10;
 					}
 				}
 
-				for(int z = min.y; z < max.y; z++) {
-					for(int y = 3; y < 5; y++) {
+				for(int z = 3; z < 5; z++) {
+					for(int y = min.y; y < max.y; y++) {
 						for(int x = min.x; x < max.x; x++) {
-							// Vec2i p = vec2i(randomInt(min.x, max.x), randomInt(min.y, max.y));
-							if(randomInt(0,10) < 2) m->voxels[z*ms.y*ms.x + y*ms.x + x] = 1;
-							if(randomInt(0,100) < 1) m->voxels[z*ms.y*ms.x + y*ms.x + x] = 8;
+							if(randomInt(0,10) < 2) m->voxels[x*ms.y*ms.x + y*ms.x + z] = 1;
+							if(randomInt(0,100) < 1) m->voxels[x*ms.y*ms.x + y*ms.x + z] = 8;
 						}
 					}
 				}
@@ -1192,6 +1201,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				inputDesc->block_tex2 = (unsigned char*)tex2;
 
 				stbvox_set_input_stride(&mm, ms.x*ms.y,ms.x);
+				// stbvox_set_input_stride(&mm, ms.x,ms.x*ms.y);
 				stbvox_set_input_range(&mm, 1,1,1, ms.x-1,ms.y-1,ms.z-1);
 				inputDesc->blocktype = m->voxels + 1*ms.y*ms.x + 1*ms.x + 1;
 
@@ -1199,7 +1209,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				int success = stbvox_make_mesh(&mm);
 
 				// stbvox_set_mesh_coordinates(&mm, 0,0,0);
-				stbvox_set_mesh_coordinates(&mm, coord.x*msr.x,0,coord.y*msr.z);
+				stbvox_set_mesh_coordinates(&mm, coord.x*msr.x,coord.y*msr.y,0);
 
 				stbvox_get_transform(&mm, m->transform);
 				float bounds [2][3]; stbvox_get_bounds(&mm, bounds);
@@ -1232,8 +1242,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-	// glDrawArrays(GL_QUADS, 0, ad->quadCount*4);
-
 
 	if(second) {
 		GLenum glError = glGetError(); printf("GLError: %i\n", glError);
@@ -1258,7 +1266,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-	lookAt(&ad->pipelineIds, ad->camPos, cLook, cUp);
+	lookAt(&ad->pipelineIds, ad->camPos, -cLook, cUp, cRight);
 	perspective(&ad->pipelineIds, degreeToRadian(60), ad->aspectRatio, 0.1f, 2000);
 	glBindProgramPipeline(ad->pipelineIds.programCube);
 
@@ -1274,9 +1282,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// for(int i = -10; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,0,i*10) + off, s, 0, normVec3(vec3(0.9f,0.6f,0.2f)));
 
 
-	for(int i = 0; i < 2; i++) drawCube(&ad->pipelineIds, vec3(i*10,0,0) + off, s, 0, normVec3(vec3(0.9f,0.6f,0.2f)));
-	for(int i = 0; i < 3; i++) drawCube(&ad->pipelineIds, vec3(0,i*10,0) + off, s, 0, normVec3(vec3(0.9f,0.6f,0.2f)));
-	for(int i = 0; i < 4; i++) drawCube(&ad->pipelineIds, vec3(0,0,i*10) + off, s, 0, normVec3(vec3(0.9f,0.6f,0.2f)));
+	for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(i*10,0,0) + off, s, 0, vec3(0,0,0));
+	for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,i*10,0) + off, s, 0, vec3(0,0,0));
+	for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,0,i*10) + off, s, 0, vec3(0,0,0));
+
 
 
 
