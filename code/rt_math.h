@@ -920,6 +920,56 @@ inline bool operator!=(Vec2i a, Vec2i b) {
 	return !(a==b);
 }
 
+inline Vec2i operator+(Vec2i a, int b) {
+	a.x += b;
+	a.y += b;
+	return a;
+}
+
+inline Vec2i operator+(Vec2i a, Vec2i b) {
+	a.x += b.x;
+	a.y += b.y;
+	return a;
+}
+
+inline Vec2i & operator+=(Vec2i & a, Vec2i b) {
+	a = a + b;
+	return a;
+}
+
+inline Vec2i & operator+=(Vec2i & a, int b) {
+	a = a + b;
+	return a;
+}
+
+inline Vec2i operator-(Vec2i a, int b) {
+	a.x -= b;
+	a.y -= b;
+	return a;
+}
+
+inline Vec2i operator-(Vec2i a, Vec2i b) {
+	a.x -= b.x;
+	a.y -= b.y;
+	return a;
+}
+
+inline Vec2i & operator-=(Vec2i & a, Vec2i b) {
+	a = a - b;
+	return a;
+}
+
+inline Vec2i & operator-=(Vec2i & a, int b) {
+	a = a - b;
+	return a;
+}
+
+inline Vec2i operator*(Vec2i a, int b) {
+	a.x *= b;
+	a.y *= b;
+	return a;
+}
+
 // //
 // //
 // //
@@ -1545,6 +1595,44 @@ inline Vec3i vec3i(int a, int b, int c) {
 
 inline Vec3i vec3i(Vec3 a) {
 	return vec3i(a.x,a.y,a.z);
+}
+
+inline Vec3i operator+(Vec3i a, float b) {
+	a.x += b;
+	a.y += b;
+	a.z += b;
+	return a;
+}
+
+inline Vec3i operator+(Vec3i a, Vec3i b) {
+	a.x += b.x;
+	a.y += b.y;
+	a.z += b.z;
+	return a;
+}
+
+inline Vec3i & operator+=(Vec3i & a, Vec3i b) {
+	a = a + b;
+	return a;
+}
+
+inline Vec3i operator-(Vec3i a, float b) {
+	a.x -= b;
+	a.y -= b;
+	a.z -= b;
+	return a;
+}
+
+inline Vec3i operator-(Vec3i a, Vec3i b) {
+	a.x -= b.x;
+	a.y -= b.y;
+	a.z -= b.z;
+	return a;
+}
+
+inline Vec3i & operator-=(Vec3i & a, Vec3i b) {
+	a = a - b;
+	return a;
 }
 
 //

@@ -2,7 +2,6 @@
 #define NOMINMAX
 #include <windows.h>
 #include <gl\gl.h>
-// #include <gl\glext.h>
 #include "glext.h"
 
 #include "rt_misc.h"
@@ -632,8 +631,92 @@ struct Texture {
 	int levels;
 };
 
+
+
+
+#include <stdio.h>
+
+static int SEED = 0;
+
+static int hash[] = {208,34,231,213,32,248,233,56,161,78,24,140,71,48,140,254,245,255,247,247,40,
+                     185,248,251,245,28,124,204,204,76,36,1,107,28,234,163,202,224,245,128,167,204,
+                     9,92,217,54,239,174,173,102,193,189,190,121,100,108,167,44,43,77,180,204,8,81,
+                     70,223,11,38,24,254,210,210,177,32,81,195,243,125,8,169,112,32,97,53,195,13,
+                     203,9,47,104,125,117,114,124,165,203,181,235,193,206,70,180,174,0,167,181,41,
+                     164,30,116,127,198,245,146,87,224,149,206,57,4,192,210,65,210,129,240,178,105,
+                     228,108,245,148,140,40,35,195,38,58,65,207,215,253,65,85,208,76,62,3,237,55,89,
+                     232,50,217,64,244,157,199,121,252,90,17,212,203,149,152,140,187,234,177,73,174,
+                     193,100,192,143,97,53,145,135,19,103,13,90,135,151,199,91,239,247,33,39,145,
+                     101,120,99,3,186,86,99,41,237,203,111,79,220,135,158,42,30,154,120,67,87,167,
+                     135,176,183,191,253,115,184,21,233,58,129,233,142,39,128,211,118,137,139,255,
+                     114,20,218,113,154,27,127,246,250,1,8,198,250,209,92,222,173,21,88,102,219};
+
+int noise2(int x, int y)
+{
+    int tmp = hash[(y + SEED) % 256];
+    return hash[(tmp + x) % 256];
+}
+
+float lin_inter(float x, float y, float s)
+{
+    return x + s * (y-x);
+}
+
+float smooth_inter(float x, float y, float s)
+{
+    return lin_inter(x, y, s * s * (3-2*s));
+}
+
+float noise2d(float x, float y)
+{
+    int x_int = x;
+    int y_int = y;
+    float x_frac = x - x_int;
+    float y_frac = y - y_int;
+    int s = noise2(x_int, y_int);
+    int t = noise2(x_int+1, y_int);
+    int u = noise2(x_int, y_int+1);
+    int v = noise2(x_int+1, y_int+1);
+    float low = smooth_inter(s, t, x_frac);
+    float high = smooth_inter(u, v, x_frac);
+    return smooth_inter(low, high, y_frac);
+}
+
+float perlin2d(float x, float y, float freq, int depth)
+{
+    float xa = x*freq;
+    float ya = y*freq;
+    float amp = 1.0;
+    float fin = 0;
+    float div = 0.0;
+
+    int i;
+    for(i=0; i<depth; i++)
+    {
+        div += 256 * amp;
+        fin += noise2d(xa, ya) * amp;
+        amp /= 2;
+        xa *= 2;
+        ya *= 2;
+    }
+
+    return fin/div;
+}
+
+
+
+
+#define VOXEL_X 64
+#define VOXEL_Y 64
+#define VOXEL_Z 254
+#define VOXEL_SIZE VOXEL_X*VOXEL_Y*VOXEL_Z
+#define VC_X 66
+#define VC_Y 66
+#define VC_Z 256
+uchar voxelCache[VC_X][VC_Y][VC_Z];
+
 struct VoxelMesh {
-	// bool generated;
+	bool generated;
 	bool upToDate;
 
 	Vec2i coord;
@@ -650,6 +733,199 @@ struct VoxelMesh {
 	int texBufferSize;
 	int texBufferCapacity;
 };
+
+void initVoxelMesh(VoxelMesh* m, Vec2i coord) {
+	*m = {};
+	m->coord = coord;
+
+	m->meshBufferCapacity = kiloBytes(300);
+	m->meshBuffer = (char*)getPMemory(m->meshBufferCapacity);
+
+	m->texBufferCapacity = m->meshBufferCapacity/4;
+	m->texBuffer = (char*)getPMemory(m->texBufferCapacity);
+
+	m->voxels = (uchar*)getPMemory(VOXEL_SIZE);
+}
+
+VoxelMesh* getVoxelMesh(VoxelMesh* vms, int* vmsSize, Vec2i coord) {
+	// find mesh at coordinate
+	int index = -1;
+	for(int i = 0; i < *vmsSize; i++) {
+		VoxelMesh* vm = vms + i;
+		if(vm->coord == coord) {
+			index = i;
+			break;
+		}
+	}
+
+	// initialise mesh with coordinate
+	if(index == -1) {
+		index = (*vmsSize)++;
+		VoxelMesh* m = vms + index;
+
+		initVoxelMesh(m, coord);
+	}
+
+	VoxelMesh* m = vms + index;
+	// generate mesh
+	if(!m->generated) {
+		zeroMemory(m->voxels, VOXEL_SIZE);
+
+		// generate voxel world
+		Vec3i min = vec3i(0,0,0);
+		Vec3i max = vec3i(VOXEL_X,VOXEL_Y,VOXEL_Z);
+
+		// int x, y;
+		// for(y=0; y<2; y++)
+		//     for(x=0; x<2; x++)
+		//         float temp = perlin2d(x, y, 0.1, 4);
+
+	    for(int y = min.y; y < max.y; y++) {
+	    	for(int x = min.x; x < max.x; x++) {
+	    		int gx = (coord.x*VOXEL_X)+x;
+	    		int gy = (coord.y*VOXEL_Y)+y;
+
+	    		float perlin = perlin2d(gx+4000, gy+4000, 0.015f, 4);
+
+	    		float height = perlin*50;
+	    		// float height = perlin*40;
+	    		// float height = perlin*200;
+	    		for(int z = 0; z < height; z++) {
+	    			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = randomInt(8,10);
+	    		}
+	    	}
+	    }
+
+		// for(int y = min.y; y < max.y; y++) {
+		// 	for(int x = min.x; x < max.x; x++) {
+		// 		int gx = (coord.x*VOXEL_X)+x;
+		// 		int gy = (coord.y*VOXEL_Y)+y;
+
+		// 		int h1 = mapRange(sin((float)gx/10), -1, 1, 2, VOXEL_Z/4);
+		// 		int h2 = mapRange(sin((float)gy/10), -1, 1, 2, VOXEL_Z/4);
+		// 		int height = h1*0.5f + h2*0.5f;
+
+		// 		for(int z = 0; z < height; z++) {
+		// 			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 10;
+		// 		}
+		// 	}
+		// }
+
+		for(int z = min.z; z < min.z+1; z++) {
+			for(int y = min.y; y < max.y; y++) {
+				for(int x = min.x; x < max.x; x++) {
+					m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 10;
+				}
+			}
+		}
+
+
+		// for(int z = min.z; z < max.z; z++) {
+		// 	for(int y = min.y; y < max.y; y++) {
+		// 		for(int x = min.x; x < max.x; x++) {
+		// 			if(randomInt(0, z) < 1)
+		// 				m->voxels[x*ms.y*ms.z + y*ms.z + z] = 9;
+		// 		}
+		// 	}
+		// }
+
+		// for(int z = min.z+1; z < min.z+3; z++) {
+		// 	for(int y = min.y; y < max.y; y++) {
+		// 		for(int x = min.x; x < max.x; x++) {
+		// 			if(randomInt(0,10) < 2) m->voxels[x*ms.y*ms.z + y*ms.z + z] = 1;
+		// 			if(randomInt(0,100) < 1) m->voxels[x*ms.y*ms.z + y*ms.z + z] = 8;
+		// 		}
+		// 	}
+		// }
+
+		m->generated = true;
+	}
+
+	return m;
+}
+
+void makeMesh(VoxelMesh* m, VoxelMesh* vms, int* vmsSize) {
+
+	zeroMemory(voxelCache, VC_X*VC_Y*VC_Z);
+
+	// gather voxel data in radius and copy to cache
+	Vec2i coord = m->coord;
+	for(int y = -1; y < 2; y++) {
+		for(int x = -1; x < 2; x++) {
+			Vec2i c = coord + vec2i(x,y);
+			VoxelMesh* lm = getVoxelMesh(vms, vmsSize, c);
+
+			int w = x == 0 ? VOXEL_X : 1;
+			int h = y == 0 ? VOXEL_Y : 1;
+
+			Vec2i mPos;
+			if(x == -1) 	mPos.x = VOXEL_X-1;
+			if(x ==  0) 	mPos.x = 0;
+			if(x ==  1) 	mPos.x = 0;
+			if(y == -1) 	mPos.y = VOXEL_Y-1;
+			if(y ==  0) 	mPos.y = 0;
+			if(y ==  1) 	mPos.y = 0;
+
+			Vec2i lPos;
+			if(x == -1) 	lPos.x = 0;
+			if(x ==  0) 	lPos.x = 1;
+			if(x ==  1) 	lPos.x = VOXEL_X+1;
+			if(y == -1) 	lPos.y = 0;
+			if(y ==  0) 	lPos.y = 1;
+			if(y ==  1) 	lPos.y = VOXEL_Y+1;
+
+			for(int z = 0; z < VOXEL_Z; z++) {
+				for(int y = 0; y < h; y++) {
+					for(int x = 0; x < w; x++) {
+						voxelCache[x+lPos.x][y+lPos.y][z+1] = lm->voxels[(x+mPos.x)*VOXEL_Y*VOXEL_Z + (y+mPos.y)*VOXEL_Z + z];
+					}
+				}
+			}
+
+			// make floor solid
+			for(int y = 0; y < VC_Y; y++) {
+				for(int x = 0; x < VC_X; x++) {
+					voxelCache[x][y][0] = 1;
+				}
+			}
+
+		}
+	}
+
+	stbvox_mesh_maker mm;
+	stbvox_init_mesh_maker(&mm);
+	stbvox_input_description* inputDesc = stbvox_get_input_description(&mm);
+	*inputDesc = {};
+
+	stbvox_set_buffer(&mm, 0, 0, m->meshBuffer, m->meshBufferCapacity);
+
+	if(STBVOX_CONFIG_MODE == 1) {
+		stbvox_set_buffer(&mm, 0, 1, m->texBuffer, m->texBufferCapacity);
+	}
+
+	int count = stbvox_get_buffer_count(&mm);
+	int perQuad = stbvox_get_buffer_size_per_quad(&mm, 0);
+
+	unsigned char tex2[256];
+	for(int i = 0; i < arrayCount(tex2)-1; i++) tex2[1+i] = i;
+	inputDesc->block_tex2 = (unsigned char*)tex2;
+
+	stbvox_set_input_stride(&mm, VC_Y*VC_Z,VC_Z);
+	stbvox_set_input_range(&mm, 0,0,0, VOXEL_X, VOXEL_Y, VOXEL_Z);
+	inputDesc->blocktype = &voxelCache[1][1][1];
+
+	stbvox_set_default_mesh(&mm, 0);
+	int success = stbvox_make_mesh(&mm);
+
+	stbvox_set_mesh_coordinates(&mm, coord.x*VOXEL_X, coord.y*VOXEL_Y,0);
+
+	stbvox_get_transform(&mm, m->transform);
+	float bounds [2][3]; stbvox_get_bounds(&mm, bounds);
+	m->quadCount = stbvox_get_quad_count(&mm, 0);
+
+	int bs = stbvox_get_buffer_size_per_quad(&mm, 0);
+	int ts = stbvox_get_buffer_size_per_quad(&mm, 1);
+}
 
 struct AppData {
 	SystemData systemData;
@@ -684,7 +960,6 @@ struct AppData {
 	GLuint voxelSamplers[3];
 	GLuint voxelTextures[3];
 
-	Vec3i ms;
 	unsigned char* voxelBlocks;
 
 	GLuint voxelFaceTextures;
@@ -786,7 +1061,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		ad->camera = vec3(0,0,10);
 
-		ad->camPos = vec3(-10,-10,5);
+		// ad->camPos = vec3(-10,-10,5);
+		ad->camPos = vec3(30,30,50);
 		ad->camLook = normVec3(vec3(-1,-1,0));
 		// ad->camLook = vec3(0,0,1);
 		ad->camRot = vec2(0,0);
@@ -921,7 +1197,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			ad->texBufferSize = megaBytes(1);
 			ad->texBuffer = (char*)getPMemory(ad->texBufferSize);
-			bufferSize = megaBytes(10);
+			bufferSize = megaBytes(20);
 
 			glCreateBuffers(1, &ad->texBufferId);
 			glNamedBufferData(ad->texBufferId, bufferSize, ad->texBuffer, GL_STREAM_DRAW);
@@ -939,11 +1215,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->samplerUnits[1] = ad->voxelSamplers[1];
 		ad->samplerUnits[2] = ad->voxelSamplers[2];
 
-		// ad->ms = vec3i(34,128,34);
-		ad->ms = vec3i(12,12,12);
-		int vBlocksSize = ad->ms.z*ad->ms.y*ad->ms.x;
-		ad->voxelBlocks = (unsigned char*)getPMemory(vBlocksSize);
-		zeroMemory(ad->voxelBlocks, vBlocksSize);
+
 
 
 		int vMeshSize = sizeof(VoxelMesh)*1000;
@@ -1046,15 +1318,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-	// glEnable(GL_CULL_FACE);
-	glDisable(GL_CULL_FACE);
+	glEnable(GL_CULL_FACE);
+	// glDisable(GL_CULL_FACE);
 	// glDisable(GL_LIGHTING);
 	glEnable(GL_DEPTH_TEST);
 	glDepthFunc(GL_LESS);
 	glClearDepth(1);
 	glDepthMask(GL_TRUE);
 	glDisable(GL_SCISSOR_TEST);
-	glClearColor(0.6f,0.7f,0.9f,0.0f);
+	// glClearColor(0.6f,0.7f,0.9f,0.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -1116,115 +1388,28 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-
-
-	Vec3i ms = ad->ms;
-	Vec3i msr = vec3i(ms.x-2, ms.y-2, ms.z-2);
 	Vec3i pos = vec3i(ad->camPos);
-	if(pos.x < 0) pos.x -= msr.x;
-	if(pos.y < 0) pos.y -= msr.y;
-	Vec2i playerMeshCoord = vec2i(pos.x/msr.x, pos.y/msr.y);
+	if(pos.x < 0) pos.x -= VOXEL_X;
+	if(pos.y < 0) pos.y -= VOXEL_Y;
+	Vec2i playerMeshCoord = vec2i(pos.x/VOXEL_X, pos.y/VOXEL_Y);
 
-	int radius = 10;
+	int radius = 3;
 	Vec2i min = vec2i(playerMeshCoord.x-radius, playerMeshCoord.y-radius);
 	Vec2i max = vec2i(playerMeshCoord.x+radius, playerMeshCoord.y+radius);
 
 	VoxelMesh* vms = ad->vMeshs;
-	int vmsSize = ad->vMeshsSize;
+	int* vmsSize = &ad->vMeshsSize;
 	for(int x = min.x; x < max.x+1; x++) {
 		for(int y = min.y; y < max.y+1; y++) {
 			Vec2i coord = vec2i(x,y);
 
-			// find mesh at coordinate
-			int index = -1;
-			for(int i = 0; i < vmsSize; i++) {
-				VoxelMesh* vm = vms + i;
-				if(vm->coord == coord) {
-					index = i;
-					break;
-				}
-			}
-
-			// generate the mesh if not there yet
-			if(index == -1) {
-				index = ad->vMeshsSize++;
-				VoxelMesh* m = vms + index;
-				*m = {};
-				m->coord = coord;
-				m->voxels = (uchar*)getPMemory(ms.x*ms.y*ms.z);
-				zeroMemory(m->voxels, ms.x*ms.y*ms.z);
-
-				// generate voxel world
-				Vec2i min = vec2i(1,1);
-				Vec2i max = vec2i(ms.x,ms.y);
-				for(int y = min.y; y < max.y; y++) {
-					for(int x = min.x; x < max.x; x++) {
-						m->voxels[x*ms.y*ms.x + y*ms.x + 2] = 10;
-					}
-				}
-
-				for(int z = 3; z < 5; z++) {
-					for(int y = min.y; y < max.y; y++) {
-						for(int x = min.x; x < max.x; x++) {
-							if(randomInt(0,10) < 2) m->voxels[x*ms.y*ms.x + y*ms.x + z] = 1;
-							if(randomInt(0,100) < 1) m->voxels[x*ms.y*ms.x + y*ms.x + z] = 8;
-						}
-					}
-				}
-				
-				m->meshBufferCapacity = kiloBytes(200);
-				m->meshBuffer = (char*)getPMemory(m->meshBufferCapacity);
-
-				m->texBufferCapacity = m->meshBufferCapacity/4;
-				m->texBuffer = (char*)getPMemory(m->texBufferCapacity);
-			}
-
-			// make the mesh if out of date
-			VoxelMesh* m = vms + index;
+			VoxelMesh* m = getVoxelMesh(vms, vmsSize, coord);
 			if(!m->upToDate) {
-				stbvox_mesh_maker mm;
-				stbvox_init_mesh_maker(&mm);
-				stbvox_input_description* inputDesc = stbvox_get_input_description(&mm);
-				*inputDesc = {};
-
-				stbvox_set_buffer(&mm, 0, 0, m->meshBuffer, m->meshBufferCapacity);
-
-				if(STBVOX_CONFIG_MODE == 1) {
-					stbvox_set_buffer(&mm, 0, 1, m->texBuffer, m->texBufferCapacity);
-				}
-
-				int count = stbvox_get_buffer_count(&mm);
-				int perQuad = stbvox_get_buffer_size_per_quad(&mm, 0);
-
-				unsigned char tex2[256];
-				for(int i = 0; i < arrayCount(tex2)-1; i++) tex2[1+i] = i;
-				inputDesc->block_tex2 = (unsigned char*)tex2;
-
-				stbvox_set_input_stride(&mm, ms.x*ms.y,ms.x);
-				// stbvox_set_input_stride(&mm, ms.x,ms.x*ms.y);
-				stbvox_set_input_range(&mm, 1,1,1, ms.x-1,ms.y-1,ms.z-1);
-				inputDesc->blocktype = m->voxels + 1*ms.y*ms.x + 1*ms.x + 1;
-
-				stbvox_set_default_mesh(&mm, 0);
-				int success = stbvox_make_mesh(&mm);
-
-				// stbvox_set_mesh_coordinates(&mm, 0,0,0);
-				stbvox_set_mesh_coordinates(&mm, coord.x*msr.x,coord.y*msr.y,0);
-
-				stbvox_get_transform(&mm, m->transform);
-				float bounds [2][3]; stbvox_get_bounds(&mm, bounds);
-				m->quadCount = stbvox_get_quad_count(&mm, 0);
-
-				int bs = stbvox_get_buffer_size_per_quad(&mm, 0);
-				int ts = stbvox_get_buffer_size_per_quad(&mm, 1);
-
-
+				makeMesh(m, vms, vmsSize);
 				m->upToDate = true;
 			}
 
 			// draw mesh
-			m = vms + index;
-
 			GLuint transformUniform1 = glGetUniformLocation(ad->voxelVertex, "transform");
 			glProgramUniform3fv(ad->voxelVertex, transformUniform1, 3, m->transform[0]);
 			GLuint transformUniform2 = glGetUniformLocation(ad->voxelFragment, "transform");
