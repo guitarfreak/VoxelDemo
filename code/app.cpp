@@ -19,7 +19,9 @@
 #include "stb_truetype.h"
 
 #define STB_VOXEL_RENDER_IMPLEMENTATION
-#define STBVOX_CONFIG_LIGHTING_SIMPLE
+// #define STBVOX_CONFIG_LIGHTING_SIMPLE
+#define STBVOX_CONFIG_FOG_SMOOTHSTEP
+
 // #define STBVOX_CONFIG_MODE 0
 #define STBVOX_CONFIG_MODE 1
 #include "stb_voxel_render.h"
@@ -208,41 +210,41 @@ void loadFunctions() {
 const char* vertexShaderCube = GLSL (
 	const vec3 cube[] = vec3[] (
 	    vec3(-0.5f,-0.5f,-0.5f), 
-	    vec3(-0.5f,-0.5f, 0.5f),
-	    vec3(-0.5f, 0.5f, 0.5f),
-	    vec3(0.5f, 0.5f,-0.5f),
-	    vec3(-0.5f,-0.5f,-0.5f),
+	    vec3( 0.5f,-0.5f,-0.5f), 
 	    vec3(-0.5f, 0.5f,-0.5f), 
-	    vec3(0.5f,-0.5f, 0.5f),
-	    vec3(-0.5f,-0.5f,-0.5f),
-	    vec3(0.5f,-0.5f,-0.5f),
-	    vec3(0.5f, 0.5f,-0.5f),
-	    vec3(0.5f,-0.5f,-0.5f),
-	    vec3(-0.5f,-0.5f,-0.5f),
-	    vec3(-0.5f,-0.5f,-0.5f),
-	    vec3(-0.5f, 0.5f, 0.5f),
+	    vec3( 0.5f,-0.5f,-0.5f), 
+	    vec3( 0.5f, 0.5f,-0.5f),
 	    vec3(-0.5f, 0.5f,-0.5f),
-	    vec3(0.5f,-0.5f, 0.5f),
+	    vec3(-0.5f,-0.5f, 0.5f), 
+	    vec3(-0.5f, 0.5f, 0.5f), 
+	    vec3( 0.5f,-0.5f, 0.5f), 
+	    vec3( 0.5f,-0.5f, 0.5f), 
+	    vec3(-0.5f, 0.5f, 0.5f),
+	    vec3( 0.5f, 0.5f, 0.5f),
+	    vec3(-0.5f, 0.5f,-0.5f), 
+	    vec3( 0.5f, 0.5f,-0.5f), 
+	    vec3(-0.5f, 0.5f, 0.5f), 
+	    vec3( 0.5f, 0.5f,-0.5f), 
+	    vec3( 0.5f, 0.5f, 0.5f),
+	    vec3(-0.5f, 0.5f, 0.5f),
+	    vec3(-0.5f,-0.5f,-0.5f),
+	    vec3(-0.5f,-0.5f, 0.5f), 
+	    vec3( 0.5f,-0.5f,-0.5f), 
+	    vec3( 0.5f,-0.5f,-0.5f), 
 	    vec3(-0.5f,-0.5f, 0.5f),
-	    vec3(-0.5f,-0.5f,-0.5f),
+	    vec3( 0.5f,-0.5f, 0.5f),
+	    vec3(-0.5f,-0.5f,-0.5f), 
+	    vec3(-0.5f, 0.5f,-0.5f), 
+	    vec3(-0.5f,-0.5f, 0.5f), 
+	    vec3(-0.5f, 0.5f,-0.5f), 
 	    vec3(-0.5f, 0.5f, 0.5f),
 	    vec3(-0.5f,-0.5f, 0.5f),
-	    vec3(0.5f,-0.5f, 0.5f),
-	    vec3(0.5f, 0.5f, 0.5f),
-	    vec3(0.5f,-0.5f,-0.5f),
-	    vec3(0.5f, 0.5f,-0.5f),
-	    vec3(0.5f,-0.5f,-0.5f),
-	    vec3(0.5f, 0.5f, 0.5f),
-	    vec3(0.5f,-0.5f, 0.5f),
-	    vec3(0.5f, 0.5f, 0.5f),
-	    vec3(0.5f, 0.5f,-0.5f),
-	    vec3(-0.5f, 0.5f,-0.5f),
-	    vec3(0.5f, 0.5f, 0.5f),
-	    vec3(-0.5f, 0.5f,-0.5f),
-	    vec3(-0.5f, 0.5f, 0.5f),
-	    vec3(0.5f, 0.5f, 0.5f),
-	    vec3(-0.5f, 0.5f, 0.5f),
-	    vec3(0.5f,-0.5f, 0.5f)	
+	    vec3( 0.5f,-0.5f,-0.5f), 
+	    vec3( 0.5f,-0.5f, 0.5f), 
+	    vec3( 0.5f, 0.5f,-0.5f), 
+	    vec3( 0.5f, 0.5f,-0.5f), 
+	    vec3( 0.5f,-0.5f, 0.5f),
+	    vec3( 0.5f, 0.5f, 0.5f)
 	);
 
 	out gl_PerVertex { vec4 gl_Position; };
@@ -251,13 +253,17 @@ const char* vertexShaderCube = GLSL (
 	uniform mat4x4 model;
 	uniform mat4x4 view;
 	uniform mat4x4 proj;
+	// uniform mat4x4 projViewModel;
 
-	uniform mat4x4 projViewModel;
+	uniform vec4 setColor;
 
 	void main() {
 		float c = gl_VertexID;
 		// Color = vec4(1/(c/36),1/(c/7),1/(c/2),1);
-		Color = vec4(c/36,c/36,c/36,1);
+		// Color = vec4(c/36,c/36,c/36,1);
+		// setColor = vec4(1,1,1,1);
+		// vec4 co = vec4(1,1,1,1);
+		Color = setColor;
 	
 		vec4 pos = vec4(cube[gl_VertexID], 1);
 	
@@ -304,15 +310,15 @@ const char* fragmentShaderCube = GLSL (
 const char* vertexShaderQuad = GLSL (
 	const vec2 quad[] = vec2[] (
 	  vec2( -0.5f, -0.5f ),
-	  vec2(  0.5f, -0.5f ),
 	  vec2( -0.5f,  0.5f ),
+	  vec2(  0.5f, -0.5f ),
 	  vec2(  0.5f,  0.5f )
 	);
 
 	const ivec2 quad_uv[] = ivec2[] (
 	  ivec2(  0.0,  0.0 ),
-	  ivec2(  1.0,  0.0 ),
 	  ivec2(  0.0,  1.0 ),
+	  ivec2(  1.0,  0.0 ),
 	  ivec2(  1.0,  1.0 )
 	);
 
@@ -348,13 +354,6 @@ const char* fragmentShaderQuad = GLSL (
 
 	void main() {
 		color = texture(s, uv) * Color;
-
-
-         // "   vec4 tex2 = texture(tex_array[1], vec3(texcoord_2, float(tex2_id)));\n"
-
-		// color = texture(s[0], vec3(uv, 2)) * Color;
-		// color = texture(s[0], uv) * Color;
-		// color = texture(s, uv) * Color;
 	}
 );
 
@@ -373,18 +372,19 @@ struct PipelineIds {
 	uint cubeVertexModel;
 	uint cubeVertexView;
 	uint cubeVertexProj;
+	uint cubeVertexColor;
 
 	uint programVoxel;
 	uint voxelVertex;
 	uint voxelFragment;
 };
 
-void drawRect(PipelineIds ids, Rect r, Rect uv, Vec4 color, int texture) {
+void drawRect(PipelineIds* ids, Rect r, Rect uv, Vec4 color, int texture) {
 	uint uniformLocation;
 	Rect cd = rectGetCenDim(r);
-	glProgramUniform4f(1, ids.quadVertexMod, cd.min.x, cd.min.y, cd.max.x, cd.max.y);
-	glProgramUniform4f(1, ids.quadVertexUV, uv.min.x, uv.max.x, uv.max.y, uv.min.y);
-	glProgramUniform4f(1, ids.quadVertexColor, color.r, color.g, color.b, color.a);
+	glProgramUniform4f(ids->quadVertex, ids->quadVertexMod, cd.min.x, cd.min.y, cd.max.x, cd.max.y);
+	glProgramUniform4f(ids->quadVertex, ids->quadVertexUV, uv.min.x, uv.max.x, uv.max.y, uv.min.y);
+	glProgramUniform4f(ids->quadVertex, ids->quadVertexColor, color.r, color.g, color.b, color.a);
 	glBindTexture(GL_TEXTURE_2D, texture);
 	glDrawArraysInstancedBaseInstance(GL_TRIANGLE_STRIP, 0, 4, 1, 0);
 }
@@ -479,7 +479,7 @@ void drawText(PipelineIds* ids, Vec2 pos, char* text, Vec4 color, Font* font, in
 
 		stbtt_aligned_quad q;
 		stbtt_GetBakedQuad(font->cData, font->size.w, font->size.h, t-font->glyphStart, &pos.x, &pos.y, &q, 1);
-		drawRect(*ids, rect(q.x0, q.y0, q.x1, q.y1), rect(q.s0,q.t0,q.s1,q.t1), color, 3);
+		drawRect(ids, rect(q.x0, q.y0, q.x1, q.y1), rect(q.s0,q.t0,q.s1,q.t1), color, 3);
 	}
 }
 
@@ -528,11 +528,11 @@ void drawTextA(PipelineIds* ids, Vec2 pos, Vec4 color, Font* font, int vAlign, i
 
 		stbtt_aligned_quad q;
 		stbtt_GetBakedQuad(font->cData, font->size.w, font->size.h, t-font->glyphStart, &pos.x, &pos.y, &q, 1);
-		drawRect(*ids, rect(q.x0, q.y0, q.x1, q.y1), rect(q.s0,q.t0,q.s1,q.t1), color, 3);
+		drawRect(ids, rect(q.x0, q.y0, q.x1, q.y1), rect(q.s0,q.t0,q.s1,q.t1), color, 3);
 	}
 }
 
-void drawCube(PipelineIds* ids, Vec3 trans, Vec3 scale, float degrees, Vec3 rot) {
+void drawCube(PipelineIds* ids, Vec3 trans, Vec3 scale, Vec4 color, float degrees, Vec3 rot) {
 	// Quat xRot = quat(dt, normVec3(vec3(1,0.7f,0.5f)));
 	// Quat yRot = quat(0, vec3(0,1,0));
 	// Quat zRot = quat(0, vec3(0,0,1));
@@ -544,6 +544,8 @@ void drawCube(PipelineIds* ids, Vec3 trans, Vec3 scale, float degrees, Vec3 rot)
 	Mat4 model = tm*rm*sm;
 
 	glProgramUniformMatrix4fv(ids->cubeVertex, ids->cubeVertexModel, 1, 1, model.e);
+	glProgramUniform4f(ids->cubeVertex, ids->cubeVertexColor, color.r, color.g, color.b, color.a);
+
 	glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 36, 1, 0);
 }
 
@@ -559,7 +561,7 @@ uint createSampler(int wrapS, int wrapT, int magF, int minF) {
 	return result;
 }
 
-void setupVoxelUniforms(uint vertexShader, uint fragmentShader, Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit, Mat4 ambient) {
+void setupVoxelUniforms(uint vertexShader, uint fragmentShader, Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit, Mat4 ambient, Mat4 view, Mat4 proj) {
 
 	int texUnit[2] = {texUnit1, texUnit2};
 
@@ -619,8 +621,10 @@ void setupVoxelUniforms(uint vertexShader, uint fragmentShader, Vec4 camera, uin
 		}
 	}
 
-
-
+	// Mat4 finalMat = proj*view*model;
+	Mat4 finalMat = proj*view;
+	GLint modelViewUni = glGetUniformLocation(vertexShader, "model_view");
+	glProgramUniformMatrix4fv(vertexShader, modelViewUni, 1, 1, finalMat.e);
 }
 
 struct Texture {
@@ -705,6 +709,9 @@ float perlin2d(float x, float y, float freq, int depth)
 
 
 
+// #define VIEW_DISTANCE 1024
+// #define VIEW_DISTANCE 512
+#define VIEW_DISTANCE 256
 
 #define VOXEL_X 64
 #define VOXEL_Y 64
@@ -714,6 +721,7 @@ float perlin2d(float x, float y, float freq, int depth)
 #define VC_Y 66
 #define VC_Z 256
 uchar voxelCache[VC_X][VC_Y][VC_Z];
+uchar voxelLightingCache[VC_X][VC_Y][VC_Z];
 
 struct VoxelMesh {
 	bool generated;
@@ -721,6 +729,7 @@ struct VoxelMesh {
 
 	Vec2i coord;
 	uchar* voxels;
+	uchar* lighting;
 
 	float transform[3][3];
 	int quadCount;
@@ -728,23 +737,27 @@ struct VoxelMesh {
 	char* meshBuffer;
 	int meshBufferSize;
 	int meshBufferCapacity;
+	uint bufferId;
 
 	char* texBuffer;
 	int texBufferSize;
 	int texBufferCapacity;
+	uint textureId;
+	uint texBufferId;
 };
 
 void initVoxelMesh(VoxelMesh* m, Vec2i coord) {
 	*m = {};
 	m->coord = coord;
 
-	m->meshBufferCapacity = kiloBytes(300);
+	m->meshBufferCapacity = kiloBytes(150);
 	m->meshBuffer = (char*)getPMemory(m->meshBufferCapacity);
 
 	m->texBufferCapacity = m->meshBufferCapacity/4;
 	m->texBuffer = (char*)getPMemory(m->texBufferCapacity);
 
 	m->voxels = (uchar*)getPMemory(VOXEL_SIZE);
+	m->lighting = (uchar*)getPMemory(VOXEL_SIZE);
 }
 
 VoxelMesh* getVoxelMesh(VoxelMesh* vms, int* vmsSize, Vec2i coord) {
@@ -769,16 +782,22 @@ VoxelMesh* getVoxelMesh(VoxelMesh* vms, int* vmsSize, Vec2i coord) {
 	VoxelMesh* m = vms + index;
 	// generate mesh
 	if(!m->generated) {
+		// for(int i = 0; i < VOXEL_SIZE; i++) m->voxels[i] = 0;
+		// for(int i = 0; i < VOXEL_SIZE; i++) m->lighting[i] = 0;
 		zeroMemory(m->voxels, VOXEL_SIZE);
+		zeroMemory(m->lighting, VOXEL_SIZE);
 
 		// generate voxel world
 		Vec3i min = vec3i(0,0,0);
 		Vec3i max = vec3i(VOXEL_X,VOXEL_Y,VOXEL_Z);
 
-		// int x, y;
-		// for(y=0; y<2; y++)
-		//     for(x=0; x<2; x++)
-		//         float temp = perlin2d(x, y, 0.1, 4);
+		// for(int z = min.z; z < min.z+1; z++) {
+		// 	for(int y = min.y; y < max.y; y++) {
+		// 		for(int x = min.x; x < max.x; x++) {
+		// 			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 10;
+		// 		}
+		// 	}
+		// }
 
 	    for(int y = min.y; y < max.y; y++) {
 	    	for(int x = min.x; x < max.x; x++) {
@@ -792,6 +811,16 @@ VoxelMesh* getVoxelMesh(VoxelMesh* vms, int* vmsSize, Vec2i coord) {
 	    		// float height = perlin*200;
 	    		for(int z = 0; z < height; z++) {
 	    			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = randomInt(8,10);
+	    		}
+	    	}
+	    }
+
+	    // lighting
+		for(int x = min.x; x < max.x; x++) {
+	    	for(int y = min.y; y < max.y; y++) {
+	    		for(int z = min.z; z < max.z; z++) {
+	    			char blockType = m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z];
+	    			m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = blockType == 0 ? 255 : 0;
 	    		}
 	    	}
 	    }
@@ -810,15 +839,6 @@ VoxelMesh* getVoxelMesh(VoxelMesh* vms, int* vmsSize, Vec2i coord) {
 		// 		}
 		// 	}
 		// }
-
-		for(int z = min.z; z < min.z+1; z++) {
-			for(int y = min.y; y < max.y; y++) {
-				for(int x = min.x; x < max.x; x++) {
-					m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 10;
-				}
-			}
-		}
-
 
 		// for(int z = min.z; z < max.z; z++) {
 		// 	for(int y = min.y; y < max.y; y++) {
@@ -847,6 +867,7 @@ VoxelMesh* getVoxelMesh(VoxelMesh* vms, int* vmsSize, Vec2i coord) {
 void makeMesh(VoxelMesh* m, VoxelMesh* vms, int* vmsSize) {
 
 	zeroMemory(voxelCache, VC_X*VC_Y*VC_Z);
+	zeroMemory(voxelLightingCache, VC_X*VC_Y*VC_Z);
 
 	// gather voxel data in radius and copy to cache
 	Vec2i coord = m->coord;
@@ -859,25 +880,22 @@ void makeMesh(VoxelMesh* m, VoxelMesh* vms, int* vmsSize) {
 			int h = y == 0 ? VOXEL_Y : 1;
 
 			Vec2i mPos;
-			if(x == -1) 	mPos.x = VOXEL_X-1;
-			if(x ==  0) 	mPos.x = 0;
-			if(x ==  1) 	mPos.x = 0;
-			if(y == -1) 	mPos.y = VOXEL_Y-1;
-			if(y ==  0) 	mPos.y = 0;
-			if(y ==  1) 	mPos.y = 0;
+			mPos.x = x == -1 ? VOXEL_X-1 : 0;
+			mPos.y = y == -1 ? VOXEL_Y-1 : 0;
 
 			Vec2i lPos;
-			if(x == -1) 	lPos.x = 0;
-			if(x ==  0) 	lPos.x = 1;
-			if(x ==  1) 	lPos.x = VOXEL_X+1;
-			if(y == -1) 	lPos.y = 0;
-			if(y ==  0) 	lPos.y = 1;
-			if(y ==  1) 	lPos.y = VOXEL_Y+1;
+			if(x == -1) lPos.x = 0;
+			else if(x ==  0) lPos.x = 1;
+			else if(x ==  1) lPos.x = VOXEL_X+1;
+			if(y == -1) lPos.y = 0;
+			else if(y ==  0) lPos.y = 1;
+			else if(y ==  1) lPos.y = VOXEL_Y+1;
 
 			for(int z = 0; z < VOXEL_Z; z++) {
 				for(int y = 0; y < h; y++) {
 					for(int x = 0; x < w; x++) {
 						voxelCache[x+lPos.x][y+lPos.y][z+1] = lm->voxels[(x+mPos.x)*VOXEL_Y*VOXEL_Z + (y+mPos.y)*VOXEL_Z + z];
+						voxelLightingCache[x+lPos.x][y+lPos.y][z+1] = lm->lighting[(x+mPos.x)*VOXEL_Y*VOXEL_Z + (y+mPos.y)*VOXEL_Z + z];
 					}
 				}
 			}
@@ -892,6 +910,7 @@ void makeMesh(VoxelMesh* m, VoxelMesh* vms, int* vmsSize) {
 		}
 	}
 
+
 	stbvox_mesh_maker mm;
 	stbvox_init_mesh_maker(&mm);
 	stbvox_input_description* inputDesc = stbvox_get_input_description(&mm);
@@ -904,15 +923,19 @@ void makeMesh(VoxelMesh* m, VoxelMesh* vms, int* vmsSize) {
 	}
 
 	int count = stbvox_get_buffer_count(&mm);
-	int perQuad = stbvox_get_buffer_size_per_quad(&mm, 0);
 
-	unsigned char tex2[256];
+	// unsigned char tex2[256];
+	// for(int i = 0; i < arrayCount(tex2)-1; i++) tex2[1+i] = i;
+	unsigned char tex2[11];
 	for(int i = 0; i < arrayCount(tex2)-1; i++) tex2[1+i] = i;
+
 	inputDesc->block_tex2 = (unsigned char*)tex2;
 
 	stbvox_set_input_stride(&mm, VC_Y*VC_Z,VC_Z);
 	stbvox_set_input_range(&mm, 0,0,0, VOXEL_X, VOXEL_Y, VOXEL_Z);
+
 	inputDesc->blocktype = &voxelCache[1][1][1];
+	inputDesc->lighting = &voxelLightingCache[1][1][1];
 
 	stbvox_set_default_mesh(&mm, 0);
 	int success = stbvox_make_mesh(&mm);
@@ -923,8 +946,24 @@ void makeMesh(VoxelMesh* m, VoxelMesh* vms, int* vmsSize) {
 	float bounds [2][3]; stbvox_get_bounds(&mm, bounds);
 	m->quadCount = stbvox_get_quad_count(&mm, 0);
 
-	int bs = stbvox_get_buffer_size_per_quad(&mm, 0);
-	int ts = stbvox_get_buffer_size_per_quad(&mm, 1);
+	int bufferSizePerQuad = stbvox_get_buffer_size_per_quad(&mm, 0);
+	int textureBufferSizePerQuad = stbvox_get_buffer_size_per_quad(&mm, 1);
+
+
+
+
+	glCreateBuffers(1, &m->bufferId);
+	glNamedBufferData(m->bufferId, bufferSizePerQuad*m->quadCount, m->meshBuffer, GL_STATIC_DRAW);
+	glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
+
+	if(STBVOX_CONFIG_MODE == 1) {
+		glCreateBuffers(1, &m->texBufferId);
+		glNamedBufferData(m->texBufferId, textureBufferSizePerQuad*m->quadCount, m->texBuffer, GL_STATIC_DRAW);
+
+		glCreateTextures(GL_TEXTURE_BUFFER, 1, &m->textureId);
+
+		glTextureBuffer(m->textureId, GL_RGBA8UI, m->texBufferId);
+	}
 }
 
 struct AppData {
@@ -1056,6 +1095,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ids->cubeVertexModel = glGetUniformLocation(ids->cubeVertex, "model");
 		ids->cubeVertexView = glGetUniformLocation(ids->cubeVertex, "view");
 		ids->cubeVertexProj = glGetUniformLocation(ids->cubeVertex, "proj");
+		ids->cubeVertexColor = glGetUniformLocation(ids->cubeVertex, "setColor");
 
 		ad->programs[1] = ids->programCube;
 
@@ -1171,58 +1211,58 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-		ad->meshBufferSize = megaBytes(1);
-		ad->meshBuffer = (char*)getPMemory(ad->meshBufferSize);
+		// ad->meshBufferSize = megaBytes(1);
+		// ad->meshBuffer = (char*)getPMemory(ad->meshBufferSize);
 
-		glCreateBuffers(1, &ad->bufferId);
-		// glNamedBufferData(ad->bufferId, ad->quadCount*4*sizeof(uint)*2, ad->meshBuffer, GL_STATIC_DRAW_ARB);
-		int bufferSize = megaBytes(10);
-		glNamedBufferData(ad->bufferId, bufferSize, ad->meshBuffer, GL_STREAM_DRAW);
-		glBindBuffer(GL_ARRAY_BUFFER, ad->bufferId);
-
-
-		if(STBVOX_CONFIG_MODE == 0) {
-			// interleaved buffer - 2 uints in a row -> 8 bytes stride
-			int vaLoc = glGetAttribLocation(ad->voxelVertex, "attr_vertex");
-			glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 8, (void*)0);
-			glEnableVertexAttribArray(vaLoc);
-			int fLoc = glGetAttribLocation(ad->voxelVertex, "attr_face");
-			glVertexAttribIPointer(fLoc, 4, GL_UNSIGNED_BYTE, 8, (void*)4);
-			glEnableVertexAttribArray(fLoc);
-
-		} else {
-			int vaLoc = glGetAttribLocation(ad->voxelVertex, "attr_vertex");
-			glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 4, (void*)0);
-			glEnableVertexAttribArray(vaLoc);
-
-			ad->texBufferSize = megaBytes(1);
-			ad->texBuffer = (char*)getPMemory(ad->texBufferSize);
-			bufferSize = megaBytes(20);
-
-			glCreateBuffers(1, &ad->texBufferId);
-			glNamedBufferData(ad->texBufferId, bufferSize, ad->texBuffer, GL_STREAM_DRAW);
-
-			glCreateTextures(GL_TEXTURE_BUFFER, 1, &ad->voxelTextures[2]);
-
-			glTextureBuffer(ad->voxelTextures[2], GL_RGBA8UI, ad->texBufferId);
-		}
-
-		ad->textureUnits[0] = ad->voxelTextures[0];
-		ad->textureUnits[1] = ad->voxelTextures[1];
-		ad->textureUnits[2] = ad->voxelTextures[2];
-
-		ad->samplerUnits[0] = ad->voxelSamplers[0];
-		ad->samplerUnits[1] = ad->voxelSamplers[1];
-		ad->samplerUnits[2] = ad->voxelSamplers[2];
+		// glCreateBuffers(1, &ad->bufferId);
+		// // glNamedBufferData(ad->bufferId, ad->quadCount*4*sizeof(uint)*2, ad->meshBuffer, GL_STATIC_DRAW_ARB);
+		// int bufferSize = megaBytes(10);
+		// glNamedBufferData(ad->bufferId, bufferSize, ad->meshBuffer, GL_STREAM_DRAW);
+		// glBindBuffer(GL_ARRAY_BUFFER, ad->bufferId);
 
 
+		// if(STBVOX_CONFIG_MODE == 0) {
+		// 	// interleaved buffer - 2 uints in a row -> 8 bytes stride
+		// 	int vaLoc = glGetAttribLocation(ad->voxelVertex, "attr_vertex");
+		// 	glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 8, (void*)0);
+		// 	glEnableVertexAttribArray(vaLoc);
+		// 	int fLoc = glGetAttribLocation(ad->voxelVertex, "attr_face");
+		// 	glVertexAttribIPointer(fLoc, 4, GL_UNSIGNED_BYTE, 8, (void*)4);
+		// 	glEnableVertexAttribArray(fLoc);
+
+		// } else {
+		// 	int vaLoc = glGetAttribLocation(ad->voxelVertex, "attr_vertex");
+		// 	glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 4, (void*)0);
+		// 	glEnableVertexAttribArray(vaLoc);
+
+		// 	ad->texBufferSize = megaBytes(1);
+		// 	ad->texBuffer = (char*)getPMemory(ad->texBufferSize);
+		// 	bufferSize = megaBytes(20);
+
+		// 	glCreateBuffers(1, &ad->texBufferId);
+		// 	glNamedBufferData(ad->texBufferId, bufferSize, ad->texBuffer, GL_STREAM_DRAW);
+
+		// 	glCreateTextures(GL_TEXTURE_BUFFER, 1, &ad->voxelTextures[2]);
+
+		// 	glTextureBuffer(ad->voxelTextures[2], GL_RGBA8UI, ad->texBufferId);
+		// }
+
+		// ad->textureUnits[0] = ad->voxelTextures[0];
+		// ad->textureUnits[1] = ad->voxelTextures[1];
+		// ad->textureUnits[2] = ad->voxelTextures[2];
+
+		// ad->samplerUnits[0] = ad->voxelSamplers[0];
+		// ad->samplerUnits[1] = ad->voxelSamplers[1];
+		// ad->samplerUnits[2] = ad->voxelSamplers[2];
 
 
-		int vMeshSize = sizeof(VoxelMesh)*1000;
+
+
+		int vMeshSize = sizeof(VoxelMesh)*2000;
 		ad->vMeshs = (VoxelMesh*)getPMemory(vMeshSize);
 		zeroMemory(ad->vMeshs, vMeshSize);
-
 		ad->vMeshsSize = 0;
+
 
 		return; // window operations only work after first frame?
 	}
@@ -1326,7 +1366,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glClearDepth(1);
 	glDepthMask(GL_TRUE);
 	glDisable(GL_SCISSOR_TEST);
-	// glClearColor(0.6f,0.7f,0.9f,0.0f);
+	glClearColor(0.6f,0.7f,0.9f,0.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -1348,52 +1388,85 @@ extern "C" APPMAINFUNCTION(appMain) {
 		0.5,0.5,0.5,1.0f/1000.0f/1000.0f, // fog data for simple_fog
 	};
 
-	setupVoxelUniforms(ad->voxelVertex, ad->voxelFragment, vec4(ad->camPos, 1), 0, 0, 2, ambientLighting);
+
+	Mat4 al;
+
+	float bright = 1.0f;
+	float amb[3][3];
+
+	#ifdef STBVOX_CONFIG_LIGHTING_SIMPLE
+	bright = 0.35f;  // when demoing lighting
+
+	static float dtl = 0;
+	dtl += 0.008f;
+	float start = 40;
+	float amp = 30;
+
+	Vec3 lColor = vec3(0.7f,0.7f,0.5f);
+	lColor *= 50;
+	Vec3 light[2] = { vec3(0,0,(amp/2)+start + sin(dtl)*amp), lColor };
+	int loc = glGetUniformLocation(ad->voxelFragment, "light_source");
+	glProgramUniform3fv(ad->voxelFragment, loc, 2, (GLfloat*)light);
+	#endif
+
+	// ambient direction is sky-colored upwards
+	// "ambient" lighting is from above
+	al.e2[0][0] =  0.3f;
+	al.e2[0][1] = -0.5f;
+	al.e2[0][2] =  0.9f;
+	al.e2[0][3] = 0;
+
+	amb[1][0] = 0.3f; amb[1][1] = 0.3f; amb[1][2] = 0.3f; // dark-grey
+	amb[2][0] = 1.0; amb[2][1] = 1.0; amb[2][2] = 1.0; // white
+
+	// convert so (table[1]*dot+table[2]) gives
+	// above interpolation
+	//     lerp((dot+1)/2, amb[1], amb[2])
+	//     amb[1] + (amb[2] - amb[1]) * (dot+1)/2
+	//     amb[1] + (amb[2] - amb[1]) * dot/2 + (amb[2]-amb[1])/2
+
+	for (int j=0; j < 3; ++j) {
+	   al.e2[1][j] = (amb[2][j] - amb[1][j])/2 * bright;
+	   al.e2[2][j] = (amb[1][j] + amb[2][j])/2 * bright;
+	}
+	al.e2[1][3] = 0;
+	al.e2[2][3] = 0;
+
+	// fog color
+	al.e2[3][0] = 0.6f, al.e2[3][1] = 0.7f, al.e2[3][2] = 0.9f;
+	// al.e2[3][3] = 1.0f / (view_distance - MESH_CHUNK_SIZE_X);
+	// al.e2[3][3] *= al.e2[3][3];
+	al.e2[3][3] = (float)1.0f/(VIEW_DISTANCE);
+	al.e2[3][3] *= al.e2[3][3];
+
+	ambientLighting = al;
 
 
 
-
-
-	// Vec3 trans = vec3(0,0,0);
-	// Vec3 scale = vec3(1, 1, 1);
-	// // Vec3 scale = vec3(1, 1, 1);
-	// float degrees = 0;
-	// Vec3 rot = vec3(1,0,0);
-
-	// Mat4 sm; scaleMatrix(&sm, scale);
-	// Mat4 rm; quatRotationMatrix(&rm, quat(degrees, rot));
-	// Mat4 tm; translationMatrix(&tm, trans);
-	// Mat4 model = tm*rm*sm;
-
-	Mat4 view;
+	Mat4 view, proj; 
 	viewMatrix(&view, ad->camPos, -cLook, cUp, cRight);
-	Mat4 proj;
 	projMatrix(&proj, degreeToRadian(60), ad->aspectRatio, 0.1f, 2000);
 
-	// Mat4 finalMat = proj*view*model;
-	Mat4 finalMat = proj*view;
-	GLint modelViewUni = glGetUniformLocation(ad->voxelVertex, "model_view");
-	glProgramUniformMatrix4fv(ad->voxelVertex, modelViewUni, 1, 1, finalMat.e);
-
-
-
-	glBindTextures(0,16,ad->textureUnits);
-	glBindSamplers(0,16,ad->samplerUnits);
-	glBindBuffer(GL_ARRAY_BUFFER, ad->bufferId);
-	glBindProgramPipeline(ad->shader);
+	setupVoxelUniforms(ad->voxelVertex, ad->voxelFragment, vec4(ad->camPos, 1), 0, 0, 2, ambientLighting, view, proj);
 
 
 
 
 
 
+
+
+
+
+
+	int triangleCount = 0;
 
 	Vec3i pos = vec3i(ad->camPos);
 	if(pos.x < 0) pos.x -= VOXEL_X;
 	if(pos.y < 0) pos.y -= VOXEL_Y;
 	Vec2i playerMeshCoord = vec2i(pos.x/VOXEL_X, pos.y/VOXEL_Y);
 
-	int radius = 3;
+	int radius = VIEW_DISTANCE/VOXEL_X;
 	Vec2i min = vec2i(playerMeshCoord.x-radius, playerMeshCoord.y-radius);
 	Vec2i max = vec2i(playerMeshCoord.x+radius, playerMeshCoord.y+radius);
 
@@ -1409,42 +1482,63 @@ extern "C" APPMAINFUNCTION(appMain) {
 				m->upToDate = true;
 			}
 
-			// draw mesh
+			if(STBVOX_CONFIG_MODE == 0) {
+				// interleaved buffer - 2 uints in a row -> 8 bytes stride
+				glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
+				int vaLoc = glGetAttribLocation(ad->voxelVertex, "attr_vertex");
+				glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 8, (void*)0);
+				glEnableVertexAttribArray(vaLoc);
+				int fLoc = glGetAttribLocation(ad->voxelVertex, "attr_face");
+				glVertexAttribIPointer(fLoc, 4, GL_UNSIGNED_BYTE, 8, (void*)4);
+				glEnableVertexAttribArray(fLoc);
+
+			} else {
+				glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
+				int vaLoc = glGetAttribLocation(ad->voxelVertex, "attr_vertex");
+				glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 4, (void*)0);
+				glEnableVertexAttribArray(vaLoc);
+			}
+
 			GLuint transformUniform1 = glGetUniformLocation(ad->voxelVertex, "transform");
 			glProgramUniform3fv(ad->voxelVertex, transformUniform1, 3, m->transform[0]);
 			GLuint transformUniform2 = glGetUniformLocation(ad->voxelFragment, "transform");
 			glProgramUniform3fv(ad->voxelFragment, transformUniform2, 3, m->transform[0]);
 
-			glNamedBufferSubData(ad->bufferId, 0, m->quadCount*16, m->meshBuffer);
+			ad->textureUnits[0] = ad->voxelTextures[0];
+			ad->textureUnits[1] = ad->voxelTextures[1];
+			ad->textureUnits[2] = m->textureId;
+			ad->samplerUnits[0] = ad->voxelSamplers[0];
+			ad->samplerUnits[1] = ad->voxelSamplers[1];
+			ad->samplerUnits[2] = ad->voxelSamplers[2];
 
-			if(STBVOX_CONFIG_MODE == 1) {
-				glNamedBufferSubData(ad->texBufferId, 0, m->quadCount*4, m->texBuffer);
-			}
+			glBindTextures(0,16,ad->textureUnits);
+			glBindSamplers(0,16,ad->samplerUnits);
+
+			glBindProgramPipeline(ad->shader);
 
 			glDrawArrays(GL_QUADS, 0, m->quadCount*4);
+			triangleCount += m->quadCount*4;
 		}
 	}
-
-
-
 
 	if(second) {
 		GLenum glError = glGetError(); printf("GLError: %i\n", glError);
 	}
 
-
-
 	// // glDisableVertexAttrribArray(0);
-	// glBindBufferARB(GL_ARRAY_BUFFER_ARB, 0);
-	// glActiveTextureARB(GL_TEXTURE0_ARB);
+	// glBindBuffer(GL_ARRAY_BUFFER, 0);
+	// glActiveTexture(GL_TEXTURE0);
 
 	// glUseProgram(0);
 
-	// glDisable(GL_BLEND);
-	// glDisable(GL_CULL_FACE);
-	// glDisable(GL_DEPTH_TEST);
+	// // glDisable(GL_BLEND);
+	// // glDisable(GL_CULL_FACE);
+	// // glDisable(GL_DEPTH_TEST);
 
 	// glDisable(GL_TEXTURE_2D);
+
+
+
 
 
 #endif
@@ -1467,10 +1561,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// for(int i = -10; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,0,i*10) + off, s, 0, normVec3(vec3(0.9f,0.6f,0.2f)));
 
 
-	for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(i*10,0,0) + off, s, 0, vec3(0,0,0));
-	for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,i*10,0) + off, s, 0, vec3(0,0,0));
-	for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,0,i*10) + off, s, 0, vec3(0,0,0));
+	// for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(i*10,0,0) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
+	// for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,i*10,0) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
+	// for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,0,i*10) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
 
+
+	#ifdef STBVOX_CONFIG_LIGHTING_SIMPLE
+	drawCube(&ad->pipelineIds, light[0], vec3(3,3,3), vec4(1,1,1,1), 0, vec3(0,0,0));
+	#endif
 
 
 
@@ -1491,9 +1589,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 	drawTextA(&ad->pipelineIds, vec2(0,-90),  vec4(1,1,1,1), &ad->fontArial, 0, 2, "Up   : (%f,%f,%f)", cUp.x, cUp.y, cUp.z);
 	drawTextA(&ad->pipelineIds, vec2(0,-120), vec4(1,1,1,1), &ad->fontArial, 0, 2, "Right: (%f,%f,%f)", cRight.x, cRight.y, cRight.z);
 	drawTextA(&ad->pipelineIds, vec2(0,-150), vec4(1,1,1,1), &ad->fontArial, 0, 2, "Rot  : (%f,%f)", ad->camRot.x, ad->camRot.y);
-	// drawTextA(&ad->pipelineIds, vec2(0,-200), vec4(1,1,1,1), &ad->fontArial, 0, 2, "Coord  : (%f,%f)", (float)playerMeshCoord.x, (float)playerMeshCoord.y);
-	// drawTextA(&ad->pipelineIds, vec2(0,-200), vec4(1,1,1,1), &ad->fontArial, 0, 2, "Coord  : (%i,%i)", 2,3);
 
+	drawTextA(&ad->pipelineIds, vec2(0,-180), vec4(1,1,1,1), &ad->fontArial, 0, 2, "Poly Count  : (%f)", (float)triangleCount);
 
 	swapBuffers(&ad->systemData);
 	glFinish();

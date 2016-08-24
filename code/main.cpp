@@ -12,6 +12,7 @@ int CALLBACK WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR commandLi
 	globalMemory = (MemoryBlock*)malloc(sizeof(MemoryBlock));
 	// initMemorySizes(globalMemory, megaBytes(100), megaBytes(100), megaBytes(100), kiloBytes(10));
 	// initMemorySizes(globalMemory, megaBytes(500), megaBytes(100), megaBytes(100), kiloBytes(10));
+	// initMemorySizes(globalMemory, megaBytes(2000), megaBytes(100), megaBytes(100), kiloBytes(10));
 	initMemorySizes(globalMemory, megaBytes(1000), megaBytes(100), megaBytes(100), kiloBytes(10));
 	initMemory(globalMemory);
 
