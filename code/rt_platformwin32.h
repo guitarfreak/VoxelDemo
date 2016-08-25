@@ -466,6 +466,10 @@ uint getTicks() {
     return result;
 }
 
+__int64 getTimestamp() {
+	return __rdtsc();
+}
+
 // MetaPlatformFunction();
 // void shellExecute(MemoryBlock* memory, char* pathOrFile, int shellCommand) {
 //     char* command = "xdg-open ";

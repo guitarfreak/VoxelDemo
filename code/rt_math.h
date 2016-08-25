@@ -911,6 +911,13 @@ inline Vec2i vec2i(int a, int b) {
 	return vec;
 }
 
+inline Vec2i vec2i(Vec2 a) {
+	Vec2i vec;
+	vec.x = a.x;
+	vec.y = a.y;
+	return vec;
+}
+
 inline bool operator==(Vec2i a, Vec2i b) {
 	bool equal = (a.x == b.x) && (a.y == b.y);
 	return equal;
@@ -978,6 +985,13 @@ inline Vec2 vec2(float a, float b) {
 	Vec2 vec;
 	vec.x = a;
 	vec.y = b;
+	return vec;
+}
+
+inline Vec2 vec2(Vec2i a) {
+	Vec2 vec;
+	vec.x = a.x;
+	vec.y = a.y;
 	return vec;
 }
 
@@ -1049,6 +1063,12 @@ inline Vec2 operator-(Vec2 a, float b) {
 inline Vec2 operator-(Vec2 a, Vec2 b) {
 	a.x -= b.x;
 	a.y -= b.y;
+	return a;
+}
+
+inline Vec2 operator-(Vec2 a) {
+	a.x = -a.x;
+	a.y = -a.y;
 	return a;
 }
 
@@ -1184,9 +1204,10 @@ inline bool getLineIntersection(Vec2 p0, Vec2 p1, Vec2 p2, Vec2 p3, Vec2 * i) {
     return false;
 }
 
+// clockwise
 Vec2 rotateVec2(Vec2 a, float radian) {
-	float cs = cos(radian);
-	float sn = sin(radian);
+	float cs = cos(-radian);
+	float sn = sin(-radian);
 
 	float nx = a.x * cs - a.y * sn;
 	float ny = a.x * sn + a.y * cs;
@@ -1429,6 +1450,15 @@ inline Vec2 angleToDir(float angleInRadians) {
 	return result;
 }
 
+inline bool vecBetweenVecs(Vec2 v, Vec2 left, Vec2 right) {
+	bool result;
+	float ca = cross(left,v);
+	float cb = cross(right,v);
+
+	result = ca < 0 && cb > 0;
+	return result;
+}
+
 //
 //
 //
@@ -1554,7 +1584,8 @@ inline bool operator!=(Vec3 a, Vec3 b) {
 }
 
 inline float dot(Vec3 a, Vec3 b) {
-	return a.x*b.x + a.y*b.y + a.z*b.z;
+	float result = a.x*b.x + a.y*b.y + a.z*b.z;
+	return result;
 }
 
 inline Vec3 cross(Vec3 a, Vec3 b) {

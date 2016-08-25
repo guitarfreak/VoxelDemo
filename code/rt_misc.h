@@ -11,9 +11,12 @@ typedef double r64;
 
 void assert(bool check) {
 	if(!check) {
-		// DebugBreak();
-		char* temp = 0;
-		*temp = 234;
+
+		printf("Assert fired!\n");
+		if(IsDebuggerPresent()) {
+			__debugbreak();
+		}
+		exit(1);
 	}
 }
 
@@ -518,6 +521,8 @@ void initMemory(MemoryBlock * memory, void* baseAddress = 0) {
     void * mem;
     if(baseAddress) mem = baseAddress;
     else mem = malloc(memory->totalSize);
+
+    assert(mem);
 
     memory->permanent = mem;
     memory->permanentIndex = 0;

@@ -45,6 +45,9 @@
 - savestates, hotrealoading
 - pre and post functions to appMain
 - memory expansion
+- collision, walking
+- anti aliasing
+- frustum culling
 
 //-------------------------------------
 //               BUGS
@@ -357,6 +360,37 @@ const char* fragmentShaderQuad = GLSL (
 	}
 );
 
+
+const char* vertexShaderPrimitive = GLSL (
+	out gl_PerVertex { vec4 gl_Position; };
+	out vec4 Color;
+
+	uniform mat4x4 view;
+	uniform mat4x4 proj;
+	uniform vec4 setColor;
+
+	uniform vec3 vertices[4];
+
+	void main() {
+		Color = setColor;
+
+		vec4 pos = vec4(vertices[gl_VertexID], 1);
+		gl_Position = proj*view*pos;
+	}
+);
+
+const char* fragmentShaderPrimitive = GLSL (
+	in vec4 Color;
+	layout(depth_less) out float gl_FragDepth;
+	out vec4 color;
+
+	void main() {
+		color = Color;
+	}
+);
+
+
+
 struct PipelineIds {
 	uint programQuad;
 	uint quadVertex;
@@ -373,6 +407,15 @@ struct PipelineIds {
 	uint cubeVertexView;
 	uint cubeVertexProj;
 	uint cubeVertexColor;
+
+	uint programPrimitive;
+	uint primitiveVertex;
+	uint primitiveFragment;
+	// uint primitiveVertexModel;
+	uint primitiveVertexView;
+	uint primitiveVertexProj;
+	uint primitiveVertexColor;
+	uint primitiveVertexVertices;
 
 	uint programVoxel;
 	uint voxelVertex;
@@ -553,6 +596,7 @@ uint createSampler(int wrapS, int wrapT, int magF, int minF) {
 	uint result;
 	glCreateSamplers(1, &result);
 
+	glSamplerParameteri(result, GL_TEXTURE_MAX_ANISOTROPY_EXT, 4.0f);
 	glSamplerParameteri(result, GL_TEXTURE_WRAP_S, wrapS);
 	glSamplerParameteri(result, GL_TEXTURE_WRAP_T, wrapT);
 	glSamplerParameteri(result, GL_TEXTURE_MAG_FILTER, magF);
@@ -710,8 +754,9 @@ float perlin2d(float x, float y, float freq, int depth)
 
 
 // #define VIEW_DISTANCE 1024
-// #define VIEW_DISTANCE 512
-#define VIEW_DISTANCE 256
+#define VIEW_DISTANCE 512
+// #define VIEW_DISTANCE 256
+// #define VIEW_DISTANCE 128
 
 #define VOXEL_X 64
 #define VOXEL_Y 64
@@ -761,6 +806,7 @@ void initVoxelMesh(VoxelMesh* m, Vec2i coord) {
 }
 
 VoxelMesh* getVoxelMesh(VoxelMesh* vms, int* vmsSize, Vec2i coord) {
+
 	// find mesh at coordinate
 	int index = -1;
 	for(int i = 0; i < *vmsSize; i++) {
@@ -780,24 +826,20 @@ VoxelMesh* getVoxelMesh(VoxelMesh* vms, int* vmsSize, Vec2i coord) {
 	}
 
 	VoxelMesh* m = vms + index;
-	// generate mesh
-	if(!m->generated) {
-		// for(int i = 0; i < VOXEL_SIZE; i++) m->voxels[i] = 0;
-		// for(int i = 0; i < VOXEL_SIZE; i++) m->lighting[i] = 0;
-		zeroMemory(m->voxels, VOXEL_SIZE);
-		zeroMemory(m->lighting, VOXEL_SIZE);
+	return m;
+}
 
-		// generate voxel world
+void generateVoxelMesh(VoxelMesh* m, Vec2i coord) {
+
+	// m->voxels = (uchar*)getTMemory(VOXEL_SIZE);
+	// m->lighting = (uchar*)getTMemory(VOXEL_SIZE);
+
+	if(!m->generated) {
+		zeroMemory(m->voxels, VOXEL_SIZE);
+		memSet(m->lighting, 255, VOXEL_SIZE);
+
 		Vec3i min = vec3i(0,0,0);
 		Vec3i max = vec3i(VOXEL_X,VOXEL_Y,VOXEL_Z);
-
-		// for(int z = min.z; z < min.z+1; z++) {
-		// 	for(int y = min.y; y < max.y; y++) {
-		// 		for(int x = min.x; x < max.x; x++) {
-		// 			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 10;
-		// 		}
-		// 	}
-		// }
 
 	    for(int y = min.y; y < max.y; y++) {
 	    	for(int x = min.x; x < max.x; x++) {
@@ -805,67 +847,22 @@ VoxelMesh* getVoxelMesh(VoxelMesh* vms, int* vmsSize, Vec2i coord) {
 	    		int gy = (coord.y*VOXEL_Y)+y;
 
 	    		float perlin = perlin2d(gx+4000, gy+4000, 0.015f, 4);
-
 	    		float height = perlin*50;
-	    		// float height = perlin*40;
-	    		// float height = perlin*200;
+
+	    		int blockType = randomInt(8,10);
 	    		for(int z = 0; z < height; z++) {
-	    			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = randomInt(8,10);
+	    			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = blockType;
+	    			m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 0;
 	    		}
 	    	}
 	    }
-
-	    // lighting
-		for(int x = min.x; x < max.x; x++) {
-	    	for(int y = min.y; y < max.y; y++) {
-	    		for(int z = min.z; z < max.z; z++) {
-	    			char blockType = m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z];
-	    			m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = blockType == 0 ? 255 : 0;
-	    		}
-	    	}
-	    }
-
-		// for(int y = min.y; y < max.y; y++) {
-		// 	for(int x = min.x; x < max.x; x++) {
-		// 		int gx = (coord.x*VOXEL_X)+x;
-		// 		int gy = (coord.y*VOXEL_Y)+y;
-
-		// 		int h1 = mapRange(sin((float)gx/10), -1, 1, 2, VOXEL_Z/4);
-		// 		int h2 = mapRange(sin((float)gy/10), -1, 1, 2, VOXEL_Z/4);
-		// 		int height = h1*0.5f + h2*0.5f;
-
-		// 		for(int z = 0; z < height; z++) {
-		// 			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 10;
-		// 		}
-		// 	}
-		// }
-
-		// for(int z = min.z; z < max.z; z++) {
-		// 	for(int y = min.y; y < max.y; y++) {
-		// 		for(int x = min.x; x < max.x; x++) {
-		// 			if(randomInt(0, z) < 1)
-		// 				m->voxels[x*ms.y*ms.z + y*ms.z + z] = 9;
-		// 		}
-		// 	}
-		// }
-
-		// for(int z = min.z+1; z < min.z+3; z++) {
-		// 	for(int y = min.y; y < max.y; y++) {
-		// 		for(int x = min.x; x < max.x; x++) {
-		// 			if(randomInt(0,10) < 2) m->voxels[x*ms.y*ms.z + y*ms.z + z] = 1;
-		// 			if(randomInt(0,100) < 1) m->voxels[x*ms.y*ms.z + y*ms.z + z] = 8;
-		// 		}
-		// 	}
-		// }
 
 		m->generated = true;
 	}
-
-	return m;
 }
 
-void makeMesh(VoxelMesh* m, VoxelMesh* vms, int* vmsSize) {
 
+void makeMesh(VoxelMesh* m, VoxelMesh* vms, int* vmsSize) {
 	zeroMemory(voxelCache, VC_X*VC_Y*VC_Z);
 	zeroMemory(voxelLightingCache, VC_X*VC_Y*VC_Z);
 
@@ -875,6 +872,7 @@ void makeMesh(VoxelMesh* m, VoxelMesh* vms, int* vmsSize) {
 		for(int x = -1; x < 2; x++) {
 			Vec2i c = coord + vec2i(x,y);
 			VoxelMesh* lm = getVoxelMesh(vms, vmsSize, c);
+			generateVoxelMesh(lm, c);
 
 			int w = x == 0 ? VOXEL_X : 1;
 			int h = y == 0 ? VOXEL_Y : 1;
@@ -906,7 +904,6 @@ void makeMesh(VoxelMesh* m, VoxelMesh* vms, int* vmsSize) {
 					voxelCache[x][y][0] = 1;
 				}
 			}
-
 		}
 	}
 
@@ -924,9 +921,7 @@ void makeMesh(VoxelMesh* m, VoxelMesh* vms, int* vmsSize) {
 
 	int count = stbvox_get_buffer_count(&mm);
 
-	// unsigned char tex2[256];
-	// for(int i = 0; i < arrayCount(tex2)-1; i++) tex2[1+i] = i;
-	unsigned char tex2[11];
+	unsigned char tex2[256];
 	for(int i = 0; i < arrayCount(tex2)-1; i++) tex2[1+i] = i;
 
 	inputDesc->block_tex2 = (unsigned char*)tex2;
@@ -964,6 +959,7 @@ void makeMesh(VoxelMesh* m, VoxelMesh* vms, int* vmsSize) {
 
 		glTextureBuffer(m->textureId, GL_RGBA8UI, m->texBufferId);
 	}
+
 }
 
 struct AppData {
@@ -1091,19 +1087,27 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->programs[0] = ids->programQuad;
 
 		ids->programCube = createShader(vertexShaderCube, fragmentShaderCube, &ids->cubeVertex, &ids->cubeFragment);
-
 		ids->cubeVertexModel = glGetUniformLocation(ids->cubeVertex, "model");
 		ids->cubeVertexView = glGetUniformLocation(ids->cubeVertex, "view");
 		ids->cubeVertexProj = glGetUniformLocation(ids->cubeVertex, "proj");
 		ids->cubeVertexColor = glGetUniformLocation(ids->cubeVertex, "setColor");
-
 		ad->programs[1] = ids->programCube;
+
+		ids->programPrimitive = createShader(vertexShaderPrimitive, fragmentShaderPrimitive, &ids->primitiveVertex, &ids->primitiveFragment);
+		ids->primitiveVertexView = glGetUniformLocation(ids->primitiveVertex, "view");
+		ids->primitiveVertexProj = glGetUniformLocation(ids->primitiveVertex, "proj");
+		ids->primitiveVertexColor = glGetUniformLocation(ids->primitiveVertex, "setColor");
+		ids->primitiveVertexVertices = glGetUniformLocation(ids->primitiveVertex, "vertices");
+		ad->programs[1] = ids->programCube;
+
+
 
 		ad->camera = vec3(0,0,10);
 
 		// ad->camPos = vec3(-10,-10,5);
 		ad->camPos = vec3(30,30,50);
-		ad->camLook = normVec3(vec3(-1,-1,0));
+		// ad->camLook = normVec3(vec3(-1,-1,0));
+		ad->camLook = normVec3(vec3(0,1,0));
 		// ad->camLook = vec3(0,0,1);
 		ad->camRot = vec2(0,0);
 
@@ -1202,6 +1206,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			if(x == width && y == height) {
 				glTextureSubImage3D(texId, 0, 0, 0, tc, x, y, 1, format, GL_UNSIGNED_BYTE, stbData);
+				glGenerateTextureMipmap(texId);
 			}
 
 			stbi_image_free(stbData);
@@ -1453,11 +1458,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-
-
-
-
-
+	int meshGenerationCount = 0;
 
 	int triangleCount = 0;
 
@@ -1478,46 +1479,117 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			VoxelMesh* m = getVoxelMesh(vms, vmsSize, coord);
 			if(!m->upToDate) {
-				makeMesh(m, vms, vmsSize);
-				m->upToDate = true;
+				if(meshGenerationCount < 1) {
+					makeMesh(m, vms, vmsSize);
+					m->upToDate = true;
+
+					meshGenerationCount++;
+				}
 			}
 
-			if(STBVOX_CONFIG_MODE == 0) {
-				// interleaved buffer - 2 uints in a row -> 8 bytes stride
-				glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
-				int vaLoc = glGetAttribLocation(ad->voxelVertex, "attr_vertex");
-				glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 8, (void*)0);
-				glEnableVertexAttribArray(vaLoc);
-				int fLoc = glGetAttribLocation(ad->voxelVertex, "attr_face");
-				glVertexAttribIPointer(fLoc, 4, GL_UNSIGNED_BYTE, 8, (void*)4);
-				glEnableVertexAttribArray(fLoc);
 
-			} else {
-				glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
-				int vaLoc = glGetAttribLocation(ad->voxelVertex, "attr_vertex");
-				glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 4, (void*)0);
-				glEnableVertexAttribArray(vaLoc);
+
+			Vec3 cp = ad->camPos;
+			Vec3 cl = cLook;
+			Vec3 cu = cUp;
+			Vec3 cr = cRight;
+
+			float ar = ad->aspectRatio;
+			float fov = degreeToRadian(60);
+			float ne = 0.1f;
+			float fa = 2000;
+
+			Vec3 left = rotateVec3(cl, fov*ar, cu);
+			Vec3 right = rotateVec3(cl, -fov*ar, cu);
+			Vec3 top = rotateVec3(cl, fov, cr);
+			Vec3 bottom = rotateVec3(cl, -fov, cr);
+
+			Vec3 normalLeftPlane = cross(cu, left);
+			Vec3 normalRightPlane = cross(right, cu);
+			Vec3 normalTopPlane = cross(cr, top);
+			Vec3 normalBottomPlane = cross(bottom, cr);
+
+			Vec3 boxPos = vec3(coord.x*VOXEL_X+VOXEL_X*0.5f, coord.y*VOXEL_Y+VOXEL_Y*0.5f, VOXEL_Z*0.5f);
+			Vec3 boxSize = vec3(VOXEL_X, VOXEL_Y, VOXEL_Z);
+
+			bool isIntersecting = true;	
+			for(int test = 0; test < 4; test++) {
+
+				Vec3 testNormal;
+				if(test == 0) testNormal = normalLeftPlane;
+				else if(test == 1) testNormal = normalRightPlane;
+				else if(test == 2) testNormal = normalTopPlane;
+				else if(test == 3) testNormal = normalBottomPlane;
+
+				bool inside = false;
+				for(int i = 0; i < 8; i++) {
+					Vec3 off;
+					switch (i) {
+						case 0: off = vec3( 0.5f,  0.5f, -0.5f); break;
+						case 1: off = vec3(-0.5f,  0.5f, -0.5f); break;
+						case 2: off = vec3( 0.5f, -0.5f, -0.5f); break;
+						case 3: off = vec3(-0.5f, -0.5f, -0.5f); break;
+						case 4: off = vec3( 0.5f,  0.5f,  0.5f); break;
+						case 5: off = vec3(-0.5f,  0.5f,  0.5f); break;
+						case 6: off = vec3( 0.5f, -0.5f,  0.5f); break;
+						case 7: off = vec3(-0.5f, -0.5f,  0.5f); break;
+					}
+
+					Vec3 boxPoint = boxPos + boxSize*off;
+					Vec3 p = boxPoint - cp;
+
+					if(dot(p, testNormal) < 0) {
+						inside = true;
+						break;
+					}
+				}
+
+				if(!inside) {
+					isIntersecting = false;
+					break;
+				}
 			}
+			
 
-			GLuint transformUniform1 = glGetUniformLocation(ad->voxelVertex, "transform");
-			glProgramUniform3fv(ad->voxelVertex, transformUniform1, 3, m->transform[0]);
-			GLuint transformUniform2 = glGetUniformLocation(ad->voxelFragment, "transform");
-			glProgramUniform3fv(ad->voxelFragment, transformUniform2, 3, m->transform[0]);
+			if(isIntersecting) {
+			// if(true) {
+				if(STBVOX_CONFIG_MODE == 0) {
+					// interleaved buffer - 2 uints in a row -> 8 bytes stride
+					glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
+					int vaLoc = glGetAttribLocation(ad->voxelVertex, "attr_vertex");
+					glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 8, (void*)0);
+					glEnableVertexAttribArray(vaLoc);
+					int fLoc = glGetAttribLocation(ad->voxelVertex, "attr_face");
+					glVertexAttribIPointer(fLoc, 4, GL_UNSIGNED_BYTE, 8, (void*)4);
+					glEnableVertexAttribArray(fLoc);
 
-			ad->textureUnits[0] = ad->voxelTextures[0];
-			ad->textureUnits[1] = ad->voxelTextures[1];
-			ad->textureUnits[2] = m->textureId;
-			ad->samplerUnits[0] = ad->voxelSamplers[0];
-			ad->samplerUnits[1] = ad->voxelSamplers[1];
-			ad->samplerUnits[2] = ad->voxelSamplers[2];
+				} else {
+					glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
+					int vaLoc = glGetAttribLocation(ad->voxelVertex, "attr_vertex");
+					glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 4, (void*)0);
+					glEnableVertexAttribArray(vaLoc);
+				}
 
-			glBindTextures(0,16,ad->textureUnits);
-			glBindSamplers(0,16,ad->samplerUnits);
+				GLuint transformUniform1 = glGetUniformLocation(ad->voxelVertex, "transform");
+				glProgramUniform3fv(ad->voxelVertex, transformUniform1, 3, m->transform[0]);
+				GLuint transformUniform2 = glGetUniformLocation(ad->voxelFragment, "transform");
+				glProgramUniform3fv(ad->voxelFragment, transformUniform2, 3, m->transform[0]);
 
-			glBindProgramPipeline(ad->shader);
+				ad->textureUnits[0] = ad->voxelTextures[0];
+				ad->textureUnits[1] = ad->voxelTextures[1];
+				ad->textureUnits[2] = m->textureId;
+				ad->samplerUnits[0] = ad->voxelSamplers[0];
+				ad->samplerUnits[1] = ad->voxelSamplers[1];
+				ad->samplerUnits[2] = ad->voxelSamplers[2];
 
-			glDrawArrays(GL_QUADS, 0, m->quadCount*4);
-			triangleCount += m->quadCount*4;
+				glBindTextures(0,16,ad->textureUnits);
+				glBindSamplers(0,16,ad->samplerUnits);
+
+				glBindProgramPipeline(ad->shader);
+
+				glDrawArrays(GL_QUADS, 0, m->quadCount*4);
+				triangleCount += m->quadCount*4;
+			}
 		}
 	}
 
@@ -1561,15 +1633,43 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// for(int i = -10; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,0,i*10) + off, s, 0, normVec3(vec3(0.9f,0.6f,0.2f)));
 
 
-	// for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(i*10,0,0) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
-	// for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,i*10,0) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
-	// for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,0,i*10) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
+	for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(i*10,0,0) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
+	for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,i*10,0) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
+	for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,0,i*10) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
 
 
 	#ifdef STBVOX_CONFIG_LIGHTING_SIMPLE
 	drawCube(&ad->pipelineIds, light[0], vec3(3,3,3), vec4(1,1,1,1), 0, vec3(0,0,0));
 	#endif
 
+
+
+
+	// view;
+	// viewMatrix(&view, ad->camPos, -cLook, cUp, cRight);
+	// glProgramUniformMatrix4fv(ids->primitiveVertex, ids->primitiveVertexView, 1, 1, view.e);
+	// proj;
+	// projMatrix(&proj, degreeToRadian(60), ad->aspectRatio, 0.1f, 2000);
+	// glProgramUniformMatrix4fv(ids->primitiveVertex, ids->primitiveVertexProj, 1, 1, proj.e);
+	// glBindProgramPipeline(ad->pipelineIds.programPrimitive);
+
+	// glDisable(GL_CULL_FACE);
+
+	// glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+	// glLineWidth(3);
+
+	// Vec3 verts[4] = {};
+	// verts[0] = cp; verts[1] = cp+cl*2;
+	// glProgramUniform3fv(ids->primitiveVertex, ids->primitiveVertexVertices, 4, verts[0].e);
+	// glProgramUniform4f(ids->primitiveVertex, ids->primitiveVertexColor, 1,0,0,1);
+	// glDrawArrays(GL_LINES, 0, 2);
+
+	// glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+	// glEnable(GL_CULL_FACE);
+
+
+
+	
 
 
 	// ortho(&ad->pipelineIds, rectCenDim(cam->x,cam->y, cam->z, cam->z/ad->aspectRatio));
