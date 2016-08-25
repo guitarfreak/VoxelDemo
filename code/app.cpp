@@ -38,7 +38,6 @@
 - Data Package - Streaming
 - Expand Font functionality
 - Gui
-- Framebuffer Render to resolution
 
 - create simpler windows.h
 - remove c runtime library, implement sin, cos...
@@ -46,8 +45,10 @@
 - pre and post functions to appMain
 - memory expansion
 - collision, walking
-- anti aliasing
-- frustum culling
+- frameBuffer resolution
+
+- change msaa setup from blit to draw to screen
+
 
 //-------------------------------------
 //               BUGS
@@ -154,7 +155,23 @@
 		GLOP(void, BindSampler, GLuint unit, GLuint sampler​) \
 		GLOP(void, BindTextureUnit, GLuint unit, GLuint texture) \
 		GLOP(void, NamedBufferSubData, GLuint buffer, GLintptr offset, GLsizei size, const void *data) \
-		GLOP(void, GetUniformiv, GLuint program, GLint location, GLint * params)
+		GLOP(void, GetUniformiv, GLuint program, GLint location, GLint * params) \
+		GLOP(void, CreateFramebuffers, GLsizei n, GLuint *framebuffers) \
+		GLOP(void, NamedFramebufferParameteri, GLuint framebuffer, GLenum pname, GLint param) \
+		GLOP(void, NamedRenderbufferStorageMultisample, GLuint renderbuffer, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height) \
+		GLOP(void, CreateRenderbuffers, GLsizei n, GLuint *renderbuffers) \
+		GLOP(void, NamedFramebufferRenderbuffer, GLuint framebuffer, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer) \
+		GLOP(void, BindFramebuffer, GLenum target, GLuint framebuffer) \
+		GLOP(void, NamedFramebufferDrawBuffer, GLuint framebuffer, GLenum buf) \
+		GLOP(void, BlitFramebuffer, GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter) \
+		GLOP(void, NamedFramebufferTexture, GLuint framebuffer, GLenum attachment, GLuint texture, GLint level) \
+		GLOP(void, TextureStorage2DMultisample, GLuint texture, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height, GLboolean fixedsamplelocations) \
+		GLOP(void, TexImage2DMultisample, GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height, GLboolean fixedsamplelocations) \
+		GLOP(void, NamedRenderbufferStorage, GLuint renderbuffer, GLenum internalformat, GLsizei width, GLsizei height) \
+		GLOP(GLenum, CheckNamedFramebufferStatus, GLuint framebuffer, GLenum target) \
+		GLOP(void, GenFramebuffers, GLsizei n, GLuint *ids) \
+		GLOP(void, FramebufferTexture, GLenum target, GLenum attachment, GLuint texture, GLint level)
+
 
 
 
@@ -389,6 +406,17 @@ const char* fragmentShaderPrimitive = GLSL (
 	}
 );
 
+
+void updateAfterWindowResizing(WindowSettings* wSettings, float* ar, uint rb0, uint rb1, uint* fbt, int msaaSamples) {
+	*ar = wSettings->aspectRatio;
+	
+	glNamedRenderbufferStorageMultisample(rb0, msaaSamples, GL_RGBA8, wSettings->currentRes.w, wSettings->currentRes.h);
+	glNamedRenderbufferStorageMultisample(rb1, msaaSamples, GL_DEPTH_COMPONENT, wSettings->currentRes.w, wSettings->currentRes.h);
+
+	glDeleteTextures(1, fbt);
+	glCreateTextures(GL_TEXTURE_2D, 1, fbt);
+	glTextureStorage2D(*fbt, 1, GL_RGBA8, wSettings->currentRes.w, wSettings->currentRes.h);
+}
 
 
 struct PipelineIds {
@@ -753,10 +781,14 @@ float perlin2d(float x, float y, float freq, int depth)
 
 
 
-// #define VIEW_DISTANCE 1024
-#define VIEW_DISTANCE 512
-// #define VIEW_DISTANCE 256
-// #define VIEW_DISTANCE 128
+// #define VIEW_DISTANCE 1024 // 16
+#define VIEW_DISTANCE 512  // 8
+// #define VIEW_DISTANCE 256 // 4
+// #define VIEW_DISTANCE 128 // 2
+
+// #define VIEW_DISTANCE 576
+// #define VIEW_DISTANCE 640
+// #define VIEW_DISTANCE 704
 
 #define VOXEL_X 64
 #define VOXEL_Y 64
@@ -973,15 +1005,21 @@ struct AppData {
 	int texCount;
 	uint samplers[16];
 
+	uint frameBuffers[16];
+	uint renderBuffers[16];
+	uint frameBufferTextures[2];
+
 	WindowSettings wSettings;
 	Vec3 camera;
 	Vec3 camPos;
 	Vec3 camLook;
 	Vec2 camRot;
 	float aspectRatio;
+	float fieldOfView;
 
 	Font fontArial;
 
+	int msaaSamples;
 
 
 	float transform[3][3];
@@ -1037,6 +1075,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 		wSettings->fullRes.y = GetSystemMetrics(SM_CYSCREEN);
 		wSettings->style = (WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU  | WS_MINIMIZEBOX  | WS_VISIBLE);
 		initSystem(systemData, windowsData, 0, 0,0,0,0);
+
+		ad->msaaSamples = 4;
+		ad->fieldOfView = 50;
 
 		// DEVMODE devMode;
 		// int index = 0;
@@ -1214,51 +1255,77 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
+		glCreateFramebuffers(1, ad->frameBuffers);
+		glCreateRenderbuffers(2, ad->renderBuffers);
+		// glNamedRenderbufferStorageMultisample(ad->renderBuffers[0], 4, GL_RGBA8, wSettings->res.w, wSettings->res.h);
+		// glNamedRenderbufferStorageMultisample(ad->renderBuffers[1], 4, GL_DEPTH_COMPONENT, wSettings->res.w, wSettings->res.h);
+		// glNamedFramebufferRenderbuffer(ad->frameBuffers[0], GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, ad->renderBuffers[0]);
+		// glNamedFramebufferRenderbuffer(ad->frameBuffers[0], GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, ad->renderBuffers[1]);
+
+		glCreateFramebuffers(1, &ad->frameBuffers[1]);
+		glCreateTextures(GL_TEXTURE_2D, 2, ad->frameBufferTextures);
+		// glTextureStorage2D(ad->frameBufferTextures[0], 1, GL_RGBA8, wSettings->res.w, wSettings->res.h);
+		// glNamedFramebufferTexture(ad->frameBuffers[1], GL_COLOR_ATTACHMENT0, ad->frameBufferTextures[0], 0);
+
+		// GLenum result = glCheckNamedFramebufferStatus(ad->frameBuffers[0], GL_FRAMEBUFFER);
 
 
-		// ad->meshBufferSize = megaBytes(1);
-		// ad->meshBuffer = (char*)getPMemory(ad->meshBufferSize);
 
-		// glCreateBuffers(1, &ad->bufferId);
-		// // glNamedBufferData(ad->bufferId, ad->quadCount*4*sizeof(uint)*2, ad->meshBuffer, GL_STATIC_DRAW_ARB);
-		// int bufferSize = megaBytes(10);
-		// glNamedBufferData(ad->bufferId, bufferSize, ad->meshBuffer, GL_STREAM_DRAW);
-		// glBindBuffer(GL_ARRAY_BUFFER, ad->bufferId);
+#if 0
+		glCreateFramebuffers(1, ad->frameBuffers);
+		glCreateRenderbuffers(2, ad->renderBuffers);
+		// glNamedRenderbufferStorageMultisample(ad->renderBuffers[0], 4, GL_RGBA8, wSettings->res.w, wSettings->res.h);
+		// glNamedFramebufferRenderbuffer(ad->frameBuffers[0], GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, ad->renderBuffers[0]);
+		glNamedRenderbufferStorageMultisample(ad->renderBuffers[1], 4, GL_DEPTH_COMPONENT, wSettings->res.w, wSettings->res.h);
+		glNamedFramebufferRenderbuffer(ad->frameBuffers[0], GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, ad->renderBuffers[1]);
 
 
-		// if(STBVOX_CONFIG_MODE == 0) {
-		// 	// interleaved buffer - 2 uints in a row -> 8 bytes stride
-		// 	int vaLoc = glGetAttribLocation(ad->voxelVertex, "attr_vertex");
-		// 	glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 8, (void*)0);
-		// 	glEnableVertexAttribArray(vaLoc);
-		// 	int fLoc = glGetAttribLocation(ad->voxelVertex, "attr_face");
-		// 	glVertexAttribIPointer(fLoc, 4, GL_UNSIGNED_BYTE, 8, (void*)4);
-		// 	glEnableVertexAttribArray(fLoc);
 
-		// } else {
-		// 	int vaLoc = glGetAttribLocation(ad->voxelVertex, "attr_vertex");
-		// 	glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 4, (void*)0);
-		// 	glEnableVertexAttribArray(vaLoc);
+			glError = glGetError(); printf("GLError: %i\n", glError);
+		glCreateTextures(GL_TEXTURE_2D_MULTISAMPLE, 2, ad->frameBufferTextures);
+			glError = glGetError(); printf("GLError: %i\n", glError);
+		glTextureStorage2DMultisample(ad->frameBufferTextures[0], 4, GL_RGBA8, wSettings->res.w, wSettings->res.h, GL_FALSE);
+			glError = glGetError(); printf("GLError: %i\n", glError);
+		// glGenTextures( 1, ad->frameBufferTextures);
+		// glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, ad->frameBufferTextures[0]);
+			glError = glGetError(); printf("GLError: %i\n", glError);
+		// glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, 4, GL_RGBA8, wSettings->res.w, wSettings->res.h, GL_FALSE);
+			glError = glGetError(); printf("GLError: %i\n", glError);
+		glNamedFramebufferTexture(ad->frameBuffers[0], GL_COLOR_ATTACHMENT0, ad->frameBufferTextures[0], 0);
+			glError = glGetError(); printf("GLError: %i\n", glError);
 
-		// 	ad->texBufferSize = megaBytes(1);
-		// 	ad->texBuffer = (char*)getPMemory(ad->texBufferSize);
-		// 	bufferSize = megaBytes(20);
+		// glTextureStorage2DMultisample(ad->frameBufferTextures[1], 4, GL_DEPTH_COMPONENT, wSettings->res.w, wSettings->res.h, asdf);
+		// glError = glGetError(); printf("GLError: %i\n", glError);
+		// glNamedFramebufferTexture(ad->frameBuffers[0], GL_DEPTH_ATTACHMENT, ad->frameBufferTextures[1], 0);
+		// glError = glGetError(); printf("GLError: %i\n", glError);
+#endif
 
-		// 	glCreateBuffers(1, &ad->texBufferId);
-		// 	glNamedBufferData(ad->texBufferId, bufferSize, ad->texBuffer, GL_STREAM_DRAW);
 
-		// 	glCreateTextures(GL_TEXTURE_BUFFER, 1, &ad->voxelTextures[2]);
 
-		// 	glTextureBuffer(ad->voxelTextures[2], GL_RGBA8UI, ad->texBufferId);
-		// }
 
-		// ad->textureUnits[0] = ad->voxelTextures[0];
-		// ad->textureUnits[1] = ad->voxelTextures[1];
-		// ad->textureUnits[2] = ad->voxelTextures[2];
+		// glCreateFramebuffers(1, ad->frameBuffers);
 
-		// ad->samplerUnits[0] = ad->voxelSamplers[0];
-		// ad->samplerUnits[1] = ad->voxelSamplers[1];
-		// ad->samplerUnits[2] = ad->voxelSamplers[2];
+		// glCreateTextures(GL_TEXTURE_2D, 2, ad->frameBufferTextures);
+		// glTextureStorage2D(ad->frameBufferTextures[0], 1, GL_RGBA8, wSettings->res.w, wSettings->res.h);
+		// glTextureStorage2D(ad->frameBufferTextures[1], 1, GL_DEPTH_COMPONENT32, wSettings->res.w, wSettings->res.h);
+
+		// glNamedFramebufferTexture(ad->frameBuffers[0], GL_COLOR_ATTACHMENT0, ad->frameBufferTextures[0], 0);
+		// glNamedFramebufferTexture(ad->frameBuffers[0], GL_DEPTH_ATTACHMENT, ad->frameBufferTextures[1], 0);
+		// GLenum result = glCheckNamedFramebufferStatus(ad->frameBuffers[0], GL_FRAMEBUFFER);
+
+
+
+
+		// glCreateFramebuffers(1, ad->frameBuffers);
+
+		// glCreateTextures(GL_TEXTURE_2D_MULTISAMPLE, 2, ad->frameBufferTextures);
+		// glTextureStorage2DMultisample(ad->frameBufferTextures[0], 4, GL_RGBA8, wSettings->res.w, wSettings->res.h, GL_FALSE);
+		// glTextureStorage2DMultisample(ad->frameBufferTextures[1], 4, GL_DEPTH_COMPONENT32, wSettings->res.w, wSettings->res.h, GL_FALSE);
+
+		// glNamedFramebufferTexture(ad->frameBuffers[0], GL_COLOR_ATTACHMENT0, ad->frameBufferTextures[0], 0);
+		// glNamedFramebufferTexture(ad->frameBuffers[0], GL_DEPTH_ATTACHMENT, ad->frameBufferTextures[1], 0);
+		// GLenum result = glCheckNamedFramebufferStatus(ad->frameBuffers[0], GL_FRAMEBUFFER);
+
 
 
 
@@ -1273,22 +1340,41 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 	if(second) {
-		setWindowProperties(windowHandle, wSettings->res.w, wSettings->res.h, -1920, 0);
+		// setWindowProperties(windowHandle, wSettings->res.w, wSettings->res.h, -1920, 0);
+		setWindowProperties(windowHandle, wSettings->res.w, wSettings->res.h, 0, 0);
 		setWindowStyle(windowHandle, wSettings->style);
+
 		setWindowMode(windowHandle, wSettings, WINDOW_MODE_FULLBORDERLESS);
+
+		updateAfterWindowResizing(wSettings, &ad->aspectRatio, ad->renderBuffers[0], ad->renderBuffers[1], &ad->frameBufferTextures[0], ad->msaaSamples);
+
+		glNamedFramebufferRenderbuffer(ad->frameBuffers[0], GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, ad->renderBuffers[0]);
+		glNamedFramebufferRenderbuffer(ad->frameBuffers[0], GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, ad->renderBuffers[1]);
+		glNamedFramebufferTexture(ad->frameBuffers[1], GL_COLOR_ATTACHMENT0, ad->frameBufferTextures[0], 0);
+
 	}
 
 	if(reload) {
 		loadFunctions();
 	}
 
-
-
 	updateInput(&ad->input, isRunning, windowHandle);
-	getWindowProperties(windowHandle, &wSettings->currentRes.x, &wSettings->currentRes.y,0,0,0,0);
-	ad->aspectRatio = wSettings->currentRes.x / (float)wSettings->currentRes.y;
 
 	PipelineIds* ids = &ad->pipelineIds;
+
+
+	if(input->keysPressed[VK_F1]) {
+		int mode;
+		if(wSettings->fullscreen) mode = WINDOW_MODE_WINDOWED;
+		else mode = WINDOW_MODE_FULLBORDERLESS;
+		setWindowMode(windowHandle, wSettings, mode);
+
+		updateAfterWindowResizing(wSettings, &ad->aspectRatio, ad->renderBuffers[0], ad->renderBuffers[1], &ad->frameBufferTextures[0], ad->msaaSamples);
+
+		glNamedFramebufferRenderbuffer(ad->frameBuffers[0], GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, ad->renderBuffers[0]);
+		glNamedFramebufferRenderbuffer(ad->frameBuffers[0], GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, ad->renderBuffers[1]);
+		glNamedFramebufferTexture(ad->frameBuffers[1], GL_COLOR_ATTACHMENT0, ad->frameBufferTextures[0], 0);
+	}
 
 	Vec3* cam = &ad->camera;	
 	if(input->mouseButtonDown[0]) {
@@ -1302,12 +1388,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		cam->z = zoom;
 	}
 
-	if(input->keysPressed[VK_F1]) {
-		int mode;
-		if(wSettings->fullscreen) mode = WINDOW_MODE_WINDOWED;
-		else mode = WINDOW_MODE_FULLBORDERLESS;
-		setWindowMode(windowHandle, wSettings, mode);
-	}
+
 
 	#define VK_W 0x57
 	#define VK_A 0x41
@@ -1351,10 +1432,17 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 	glViewport(0,0, wSettings->currentRes.x, wSettings->currentRes.y);
-	glClearColor(0.3f, 0.1f, 0.1f, 1.0f);
+	// glClearColor(0.3f, 0.1f, 0.1f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	// glDepthRange(-1.0,1.0);
 	glEnable(GL_DEPTH_TEST);
+	glFrontFace(GL_CW);
+
+
+
+	glEnable(GL_MULTISAMPLE);
+	glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[0]);
+	glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
 
 
 
@@ -1450,7 +1538,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	Mat4 view, proj; 
 	viewMatrix(&view, ad->camPos, -cLook, cUp, cRight);
-	projMatrix(&proj, degreeToRadian(60), ad->aspectRatio, 0.1f, 2000);
+	projMatrix(&proj, degreeToRadian(ad->fieldOfView), ad->aspectRatio, 0.1f, 2000);
 
 	setupVoxelUniforms(ad->voxelVertex, ad->voxelFragment, vec4(ad->camPos, 1), 0, 0, 2, ambientLighting, view, proj);
 
@@ -1495,7 +1583,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			Vec3 cr = cRight;
 
 			float ar = ad->aspectRatio;
-			float fov = degreeToRadian(60);
+			float fov = degreeToRadian(ad->fieldOfView);
 			float ne = 0.1f;
 			float fa = 2000;
 
@@ -1616,9 +1704,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 #endif
 
 
+	if(second) {
+		GLenum glError = glGetError(); printf("GLError: %i\n", glError);
+		int stop = 2;
+	}
+
+
 
 	lookAt(&ad->pipelineIds, ad->camPos, -cLook, cUp, cRight);
-	perspective(&ad->pipelineIds, degreeToRadian(60), ad->aspectRatio, 0.1f, 2000);
+	perspective(&ad->pipelineIds, degreeToRadian(ad->fieldOfView), ad->aspectRatio, 0.1f, 2000);
 	glBindProgramPipeline(ad->pipelineIds.programCube);
 
 	// static float dt = 0;
@@ -1645,11 +1739,17 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
+
+
+
+
+
+
 	// view;
 	// viewMatrix(&view, ad->camPos, -cLook, cUp, cRight);
 	// glProgramUniformMatrix4fv(ids->primitiveVertex, ids->primitiveVertexView, 1, 1, view.e);
 	// proj;
-	// projMatrix(&proj, degreeToRadian(60), ad->aspectRatio, 0.1f, 2000);
+	// projMatrix(&proj, degreeToRadian(ad->fieldOfView), ad->aspectRatio, 0.1f, 2000);
 	// glProgramUniformMatrix4fv(ids->primitiveVertex, ids->primitiveVertexProj, 1, 1, proj.e);
 	// glBindProgramPipeline(ad->pipelineIds.programPrimitive);
 
@@ -1669,16 +1769,53 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-	
 
 
-	// ortho(&ad->pipelineIds, rectCenDim(cam->x,cam->y, cam->z, cam->z/ad->aspectRatio));
-	// glBindProgramPipeline(ad->pipelineIds.programQuad);
-	// drawRect(ad->pipelineIds, rectCenDim(0, 0, 0.01f, 100), rect(0,0,1,1), vec4(0.4f,1,0.4f,1), ad->textures[0]);
-	// drawRect(ad->pipelineIds, rectCenDim(0, 0, 100, 0.01f), rect(0,0,1,1), vec4(0.4f,0.4f,1,1), ad->textures[0]);
 
-	// drawRect(ad->pipelineIds, rectCenDim(0, 0, 5, 5), rect(0,0,1,1), vec4(1,1,1,1), ad->textures[2]);
-	// drawRect(ad->pipelineIds, rectCenDim(0, 0, 5, 5), rect(0,0,1,1), vec4(1,1,1,1), 3);
+	glBindFramebuffer (GL_READ_FRAMEBUFFER, ad->frameBuffers[0]);
+	// glReadBuffer      (GL_COLOR_ATTACHMENT0);
+	glBindFramebuffer (GL_DRAW_FRAMEBUFFER, ad->frameBuffers[1]);
+	// glDrawBuffer      (GL_BACK);
+	glBlitFramebuffer (0,0, wSettings->currentRes.w, wSettings->currentRes.h,
+	                   0,0, wSettings->currentRes.w, wSettings->currentRes.h,
+	                   // GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT,
+	                   GL_COLOR_BUFFER_BIT,
+	                   // GL_NEAREST);
+	                   GL_LINEAR);
+
+
+	glBindFramebuffer (GL_FRAMEBUFFER, 0);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glDisable(GL_DEPTH_TEST);
+
+
+
+	ortho(&ad->pipelineIds, rect(0,0,1,1));
+	glBindProgramPipeline(ad->pipelineIds.programQuad);
+
+	glProgramUniform4f(ids->quadVertex, ids->quadVertexMod, 0.5f, 0.5f, 1, 1);
+	glProgramUniform4f(ids->quadVertex, ids->quadVertexUV, 0,1,0,1);
+	glProgramUniform4f(ids->quadVertex, ids->quadVertexColor, 1,1,1,1);
+	glBindTexture(GL_TEXTURE_2D, ad->frameBufferTextures[0]);
+	glDrawArraysInstancedBaseInstance(GL_TRIANGLE_STRIP, 0, 4, 1, 0);
+
+	glBindFramebuffer (GL_DRAW_FRAMEBUFFER, ad->frameBuffers[1]);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glBindFramebuffer (GL_FRAMEBUFFER, 0);
+
+
+
+
+	ortho(&ad->pipelineIds, rectCenDim(cam->x,cam->y, cam->z, cam->z/ad->aspectRatio));
+	glBindProgramPipeline(ad->pipelineIds.programQuad);
+	// drawRect(&ad->pipelineIds, rectCenDim(0, 0, 0.01f, 100), rect(0,0,1,1), vec4(0.4f,1,0.4f,1), ad->textures[0]);
+	// drawRect(&ad->pipelineIds, rectCenDim(0, 0, 100, 0.01f), rect(0,0,1,1), vec4(0.4f,0.4f,1,1), ad->textures[0]);
+
+	// drawRect(&ad->pipelineIds, rectCenDim(0, 0, 5, 5), rect(0,0,1,1), vec4(1,1,1,1), ad->textures[2]);
+	// drawRect(&ad->pipelineIds, rectCenDim(0, 0, 5, 5), rect(0,0,1,1), vec4(1,1,1,1), 3);
+
+
+
 
 
 
@@ -1691,6 +1828,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 	drawTextA(&ad->pipelineIds, vec2(0,-150), vec4(1,1,1,1), &ad->fontArial, 0, 2, "Rot  : (%f,%f)", ad->camRot.x, ad->camRot.y);
 
 	drawTextA(&ad->pipelineIds, vec2(0,-180), vec4(1,1,1,1), &ad->fontArial, 0, 2, "Poly Count  : (%f)", (float)triangleCount);
+
+
+
+
 
 	swapBuffers(&ad->systemData);
 	glFinish();

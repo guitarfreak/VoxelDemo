@@ -413,6 +413,7 @@ struct WindowSettings {
 	WINDOWPLACEMENT g_wpPrev;
 
 	Vec2i currentRes;
+	float aspectRatio;
 };
 
 void setWindowStyle(HWND hwnd, DWORD dwStyle) {
@@ -453,6 +454,9 @@ void setWindowMode(HWND hwnd, WindowSettings* wSettings, int mode) {
 
 		wSettings->fullscreen = false;
 	}
+
+	getWindowProperties(hwnd, &wSettings->currentRes.x, &wSettings->currentRes.y,0,0,0,0);
+	wSettings->aspectRatio = wSettings->currentRes.x / (float)wSettings->currentRes.y;
 }
 
 void swapBuffers(SystemData* systemData) {
