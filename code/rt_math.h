@@ -34,6 +34,13 @@ inline float mapRange(float value, float min, float max, float rangeMin, float r
 	return result;
 };
 
+int mod(int a, int b) {
+	int result;
+	result = a % b;
+	if(result < 0) result += b;
+	return result;
+}
+
 inline float min(float a, float b) {
 	return a <= b ? a : b;
 }
@@ -48,6 +55,15 @@ inline float max(float a, float b) {
 
 inline float max(float a, float b, float c) {
 	return max(max(a, b), max(b, c));
+}
+
+inline int maxReturnIndex(float a, float b, float c) {
+	float result = max(a,b,c);
+	int index;
+	if(result == a) index = 0;
+	if(result == b) index = 1;
+	else index = 2;
+	return index;
 }
 
 inline float clampMin(float min, float a) {
@@ -977,6 +993,12 @@ inline Vec2i operator*(Vec2i a, int b) {
 	return a;
 }
 
+inline Vec2i operator/(Vec2i a, Vec2i b) {
+	a.x /= b.x;
+	a.y /= b.y;
+	return a;
+}
+
 // //
 // //
 // //
@@ -1471,6 +1493,14 @@ inline Vec3 vec3(float a, float b, float c) {
 	return vec;
 }
 
+inline Vec3 vec3(Vec3i v) {
+	Vec3 vec;
+	vec.x = v.x;
+	vec.y = v.y;
+	vec.z = v.z;
+	return vec;
+}
+
 inline Vec3 vec3(float a[3]) {
 	Vec3 vec;
 	vec.x = a[0];
@@ -1560,6 +1590,11 @@ inline Vec3 operator-(Vec3 a, Vec3 b) {
 	return a;
 }
 
+inline Vec3 & operator-=(Vec3 & a, Vec3 b) {
+	a = a - b;
+	return a;
+}
+
 inline Vec3 operator/(Vec3 a, float b) {
 	a.x /= b;
 	a.y /= b;
@@ -1606,10 +1641,56 @@ inline Vec3 toVec3(Vec2 a) {
 	return result;
 }
 
-inline Vec3 normVec3(Vec3 a) {
+inline float lenVec3(Vec3 a) {
 	float sqrlen = dot(a,a);
 	if(sqrlen > 0) sqrlen = 1.0f/sqrt(sqrlen);
+	return sqrlen;
+}
+
+inline Vec3 normVec3(Vec3 a) {
+	float sqrlen = lenVec3(a);
 	return a*sqrlen;
+}
+
+Vec3 projectPointOnLine(Vec3 lPos, Vec3 lDir, Vec3 p) {
+	Vec3 result;
+	result = lPos + ((dot(p-lPos, lDir) / dot(lDir,lDir))) * lDir;
+	return result;
+}
+
+bool boxRaycast(Vec3 lp, Vec3 ld, Rect3 box) {
+	// ld is unit
+	Vec3 dirfrac;
+	dirfrac.x = 1.0f / ld.x;
+	dirfrac.y = 1.0f / ld.y;
+	dirfrac.z = 1.0f / ld.z;
+	// lb is the corner of AABB with minimal coordinates - left bottom, rt is maximal corner
+	// r.org is origin of ray
+	float t1 = (box.min.x - lp.x)*dirfrac.x;
+	float t2 = (box.max.x - lp.x)*dirfrac.x;
+	float t3 = (box.min.y - lp.y)*dirfrac.y;
+	float t4 = (box.max.y - lp.y)*dirfrac.y;
+	float t5 = (box.min.z - lp.z)*dirfrac.z;
+	float t6 = (box.max.z - lp.z)*dirfrac.z;
+
+	float tmin = max(max(min(t1, t2), min(t3, t4)), min(t5, t6));
+	float tmax = min(min(max(t1, t2), max(t3, t4)), max(t5, t6));
+
+	float t;
+	// if tmax < 0, ray (line) is intersecting AABB, but whole AABB is behing us
+	if (tmax < 0) {
+	    t = tmax;
+	    return false;
+	}
+
+	// if tmin > tmax, ray doesn't intersect AABB
+	if (tmin > tmax) {
+	    t = tmax;
+	    return false;
+	}
+
+	t = tmin;
+	return true;
 }
 
 //
@@ -2075,6 +2156,29 @@ inline Rect3 rect3(Vec3 min, Vec3 max) {
 	Rect3 r;
 	r.min = min;
 	r.max = max;
+
+	return r;
+}
+
+inline Rect3 rect3CenDim(Vec3 cen, Vec3 dim) {
+	Rect3 r;
+	r.min = cen-dim*0.5f;
+	r.max = cen+dim*0.5f;
+
+	return r;
+}
+
+// Rect rectExpand(Rect r, Rect rExpand) {
+// 	Vec2 dim = rectGetDim(rExpand);
+// 	r.min -= dim/2;
+// 	r.max += dim/2;
+
+// 	return r;
+// }
+
+Rect3 rect3Expand(Rect3 r, Vec3 dim) {
+	r.min -= (dim/2);
+	r.max += (dim/2);
 
 	return r;
 }

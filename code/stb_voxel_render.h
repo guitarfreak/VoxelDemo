@@ -1847,7 +1847,7 @@ static const char *stbvox_fragment_program =
       //"   f = rlerp(f, -2,1);\n"
       "   f = clamp(f, 0.0, 1.0);\n" 
       "   f = 3.0*f*f - 2.0*f*f*f;\n" // smoothstep
-      //"   f = f*f;\n"  // fade in more smoothly
+      // "   f = f*f;\n"  // fade in more smoothly
       #ifdef STBVOX_CONFIG_PREMULTIPLIED_ALPHA
       "   return rlerp(f, color.xyz, ambient[3].xyz*fragment_alpha);\n"
       #else

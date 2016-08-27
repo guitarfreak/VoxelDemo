@@ -33,7 +33,6 @@
 //-----------------------------------------
 /*
 - Joysticks, Keyboard, Mouse, Xinput-DirectInput
-- stb_voxel
 - Sound
 - Data Package - Streaming
 - Expand Font functionality
@@ -43,11 +42,10 @@
 - remove c runtime library, implement sin, cos...
 - savestates, hotrealoading
 - pre and post functions to appMain
-- memory expansion
+- memory dynamic expansion
 - collision, walking
-- frameBuffer resolution
-
-- change msaa setup from blit to draw to screen
+- select block and delete
+- 32x32 voxel chunks
 
 
 //-------------------------------------
@@ -55,6 +53,7 @@
 //-------------------------------------
 - Font doesn't draw int
 - look has to be negative to work
+- app stops reacting to input after a while, hotloading still works though
 
 */
 
@@ -407,15 +406,26 @@ const char* fragmentShaderPrimitive = GLSL (
 );
 
 
-void updateAfterWindowResizing(WindowSettings* wSettings, float* ar, uint rb0, uint rb1, uint* fbt, int msaaSamples) {
+void updateAfterWindowResizing(WindowSettings* wSettings, float* ar, uint fb0, uint fb1, uint rb0, uint rb1, uint* fbt, int msaaSamples, Vec2i* fboRes, Vec2i* curRes, bool useNativeRes) {
 	*ar = wSettings->aspectRatio;
 	
-	glNamedRenderbufferStorageMultisample(rb0, msaaSamples, GL_RGBA8, wSettings->currentRes.w, wSettings->currentRes.h);
-	glNamedRenderbufferStorageMultisample(rb1, msaaSamples, GL_DEPTH_COMPONENT, wSettings->currentRes.w, wSettings->currentRes.h);
+	fboRes->x = fboRes->y*(*ar);
+
+	if(useNativeRes) *curRes = wSettings->currentRes;
+	else *curRes = *fboRes;
+
+	Vec2i s = *curRes;
+
+	glNamedRenderbufferStorageMultisample(rb0, msaaSamples, GL_RGBA8, s.w, s.h);
+	glNamedRenderbufferStorageMultisample(rb1, msaaSamples, GL_DEPTH_COMPONENT, s.w, s.h);
 
 	glDeleteTextures(1, fbt);
 	glCreateTextures(GL_TEXTURE_2D, 1, fbt);
-	glTextureStorage2D(*fbt, 1, GL_RGBA8, wSettings->currentRes.w, wSettings->currentRes.h);
+	glTextureStorage2D(*fbt, 1, GL_RGBA8, s.w, s.h);
+
+	glNamedFramebufferRenderbuffer(fb0, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, rb0);
+	glNamedFramebufferRenderbuffer(fb0, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rb1);
+	glNamedFramebufferTexture(fb1, GL_COLOR_ATTACHMENT0, *fbt, 0);
 }
 
 
@@ -782,13 +792,17 @@ float perlin2d(float x, float y, float freq, int depth)
 
 
 // #define VIEW_DISTANCE 1024 // 16
-#define VIEW_DISTANCE 512  // 8
-// #define VIEW_DISTANCE 256 // 4
+// #define VIEW_DISTANCE 512  // 8
+#define VIEW_DISTANCE 256 // 4
 // #define VIEW_DISTANCE 128 // 2
 
-// #define VIEW_DISTANCE 576
-// #define VIEW_DISTANCE 640
-// #define VIEW_DISTANCE 704
+// #define VIEW_DISTANCE 64*10
+// #define VIEW_DISTANCE 64*11
+// #define VIEW_DISTANCE 64*12
+// #define VIEW_DISTANCE 64*13
+// #define VIEW_DISTANCE 64*14
+// #define VIEW_DISTANCE 64*15
+// #define VIEW_DISTANCE 64*16
 
 #define VOXEL_X 64
 #define VOXEL_Y 64
@@ -835,6 +849,13 @@ void initVoxelMesh(VoxelMesh* m, Vec2i coord) {
 
 	m->voxels = (uchar*)getPMemory(VOXEL_SIZE);
 	m->lighting = (uchar*)getPMemory(VOXEL_SIZE);
+
+	glCreateBuffers(1, &m->bufferId);
+
+	if(STBVOX_CONFIG_MODE == 1) {
+		glCreateBuffers(1, &m->texBufferId);
+		glCreateTextures(GL_TEXTURE_BUFFER, 1, &m->textureId);
+	}
 }
 
 VoxelMesh* getVoxelMesh(VoxelMesh* vms, int* vmsSize, Vec2i coord) {
@@ -861,10 +882,8 @@ VoxelMesh* getVoxelMesh(VoxelMesh* vms, int* vmsSize, Vec2i coord) {
 	return m;
 }
 
-void generateVoxelMesh(VoxelMesh* m, Vec2i coord) {
-
-	// m->voxels = (uchar*)getTMemory(VOXEL_SIZE);
-	// m->lighting = (uchar*)getTMemory(VOXEL_SIZE);
+void generateVoxelMesh(VoxelMesh* m) {
+	Vec2i coord = m->coord;
 
 	if(!m->generated) {
 		zeroMemory(m->voxels, VOXEL_SIZE);
@@ -880,6 +899,7 @@ void generateVoxelMesh(VoxelMesh* m, Vec2i coord) {
 
 	    		float perlin = perlin2d(gx+4000, gy+4000, 0.015f, 4);
 	    		float height = perlin*50;
+	    		// float height = 5;
 
 	    		int blockType = randomInt(8,10);
 	    		for(int z = 0; z < height; z++) {
@@ -904,7 +924,7 @@ void makeMesh(VoxelMesh* m, VoxelMesh* vms, int* vmsSize) {
 		for(int x = -1; x < 2; x++) {
 			Vec2i c = coord + vec2i(x,y);
 			VoxelMesh* lm = getVoxelMesh(vms, vmsSize, c);
-			generateVoxelMesh(lm, c);
+			generateVoxelMesh(lm);
 
 			int w = x == 0 ? VOXEL_X : 1;
 			int h = y == 0 ? VOXEL_Y : 1;
@@ -978,20 +998,63 @@ void makeMesh(VoxelMesh* m, VoxelMesh* vms, int* vmsSize) {
 
 
 
-
-	glCreateBuffers(1, &m->bufferId);
 	glNamedBufferData(m->bufferId, bufferSizePerQuad*m->quadCount, m->meshBuffer, GL_STATIC_DRAW);
 	glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
 
 	if(STBVOX_CONFIG_MODE == 1) {
-		glCreateBuffers(1, &m->texBufferId);
 		glNamedBufferData(m->texBufferId, textureBufferSizePerQuad*m->quadCount, m->texBuffer, GL_STATIC_DRAW);
-
-		glCreateTextures(GL_TEXTURE_BUFFER, 1, &m->textureId);
-
 		glTextureBuffer(m->textureId, GL_RGBA8UI, m->texBufferId);
 	}
 
+}
+
+Vec3i getVoxelCoordFromGlobalCoord(Vec3 globalCoord) {
+	Vec3i result;
+	if(globalCoord.x < 0) globalCoord.x -= 1;
+	if(globalCoord.y < 0) globalCoord.y -= 1;
+	result = vec3i(globalCoord);
+
+	return result;
+}
+
+Vec3 getGlobalCoordFromVoxelCoord(Vec3i voxelCoord) {
+	Vec3 result;
+	// assumes voxel has length of 1
+	result = vec3(voxelCoord) + vec3(0.5f, 0.5f, 0.5f);
+	return result;
+}
+
+Vec2i getMeshCoordFromVoxelCoord(Vec3i voxelCoord) {
+	Vec2i result;
+	result = vec2i(floor(voxelCoord.x/(float)VOXEL_X), floor(voxelCoord.y/(float)VOXEL_Y));
+	return result;
+}
+
+Vec2i getMeshCoordFromGlobalCoord(Vec3 globalCoord) {
+	Vec2i result;
+	Vec3i mc = getVoxelCoordFromGlobalCoord(globalCoord);
+	result = getMeshCoordFromVoxelCoord(mc);
+	return result;
+}
+
+Vec3i getLocalVoxelCoord(Vec3i voxelCoord) {
+	Vec3i result = voxelCoord;
+	result.x = mod(voxelCoord.x, VOXEL_X);
+	result.y = mod(voxelCoord.y, VOXEL_Y);
+
+	return result;
+}
+
+
+#define voxelArray(x, y, z) x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z
+
+
+void getCamData(Vec3 look, Vec2 rot, Vec3 gUp, Vec3* cLook, Vec3* cRight, Vec3* cUp) {
+	rotateVec3(&look, rot.x, gUp);
+	rotateVec3(&look, rot.y, normVec3(cross(gUp, look)));
+	*cUp = normVec3(cross(look, normVec3(cross(gUp, look))));
+	*cRight = normVec3(cross(gUp, look));
+	*cLook = -look;
 }
 
 struct AppData {
@@ -1019,7 +1082,22 @@ struct AppData {
 
 	Font fontArial;
 
+	Vec2i curRes;
 	int msaaSamples;
+	Vec2i fboRes;
+	bool useNativeRes;
+
+	Vec3 playerPos;
+	Vec3 playerLook;
+	Vec2 playerRot;
+	Vec3 playerSize;
+	float playerCamZOffset;
+	bool playerMode;
+	bool pickMode;
+
+	Vec3 playerVel;
+	Vec3 playerAcc;
+
 
 
 	float transform[3][3];
@@ -1078,6 +1156,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		ad->msaaSamples = 4;
 		ad->fieldOfView = 50;
+		ad->fboRes = vec2i(0, 120);
+		ad->useNativeRes = true;
 
 		// DEVMODE devMode;
 		// int index = 0;
@@ -1146,7 +1226,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->camera = vec3(0,0,10);
 
 		// ad->camPos = vec3(-10,-10,5);
-		ad->camPos = vec3(30,30,50);
+		// ad->camPos = vec3(30,30,50);
+		ad->camPos = vec3(35,35,32);
 		// ad->camLook = normVec3(vec3(-1,-1,0));
 		ad->camLook = normVec3(vec3(0,1,0));
 		// ad->camLook = vec3(0,0,1);
@@ -1178,9 +1259,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->textures[ad->texCount++] = texId;
 		font.texId = texId;
 		ad->fontArial = font;
-
-
-
 
 
 
@@ -1235,7 +1313,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		char* fullPath = getTString(234);
 
 		texId = ad->voxelTextures[0];
-		glTextureStorage3D(texId, 1, internalFormat, width, height, texCount);
+		glTextureStorage3D(texId, 6, internalFormat, width, height, texCount);
 		for(int tc = 0; tc < texCount; tc++) {
 			unsigned char* stbData;
 			int x,y,n;
@@ -1255,78 +1333,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-		glCreateFramebuffers(1, ad->frameBuffers);
+		glCreateFramebuffers(2, ad->frameBuffers);
 		glCreateRenderbuffers(2, ad->renderBuffers);
-		// glNamedRenderbufferStorageMultisample(ad->renderBuffers[0], 4, GL_RGBA8, wSettings->res.w, wSettings->res.h);
-		// glNamedRenderbufferStorageMultisample(ad->renderBuffers[1], 4, GL_DEPTH_COMPONENT, wSettings->res.w, wSettings->res.h);
-		// glNamedFramebufferRenderbuffer(ad->frameBuffers[0], GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, ad->renderBuffers[0]);
-		// glNamedFramebufferRenderbuffer(ad->frameBuffers[0], GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, ad->renderBuffers[1]);
-
-		glCreateFramebuffers(1, &ad->frameBuffers[1]);
 		glCreateTextures(GL_TEXTURE_2D, 2, ad->frameBufferTextures);
-		// glTextureStorage2D(ad->frameBufferTextures[0], 1, GL_RGBA8, wSettings->res.w, wSettings->res.h);
-		// glNamedFramebufferTexture(ad->frameBuffers[1], GL_COLOR_ATTACHMENT0, ad->frameBufferTextures[0], 0);
-
 		// GLenum result = glCheckNamedFramebufferStatus(ad->frameBuffers[0], GL_FRAMEBUFFER);
-
-
-
-#if 0
-		glCreateFramebuffers(1, ad->frameBuffers);
-		glCreateRenderbuffers(2, ad->renderBuffers);
-		// glNamedRenderbufferStorageMultisample(ad->renderBuffers[0], 4, GL_RGBA8, wSettings->res.w, wSettings->res.h);
-		// glNamedFramebufferRenderbuffer(ad->frameBuffers[0], GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, ad->renderBuffers[0]);
-		glNamedRenderbufferStorageMultisample(ad->renderBuffers[1], 4, GL_DEPTH_COMPONENT, wSettings->res.w, wSettings->res.h);
-		glNamedFramebufferRenderbuffer(ad->frameBuffers[0], GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, ad->renderBuffers[1]);
-
-
-
-			glError = glGetError(); printf("GLError: %i\n", glError);
-		glCreateTextures(GL_TEXTURE_2D_MULTISAMPLE, 2, ad->frameBufferTextures);
-			glError = glGetError(); printf("GLError: %i\n", glError);
-		glTextureStorage2DMultisample(ad->frameBufferTextures[0], 4, GL_RGBA8, wSettings->res.w, wSettings->res.h, GL_FALSE);
-			glError = glGetError(); printf("GLError: %i\n", glError);
-		// glGenTextures( 1, ad->frameBufferTextures);
-		// glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, ad->frameBufferTextures[0]);
-			glError = glGetError(); printf("GLError: %i\n", glError);
-		// glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, 4, GL_RGBA8, wSettings->res.w, wSettings->res.h, GL_FALSE);
-			glError = glGetError(); printf("GLError: %i\n", glError);
-		glNamedFramebufferTexture(ad->frameBuffers[0], GL_COLOR_ATTACHMENT0, ad->frameBufferTextures[0], 0);
-			glError = glGetError(); printf("GLError: %i\n", glError);
-
-		// glTextureStorage2DMultisample(ad->frameBufferTextures[1], 4, GL_DEPTH_COMPONENT, wSettings->res.w, wSettings->res.h, asdf);
-		// glError = glGetError(); printf("GLError: %i\n", glError);
-		// glNamedFramebufferTexture(ad->frameBuffers[0], GL_DEPTH_ATTACHMENT, ad->frameBufferTextures[1], 0);
-		// glError = glGetError(); printf("GLError: %i\n", glError);
-#endif
-
-
-
-
-		// glCreateFramebuffers(1, ad->frameBuffers);
-
-		// glCreateTextures(GL_TEXTURE_2D, 2, ad->frameBufferTextures);
-		// glTextureStorage2D(ad->frameBufferTextures[0], 1, GL_RGBA8, wSettings->res.w, wSettings->res.h);
-		// glTextureStorage2D(ad->frameBufferTextures[1], 1, GL_DEPTH_COMPONENT32, wSettings->res.w, wSettings->res.h);
-
-		// glNamedFramebufferTexture(ad->frameBuffers[0], GL_COLOR_ATTACHMENT0, ad->frameBufferTextures[0], 0);
-		// glNamedFramebufferTexture(ad->frameBuffers[0], GL_DEPTH_ATTACHMENT, ad->frameBufferTextures[1], 0);
-		// GLenum result = glCheckNamedFramebufferStatus(ad->frameBuffers[0], GL_FRAMEBUFFER);
-
-
-
-
-		// glCreateFramebuffers(1, ad->frameBuffers);
-
-		// glCreateTextures(GL_TEXTURE_2D_MULTISAMPLE, 2, ad->frameBufferTextures);
-		// glTextureStorage2DMultisample(ad->frameBufferTextures[0], 4, GL_RGBA8, wSettings->res.w, wSettings->res.h, GL_FALSE);
-		// glTextureStorage2DMultisample(ad->frameBufferTextures[1], 4, GL_DEPTH_COMPONENT32, wSettings->res.w, wSettings->res.h, GL_FALSE);
-
-		// glNamedFramebufferTexture(ad->frameBuffers[0], GL_COLOR_ATTACHMENT0, ad->frameBufferTextures[0], 0);
-		// glNamedFramebufferTexture(ad->frameBuffers[0], GL_DEPTH_ATTACHMENT, ad->frameBufferTextures[1], 0);
-		// GLenum result = glCheckNamedFramebufferStatus(ad->frameBuffers[0], GL_FRAMEBUFFER);
-
-
 
 
 
@@ -1335,23 +1345,24 @@ extern "C" APPMAINFUNCTION(appMain) {
 		zeroMemory(ad->vMeshs, vMeshSize);
 		ad->vMeshsSize = 0;
 
+		ad->playerPos = vec3(35.5f,35.3f,30);
+		ad->playerLook = vec3(0,1,0);
+		ad->playerSize = vec3(0.8f, 0.8f, 1.8f);
+		ad->playerCamZOffset = ad->playerSize.z*0.5f - ad->playerSize.x*0.5f;
+
+		ad->playerMode = true;
+		ad->pickMode = false;
 
 		return; // window operations only work after first frame?
 	}
 
 	if(second) {
-		// setWindowProperties(windowHandle, wSettings->res.w, wSettings->res.h, -1920, 0);
-		setWindowProperties(windowHandle, wSettings->res.w, wSettings->res.h, 0, 0);
+		setWindowProperties(windowHandle, wSettings->res.w, wSettings->res.h, -1920, 0);
+		// setWindowProperties(windowHandle, wSettings->res.w, wSettings->res.h, 0, 0);
 		setWindowStyle(windowHandle, wSettings->style);
-
 		setWindowMode(windowHandle, wSettings, WINDOW_MODE_FULLBORDERLESS);
 
-		updateAfterWindowResizing(wSettings, &ad->aspectRatio, ad->renderBuffers[0], ad->renderBuffers[1], &ad->frameBufferTextures[0], ad->msaaSamples);
-
-		glNamedFramebufferRenderbuffer(ad->frameBuffers[0], GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, ad->renderBuffers[0]);
-		glNamedFramebufferRenderbuffer(ad->frameBuffers[0], GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, ad->renderBuffers[1]);
-		glNamedFramebufferTexture(ad->frameBuffers[1], GL_COLOR_ATTACHMENT0, ad->frameBufferTextures[0], 0);
-
+		updateAfterWindowResizing(wSettings, &ad->aspectRatio, ad->frameBuffers[0], ad->frameBuffers[1], ad->renderBuffers[0], ad->renderBuffers[1], &ad->frameBufferTextures[0], ad->msaaSamples, &ad->fboRes, &ad->curRes, ad->useNativeRes);
 	}
 
 	if(reload) {
@@ -1362,20 +1373,16 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	PipelineIds* ids = &ad->pipelineIds;
 
-
 	if(input->keysPressed[VK_F1]) {
 		int mode;
 		if(wSettings->fullscreen) mode = WINDOW_MODE_WINDOWED;
 		else mode = WINDOW_MODE_FULLBORDERLESS;
 		setWindowMode(windowHandle, wSettings, mode);
 
-		updateAfterWindowResizing(wSettings, &ad->aspectRatio, ad->renderBuffers[0], ad->renderBuffers[1], &ad->frameBufferTextures[0], ad->msaaSamples);
-
-		glNamedFramebufferRenderbuffer(ad->frameBuffers[0], GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, ad->renderBuffers[0]);
-		glNamedFramebufferRenderbuffer(ad->frameBuffers[0], GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, ad->renderBuffers[1]);
-		glNamedFramebufferTexture(ad->frameBuffers[1], GL_COLOR_ATTACHMENT0, ad->frameBufferTextures[0], 0);
+		updateAfterWindowResizing(wSettings, &ad->aspectRatio, ad->frameBuffers[0], ad->frameBuffers[1], ad->renderBuffers[0], ad->renderBuffers[1], &ad->frameBufferTextures[0], ad->msaaSamples, &ad->fboRes, &ad->curRes, ad->useNativeRes);
 	}
 
+	// 2d camera controls
 	Vec3* cam = &ad->camera;	
 	if(input->mouseButtonDown[0]) {
 		cam->x += input->mouseDeltaX*(cam->z/wSettings->currentRes.w);
@@ -1389,6 +1396,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 
+	if(input->keysPressed[VK_F4]) {
+		ad->playerMode = !ad->playerMode;
+	}
+
+	if(input->keysPressed[VK_F5]) {
+		ad->pickMode = !ad->pickMode;
+	}
 
 	#define VK_W 0x57
 	#define VK_A 0x41
@@ -1397,41 +1411,175 @@ extern "C" APPMAINFUNCTION(appMain) {
 	#define VK_E 0x45
 	#define VK_Q 0x51
 
-	if(input->mouseButtonDown[1]) {
-		float dt = 0.005f;
-		ad->camRot.y += dt * input->mouseDeltaY;
-		ad->camRot.x += dt * input->mouseDeltaX;
-
-		float margin = 0.00001f;
-		clamp(&ad->camRot.y, -M_PI+margin, M_PI-margin);
-	}
-
-	// Vec3 gUp = vec3(0,1,0);
 	Vec3 gUp = vec3(0,0,1);
-	Vec3 cLook = ad->camLook;
-	rotateVec3(&cLook, ad->camRot.x, gUp);
-	rotateVec3(&cLook, ad->camRot.y, normVec3(cross(gUp, cLook)));
-	Vec3 cUp = normVec3(cross(cLook, normVec3(cross(gUp, cLook))));
-	Vec3 cRight = normVec3(cross(gUp, cLook));
-	cLook = -cLook;
 
-	if( input->keysDown[VK_W] || input->keysDown[VK_A] || input->keysDown[VK_S] || 
-		input->keysDown[VK_D] || input->keysDown[VK_E] || input->keysDown[VK_Q]) {
+	Vec3 pLook, pRight, pUp;
+	getCamData(ad->playerLook, ad->playerRot, gUp, &pLook, &pRight, &pUp);
+	// Vec3 playerDelta = vec3(0,0,0);
 
-		Vec3 look = cLook;
-		if(input->keysDown[VK_CONTROL]) look = cross(gUp, cRight);
+	// ad->camPos = ad->playerPos + vec3(0,0,ad->playerCamZOffset);
+	// ad->camLook = ad->playerLook;
 
-		float speed = 0.1f;
-		if(input->mouseButtonDown[0]) speed = 0.5f;
-		if(input->keysDown[VK_W]) ad->camPos += normVec3(look)*speed;
-		if(input->keysDown[VK_S]) ad->camPos += -normVec3(look)*speed;
-		if(input->keysDown[VK_D]) ad->camPos += normVec3(cRight)*speed;
-		if(input->keysDown[VK_A]) ad->camPos += -normVec3(cRight)*speed;
-		if(input->keysDown[VK_E]) ad->camPos += normVec3(gUp)*speed;
-		if(input->keysDown[VK_Q]) ad->camPos += -normVec3(gUp)*speed;
+	Vec3 cLook, cRight, cUp;
+	getCamData(ad->camLook, ad->camRot, gUp, &cLook, &cRight, &cUp);
+
+	// cLook = pLook;
+	// cRight = pRight;
+	// cUp = pUp;
+
+	ad->playerAcc = vec3(0,0,0);
+
+	if(!ad->playerMode) {
+		// 3d camera controls
+		if(input->mouseButtonDown[1]) {
+			float dt = 0.005f;
+			ad->camRot.y += dt * input->mouseDeltaY;
+			ad->camRot.x += dt * input->mouseDeltaX;
+
+			float margin = 0.00001f;
+			clamp(&ad->camRot.y, -M_PI+margin, M_PI-margin);
+		}
+
+		if( input->keysDown[VK_W] || input->keysDown[VK_A] || input->keysDown[VK_S] || 
+			input->keysDown[VK_D] || input->keysDown[VK_E] || input->keysDown[VK_Q]) {
+
+			Vec3 look = cLook;
+			if(input->keysDown[VK_CONTROL]) look = cross(gUp, cRight);
+
+			float speed = 0.1f;
+			if(input->keysDown[VK_SHIFT]) speed = 0.5f;
+			if(input->keysDown[VK_W]) ad->camPos += normVec3(look)*speed;
+			if(input->keysDown[VK_S]) ad->camPos += -normVec3(look)*speed;
+			if(input->keysDown[VK_D]) ad->camPos += normVec3(cRight)*speed;
+			if(input->keysDown[VK_A]) ad->camPos += -normVec3(cRight)*speed;
+			if(input->keysDown[VK_E]) ad->camPos += normVec3(gUp)*speed;
+			if(input->keysDown[VK_Q]) ad->camPos += -normVec3(gUp)*speed;
+		}
+	} else {
+		ad->camPos = ad->playerPos + vec3(0,0,ad->playerCamZOffset);
+		ad->camLook = ad->playerLook;
+
+		cLook = pLook;
+		cRight = pRight;
+		cUp = pUp;
+
+		if(input->mouseButtonDown[1]) {
+			float dt = 0.005f;
+			ad->playerRot.y += dt * input->mouseDeltaY;
+			ad->playerRot.x += dt * input->mouseDeltaX;
+
+			float margin = 0.00001f;
+			clamp(&ad->playerRot.y, -M_PI+margin, M_PI-margin);
+		}
+
+		if( input->keysDown[VK_W] || input->keysDown[VK_A] || input->keysDown[VK_S] || 
+			input->keysDown[VK_D] || input->keysDown[VK_E] || input->keysDown[VK_Q]) {
+
+			Vec3 look = pLook;
+			if(input->keysDown[VK_CONTROL]) look = cross(gUp, pRight);
+
+			// float speed = 0.01f;
+			float speed = 1.0f;
+			if(input->keysDown[VK_SHIFT]) speed = 3.0f;
+			if(input->keysDown[VK_W]) ad->playerAcc += normVec3(look)*speed;
+			if(input->keysDown[VK_S]) ad->playerAcc += -normVec3(look)*speed;
+			if(input->keysDown[VK_D]) ad->playerAcc += normVec3(pRight)*speed;
+			if(input->keysDown[VK_A]) ad->playerAcc += -normVec3(pRight)*speed;
+			if(input->keysDown[VK_E]) ad->playerAcc += normVec3(gUp)*speed;
+			if(input->keysDown[VK_Q]) ad->playerAcc += -normVec3(gUp)*speed;
+		}
 	}
 
-	glViewport(0,0, wSettings->currentRes.x, wSettings->currentRes.y);
+	float dt = 0.166f;
+	ad->playerVel += ad->playerAcc*dt;
+	ad->playerVel *= 0.9f;
+
+	if(ad->playerVel != vec3(0,0,0)) {
+		Vec3 pPos = ad->playerPos;
+		Vec3 pSize = ad->playerSize;
+
+		// Vec3 nPos = pPos + playerDelta;
+		// Vec3 nPos = pPos + playerDelta;
+		Vec3 nPos = pPos + 0.5f*ad->playerAcc*dt*dt + ad->playerVel*dt;
+
+		int collisionCount = 0;
+		bool collision = true;
+		while(collision) {
+
+			// get mesh coords that touch the player box
+			Rect3 box = rect3CenDim(nPos, pSize);
+			Vec3i voxelMin = getVoxelCoordFromGlobalCoord(box.min);
+			Vec3i voxelMax = getVoxelCoordFromGlobalCoord(box.max+1);
+
+			Vec3 collisionBox;
+			collision = false;
+			float minDistance = 100000;
+
+			// check collision with the voxel thats closest
+			for(int x = voxelMin.x; x < voxelMax.x; x++) {
+				for(int y = voxelMin.y; y < voxelMax.y; y++) {
+					for(int z = voxelMin.z; z < voxelMax.z; z++) {
+						Vec3i coord = vec3i(x,y,z);
+						Vec2i meshCoord = getMeshCoordFromVoxelCoord(coord);
+						VoxelMesh* m = getVoxelMesh(ad->vMeshs, &ad->vMeshsSize, meshCoord);
+						Vec3i localC = getLocalVoxelCoord(coord);
+						int blockType = m->voxels[voxelArray(localC.x,localC.y,localC.z)];
+
+						if(blockType > 0) {
+							Vec3 cBox = getGlobalCoordFromVoxelCoord(coord);
+							float distance = lenVec3(nPos - cBox);
+							if(minDistance == 100000 || distance > minDistance) {
+								minDistance = distance;
+								collisionBox = cBox;
+							}
+							collision = true;
+						}
+					}
+				}
+			}
+
+			if(collision) {
+				collisionCount++;
+
+				float minDistance;
+				Vec3 dir = vec3(0,0,0);
+
+				// check all the 6 planes and take the one with the shortest distance
+				for(int i = 0; i < 6; i++) {
+					Vec3 n;
+					if(i == 0) 		n = vec3(1,0,0);
+					else if(i == 1) n = vec3(-1,0,0);
+					else if(i == 2) n = vec3(0,1,0);
+					else if(i == 3) n = vec3(0,-1,0);
+					else if(i == 4) n = vec3(0,0,1);
+					else if(i == 5) n = vec3(0,0,-1);
+
+					// assuming voxel size is 1
+					// this could be simpler because the voxels are axis aligned
+					Vec3 p = collisionBox + (n * ((pSize/2) + 0.5));
+					float d = -dot(p, n);
+					float d2 = dot(nPos, n);
+
+					// distances are lower then zero in this case where the point is 
+					// not on the same side as the normal
+					float distance = d + d2;
+
+					if(i == 0 || distance > minDistance) {
+						minDistance = distance;
+						dir = n;
+					}
+				}
+
+				float error = 0.00001f;
+				nPos += dir*(-minDistance + error);
+			}
+		}
+
+		ad->playerPos = nPos;
+	}
+
+
+	glViewport(0,0, ad->curRes.x, ad->curRes.y);
 	// glClearColor(0.3f, 0.1f, 0.1f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	// glDepthRange(-1.0,1.0);
@@ -1443,7 +1591,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glEnable(GL_MULTISAMPLE);
 	glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[0]);
 	glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
-
 
 
 
@@ -1529,7 +1676,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	al.e2[3][0] = 0.6f, al.e2[3][1] = 0.7f, al.e2[3][2] = 0.9f;
 	// al.e2[3][3] = 1.0f / (view_distance - MESH_CHUNK_SIZE_X);
 	// al.e2[3][3] *= al.e2[3][3];
-	al.e2[3][3] = (float)1.0f/(VIEW_DISTANCE);
+	al.e2[3][3] = (float)1.0f/(VIEW_DISTANCE - VOXEL_X);
 	al.e2[3][3] *= al.e2[3][3];
 
 	ambientLighting = al;
@@ -1547,23 +1694,46 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 	int meshGenerationCount = 0;
-
 	int triangleCount = 0;
 
-	Vec3i pos = vec3i(ad->camPos);
-	if(pos.x < 0) pos.x -= VOXEL_X;
-	if(pos.y < 0) pos.y -= VOXEL_Y;
-	Vec2i playerMeshCoord = vec2i(pos.x/VOXEL_X, pos.y/VOXEL_Y);
-
+	Vec2i playerMeshCoord = getMeshCoordFromGlobalCoord(ad->camPos);
 	int radius = VIEW_DISTANCE/VOXEL_X;
-	Vec2i min = vec2i(playerMeshCoord.x-radius, playerMeshCoord.y-radius);
-	Vec2i max = vec2i(playerMeshCoord.x+radius, playerMeshCoord.y+radius);
 
 	VoxelMesh* vms = ad->vMeshs;
 	int* vmsSize = &ad->vMeshsSize;
-	for(int x = min.x; x < max.x+1; x++) {
-		for(int y = min.y; y < max.y+1; y++) {
-			Vec2i coord = vec2i(x,y);
+
+	// Vec2i min = vec2i(playerMeshCoord.x-radius, playerMeshCoord.y-radius);
+	// Vec2i max = vec2i(playerMeshCoord.x+radius, playerMeshCoord.y+radius);
+	// for(int x = min.x; x < max.x+1; x++) {
+		// for(int y = min.y; y < max.y+1; y++) {
+
+	Vec2i pPos = vec2i(playerMeshCoord.x, playerMeshCoord.y);
+
+	// generate the meshes around the player in a spiral by drawing lines and rotating
+	// the directing every time we reach a corner
+	for(int r = 0; r < radius; r++) {
+		int lineLength = r == 0? 1 : 8*r;
+		int segment = r*2;
+
+		Vec2i lPos = pPos+r;
+
+		int lLength = 0;
+		Vec2i lDir = vec2i(0,-1);
+
+		for(int lineId = 0; lineId < lineLength; lineId++) {
+			if(r == 0) lPos = pPos;
+			else {
+				if(lLength == segment) {
+					lLength = 0;
+					lDir = vec2i(lDir.y, -lDir.x);
+				}
+				lLength++;
+
+				lPos += lDir;
+			}
+
+			Vec2i coord = lPos;
+			// Vec2i coord = vec2i(x,y);
 
 			VoxelMesh* m = getVoxelMesh(vms, vmsSize, coord);
 			if(!m->upToDate) {
@@ -1727,9 +1897,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// for(int i = -10; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,0,i*10) + off, s, 0, normVec3(vec3(0.9f,0.6f,0.2f)));
 
 
-	for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(i*10,0,0) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
-	for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,i*10,0) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
-	for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,0,i*10) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
+	// for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(i*10,0,0) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
+	// for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,i*10,0) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
+	// for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,0,i*10) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
 
 
 	#ifdef STBVOX_CONFIG_LIGHTING_SIMPLE
@@ -1737,36 +1907,182 @@ extern "C" APPMAINFUNCTION(appMain) {
 	#endif
 
 
+	glDisable(GL_CULL_FACE);
+
+	glEnable(GL_CULL_FACE);
+
+
+
+	Vec3 cursorPos;
+	Vec3 cursorDir;
+
+	// if(input->mouseButtonPressed[0] && ad->playerMode) {
+	if(true) {
+		// playerPos;
+		// playerLook;
+		// playercamoffset;
+
+		cursorDir = pLook;
+		cursorPos = ad->playerPos + vec3(0,0,ad->playerCamZOffset);
+
+		// Vec3 globalCoord = cursorPos + cursorDir*3;
+
+		// VoxelMesh* vm = getVoxelMesh(ad->vMeshs, &ad->vMeshsSize, getMeshCoordFromGlobalCoord(globalCoord));
+		// Vec3i localCoord = getLocalVoxelCoord(getVoxelCoordFromGlobalCoord(globalCoord));
+		// int blockType = vm->voxels[voxelArray(localCoord.x, localCoord.y, localCoord.z)];
+
+		// Vec3 blockCoords = getGlobalCoordFromVoxelCoord(getVoxelCoordFromGlobalCoord(globalCoord));
+
+		// drawCube(&ad->pipelineIds, blockCoords, vec3(1,1,1), vec4(0,0,1,1), 0, vec3(0,0,0));
+
+
+
+		// Vec3 blockCoords;
+		// int blockType;
+
+		// if(blockType > 0) {
+			// drawCube(&ad->pipelineIds, blockCoords, vec3(1.01f,1.01f,1.01f), vec4(0,0,1,1), 0, vec3(0,0,0));
+		// }
+
+		// get block in line
+		Vec3 startPos = cursorPos;
+		Vec3 startDir = cursorDir;
+
+		Vec3 newPos = startPos;
+		int biggestAxis = maxReturnIndex(abs(startDir.x), abs(startDir.y), abs(startDir.z));
+
+		bool intersection = false;
+		Vec3 intersectionBox;
+
+		int length = 20;
+		for(int i = 0; i < length; i++) {
+			newPos = newPos + normVec3(startDir);
+
+			Vec3 coords[5];
+			int coordsSize = 0;
+
+			coords[coordsSize++] = newPos;
+
+			Vec3 blockCoords = getGlobalCoordFromVoxelCoord(getVoxelCoordFromGlobalCoord(newPos));
+			for(int axis = 0; axis < 3; axis++) {
+				if(axis == biggestAxis) continue;
+				
+				for(int i = 0; i < 2; i++) {
+					Vec3 dir = vec3(0,0,0);
+			
+					if(i == 0) dir.e[axis] = 1;
+					else dir.e[axis] = -1;
+
+					coords[coordsSize++] = blockCoords + dir;
+
+					// drawCube(&ad->pipelineIds, blockCoords + dir, vec3(1.0f,1.0f,1.0f), vec4(1,0,1,1), 0, vec3(0,0,0));
+				}
+			}
+
+			for(int i = 0; i < coordsSize; i++) {
+				Vec3 block = coords[i];
+
+				VoxelMesh* vm = getVoxelMesh(ad->vMeshs, &ad->vMeshsSize, getMeshCoordFromGlobalCoord(block));
+				Vec3i localCoord = getLocalVoxelCoord(getVoxelCoordFromGlobalCoord(block));
+				int blockType = vm->voxels[voxelArray(localCoord.x, localCoord.y, localCoord.z)];
+
+				if(blockType > 0) {
+					intersectionBox = getGlobalCoordFromVoxelCoord(getVoxelCoordFromGlobalCoord(block));
+					intersection = boxRaycast(startPos, startDir, rect3CenDim(intersectionBox, vec3(1,1,1)));
+
+					if(intersection) {
+						glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+						drawCube(&ad->pipelineIds, intersectionBox, vec3(1.01f,1.01f,1.01f), vec4(0.9f), 0, vec3(0,0,0));
+
+						intersection = true;
+						break;						
+					}
+				}
+			}
+
+			if(intersection) break;
+		}
+
+
+		if(input->mouseButtonPressed[0] && ad->playerMode) {
+			Vec3 block = intersectionBox;
+
+			VoxelMesh* vm = getVoxelMesh(ad->vMeshs, &ad->vMeshsSize, getMeshCoordFromGlobalCoord(block));
+			Vec3i localCoord = getLocalVoxelCoord(getVoxelCoordFromGlobalCoord(block));
+
+			if(ad->pickMode) {
+				vm->voxels[voxelArray(localCoord.x, localCoord.y, localCoord.z)] = 2;
+				// vm->lighting[voxelArray(localCoord.x, localCoord.y, localCoord.z)] = 255;
+			} else {
+				vm->voxels[voxelArray(localCoord.x, localCoord.y, localCoord.z)] = 0;			
+				vm->lighting[voxelArray(localCoord.x, localCoord.y, localCoord.z)] = 255;			
+			}
+
+			generateVoxelMesh(vm);
+			makeMesh(vm, ad->vMeshs, &ad->vMeshsSize);
+		}
+	}
 
 
 
 
 
 
+	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+	drawCube(&ad->pipelineIds, ad->playerPos, ad->playerSize, vec4(1,1,1,1), 0, vec3(0,0,0));
 
 
-	// view;
-	// viewMatrix(&view, ad->camPos, -cLook, cUp, cRight);
-	// glProgramUniformMatrix4fv(ids->primitiveVertex, ids->primitiveVertexView, 1, 1, view.e);
-	// proj;
-	// projMatrix(&proj, degreeToRadian(ad->fieldOfView), ad->aspectRatio, 0.1f, 2000);
-	// glProgramUniformMatrix4fv(ids->primitiveVertex, ids->primitiveVertexProj, 1, 1, proj.e);
-	// glBindProgramPipeline(ad->pipelineIds.programPrimitive);
 
-	// glDisable(GL_CULL_FACE);
+	// glEnable(GL_CULL_FACE);
 
-	// glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-	// glLineWidth(3);
+	view;
+	viewMatrix(&view, ad->camPos, -cLook, cUp, cRight);
+	glProgramUniformMatrix4fv(ids->primitiveVertex, ids->primitiveVertexView, 1, 1, view.e);
+	proj;
+	projMatrix(&proj, degreeToRadian(ad->fieldOfView), ad->aspectRatio, 0.1f, 2000);
+	glProgramUniformMatrix4fv(ids->primitiveVertex, ids->primitiveVertexProj, 1, 1, proj.e);
+	glBindProgramPipeline(ad->pipelineIds.programPrimitive);
+
+	glDisable(GL_CULL_FACE);
+	glEnable(GL_LINE_SMOOTH);
+
+	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+	glLineWidth(3);
+
+	// ad->camPos = vec3(44.81f, 34.44f, 29.27f);
+	// ad->camLook = vec3(0.90f,0, -0.45f);
+
+	Vec3 pCam = ad->playerPos + vec3(0,0,ad->playerCamZOffset);
+	Vec3 pCamDir = pLook;
+	Vec3 pCamRight = pRight;
+	Vec3 pCamUp = pUp;
 
 	// Vec3 verts[4] = {};
-	// verts[0] = cp; verts[1] = cp+cl*2;
+	// verts[0] = pCam; verts[1] = pCam + pCamDir*1;
 	// glProgramUniform3fv(ids->primitiveVertex, ids->primitiveVertexVertices, 4, verts[0].e);
 	// glProgramUniform4f(ids->primitiveVertex, ids->primitiveVertexColor, 1,0,0,1);
 	// glDrawArrays(GL_LINES, 0, 2);
 
-	// glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-	// glEnable(GL_CULL_FACE);
+	// verts[0] = pCam; verts[1] = pCam + pCamRight*1;
+	// glProgramUniform3fv(ids->primitiveVertex, ids->primitiveVertexVertices, 4, verts[0].e);
+	// glProgramUniform4f(ids->primitiveVertex, ids->primitiveVertexColor, 0,1,0,1);
+	// glDrawArrays(GL_LINES, 0, 2);
 
+	// verts[0] = pCam; verts[1] = pCam + pCamUp*1;
+	// glProgramUniform3fv(ids->primitiveVertex, ids->primitiveVertexVertices, 4, verts[0].e);
+	// glProgramUniform4f(ids->primitiveVertex, ids->primitiveVertexColor, 0,0,1,1);
+	// glDrawArrays(GL_LINES, 0, 2);
+
+
+	Vec3 verts[4] = {};
+	verts[0] = cursorPos; verts[1] = cursorPos + cursorDir*30;
+	glProgramUniform3fv(ids->primitiveVertex, ids->primitiveVertexVertices, 4, verts[0].e);
+	glProgramUniform4f(ids->primitiveVertex, ids->primitiveVertexColor, 1,0,0,1);
+	glDrawArrays(GL_LINES, 0, 2);
+
+	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+	glEnable(GL_CULL_FACE);
+	glEnable(GL_LINE_SMOOTH);
 
 
 
@@ -1776,8 +2092,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// glReadBuffer      (GL_COLOR_ATTACHMENT0);
 	glBindFramebuffer (GL_DRAW_FRAMEBUFFER, ad->frameBuffers[1]);
 	// glDrawBuffer      (GL_BACK);
-	glBlitFramebuffer (0,0, wSettings->currentRes.w, wSettings->currentRes.h,
-	                   0,0, wSettings->currentRes.w, wSettings->currentRes.h,
+
+	glBlitFramebuffer (0,0, ad->curRes.x, ad->curRes.y,
+	                   0,0, ad->curRes.x, ad->curRes.y,
 	                   // GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT,
 	                   GL_COLOR_BUFFER_BIT,
 	                   // GL_NEAREST);
@@ -1789,12 +2106,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glDisable(GL_DEPTH_TEST);
 
 
+	glViewport(0,0, wSettings->currentRes.x, wSettings->currentRes.y);
 
 	ortho(&ad->pipelineIds, rect(0,0,1,1));
 	glBindProgramPipeline(ad->pipelineIds.programQuad);
 
 	glProgramUniform4f(ids->quadVertex, ids->quadVertexMod, 0.5f, 0.5f, 1, 1);
-	glProgramUniform4f(ids->quadVertex, ids->quadVertexUV, 0,1,0,1);
+	glProgramUniform4f(ids->quadVertex, ids->quadVertexUV, 0, 1,0,1);
 	glProgramUniform4f(ids->quadVertex, ids->quadVertexColor, 1,1,1,1);
 	glBindTexture(GL_TEXTURE_2D, ad->frameBufferTextures[0]);
 	glDrawArraysInstancedBaseInstance(GL_TRIANGLE_STRIP, 0, 4, 1, 0);
