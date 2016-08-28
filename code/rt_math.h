@@ -61,7 +61,7 @@ inline int maxReturnIndex(float a, float b, float c) {
 	float result = max(a,b,c);
 	int index;
 	if(result == a) index = 0;
-	if(result == b) index = 1;
+	else if(result == b) index = 1;
 	else index = 2;
 	return index;
 }
@@ -1658,7 +1658,7 @@ Vec3 projectPointOnLine(Vec3 lPos, Vec3 lDir, Vec3 p) {
 	return result;
 }
 
-bool boxRaycast(Vec3 lp, Vec3 ld, Rect3 box) {
+bool boxRaycast(Vec3 lp, Vec3 ld, Rect3 box, float* distance = 0) {
 	// ld is unit
 	Vec3 dirfrac;
 	dirfrac.x = 1.0f / ld.x;
@@ -1690,6 +1690,7 @@ bool boxRaycast(Vec3 lp, Vec3 ld, Rect3 box) {
 	}
 
 	t = tmin;
+	if(distance != 0) *distance = t;
 	return true;
 }
 

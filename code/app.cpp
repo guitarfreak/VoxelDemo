@@ -41,7 +41,7 @@
 - create simpler windows.h
 - remove c runtime library, implement sin, cos...
 - savestates, hotrealoading
-- pre and post functions to appMain
+- pre and post functions to Main
 - memory dynamic expansion
 - collision, walking
 - select block and delete
@@ -1098,6 +1098,10 @@ struct AppData {
 	Vec3 playerVel;
 	Vec3 playerAcc;
 
+	int selectionRadius;
+	bool blockSelected;
+	Vec3 selectedBlock;
+
 
 
 	float transform[3][3];
@@ -1351,7 +1355,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->playerCamZOffset = ad->playerSize.z*0.5f - ad->playerSize.x*0.5f;
 
 		ad->playerMode = true;
-		ad->pickMode = false;
+		ad->selectionRadius = 10;
 
 		return; // window operations only work after first frame?
 	}
@@ -1577,6 +1581,115 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		ad->playerPos = nPos;
 	}
+
+
+	// if(input->mouseButtonPressed[0] && ad->playerMode) {
+	if(true) {
+		ad->blockSelected = false;
+
+		// get block in line
+		Vec3 startDir = pLook;
+		Vec3 startPos = ad->playerPos + vec3(0,0,ad->playerCamZOffset);
+
+		Vec3 newPos = startPos;
+		int biggestAxis = maxReturnIndex(abs(startDir.x), abs(startDir.y), abs(startDir.z));
+		int smallerAxis[2];
+		smallerAxis[0] = mod(biggestAxis-1, 3);
+		smallerAxis[1] = mod(biggestAxis+1, 3);
+
+		bool intersection = false;
+		Vec3 intersectionBox;
+
+		for(int i = 0; i < ad->selectionRadius; i++) {
+			newPos = newPos + normVec3(startDir);
+
+			Vec3 coords[9];
+			int coordsSize = 0;
+
+			Vec3 blockCoords = getGlobalCoordFromVoxelCoord(getVoxelCoordFromGlobalCoord(newPos));
+
+			// we populate 8 blocks around the biggest axis
+			for(int y = -1; y < 2; y++) {
+				for(int x = -1; x < 2; x++) {
+					Vec3 dir = vec3(0,0,0);
+					dir.e[smallerAxis[0]] = y;
+					dir.e[smallerAxis[1]] = x;
+	
+					coords[coordsSize++] = blockCoords + dir;
+				}
+			}
+
+			bool firstIntersection = true;
+			float minDistance = -1;
+
+			for(int i = 0; i < coordsSize; i++) {
+				Vec3 block = coords[i];
+
+				VoxelMesh* vm = getVoxelMesh(ad->vMeshs, &ad->vMeshsSize, getMeshCoordFromGlobalCoord(block));
+				Vec3i localCoord = getLocalVoxelCoord(getVoxelCoordFromGlobalCoord(block));
+				int blockType = vm->voxels[voxelArray(localCoord.x, localCoord.y, localCoord.z)];
+
+				Vec3 temp = getGlobalCoordFromVoxelCoord(getVoxelCoordFromGlobalCoord(block));
+
+				// Vec4 c;
+				// if(i == 0) c = vec4(1,0,1,1);
+				// else c = vec4(0,0,1,1);
+				// glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+				// drawCube(&ad->pipelineIds, temp, vec3(1.0f,1.0f,1.0f), c, 0, vec3(0,0,0));
+
+				if(blockType > 0) {
+					Vec3 iBox = getGlobalCoordFromVoxelCoord(getVoxelCoordFromGlobalCoord(block));
+					float distance;
+					bool inter = boxRaycast(startPos, startDir, rect3CenDim(iBox, vec3(1,1,1)), &distance);
+
+					if(inter) {
+						if(firstIntersection) {
+							minDistance = distance;
+							intersectionBox = iBox;
+							firstIntersection = false;
+						} else if(distance < minDistance) {
+							minDistance = distance;
+							intersectionBox = iBox;
+						}
+
+						intersection = true;
+					}
+				}
+			}
+
+			if(intersection) break;
+		}
+
+		if(intersection) {
+			ad->selectedBlock = intersectionBox;
+			ad->blockSelected = true;
+
+			if(input->mouseButtonPressed[0] && ad->playerMode) {
+				Vec3 block = intersectionBox;
+
+				VoxelMesh* vm = getVoxelMesh(ad->vMeshs, &ad->vMeshsSize, getMeshCoordFromGlobalCoord(block));
+				Vec3i localCoord = getLocalVoxelCoord(getVoxelCoordFromGlobalCoord(block));
+
+				if(ad->pickMode) {
+					vm->voxels[voxelArray(localCoord.x, localCoord.y, localCoord.z)] = 2;
+					vm->lighting[voxelArray(localCoord.x, localCoord.y, localCoord.z)] = 0;
+				} else {
+					if(vm->voxels[voxelArray(localCoord.x, localCoord.y, localCoord.z)] > 0) {
+						vm->voxels[voxelArray(localCoord.x, localCoord.y, localCoord.z)] = 0;			
+						vm->lighting[voxelArray(localCoord.x, localCoord.y, localCoord.z)] = 255;			
+					}
+				}
+
+				generateVoxelMesh(vm);
+				makeMesh(vm, ad->vMeshs, &ad->vMeshsSize);
+			}
+		}
+	}
+
+
+
+
+
 
 
 	glViewport(0,0, ad->curRes.x, ad->curRes.y);
@@ -1908,128 +2021,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 	glDisable(GL_CULL_FACE);
-
 	glEnable(GL_CULL_FACE);
 
-
-
-	Vec3 cursorPos;
-	Vec3 cursorDir;
-
-	// if(input->mouseButtonPressed[0] && ad->playerMode) {
-	if(true) {
-		// playerPos;
-		// playerLook;
-		// playercamoffset;
-
-		cursorDir = pLook;
-		cursorPos = ad->playerPos + vec3(0,0,ad->playerCamZOffset);
-
-		// Vec3 globalCoord = cursorPos + cursorDir*3;
-
-		// VoxelMesh* vm = getVoxelMesh(ad->vMeshs, &ad->vMeshsSize, getMeshCoordFromGlobalCoord(globalCoord));
-		// Vec3i localCoord = getLocalVoxelCoord(getVoxelCoordFromGlobalCoord(globalCoord));
-		// int blockType = vm->voxels[voxelArray(localCoord.x, localCoord.y, localCoord.z)];
-
-		// Vec3 blockCoords = getGlobalCoordFromVoxelCoord(getVoxelCoordFromGlobalCoord(globalCoord));
-
-		// drawCube(&ad->pipelineIds, blockCoords, vec3(1,1,1), vec4(0,0,1,1), 0, vec3(0,0,0));
-
-
-
-		// Vec3 blockCoords;
-		// int blockType;
-
-		// if(blockType > 0) {
-			// drawCube(&ad->pipelineIds, blockCoords, vec3(1.01f,1.01f,1.01f), vec4(0,0,1,1), 0, vec3(0,0,0));
-		// }
-
-		// get block in line
-		Vec3 startPos = cursorPos;
-		Vec3 startDir = cursorDir;
-
-		Vec3 newPos = startPos;
-		int biggestAxis = maxReturnIndex(abs(startDir.x), abs(startDir.y), abs(startDir.z));
-
-		bool intersection = false;
-		Vec3 intersectionBox;
-
-		int length = 20;
-		for(int i = 0; i < length; i++) {
-			newPos = newPos + normVec3(startDir);
-
-			Vec3 coords[5];
-			int coordsSize = 0;
-
-			coords[coordsSize++] = newPos;
-
-			Vec3 blockCoords = getGlobalCoordFromVoxelCoord(getVoxelCoordFromGlobalCoord(newPos));
-			for(int axis = 0; axis < 3; axis++) {
-				if(axis == biggestAxis) continue;
-				
-				for(int i = 0; i < 2; i++) {
-					Vec3 dir = vec3(0,0,0);
-			
-					if(i == 0) dir.e[axis] = 1;
-					else dir.e[axis] = -1;
-
-					coords[coordsSize++] = blockCoords + dir;
-
-					// drawCube(&ad->pipelineIds, blockCoords + dir, vec3(1.0f,1.0f,1.0f), vec4(1,0,1,1), 0, vec3(0,0,0));
-				}
-			}
-
-			for(int i = 0; i < coordsSize; i++) {
-				Vec3 block = coords[i];
-
-				VoxelMesh* vm = getVoxelMesh(ad->vMeshs, &ad->vMeshsSize, getMeshCoordFromGlobalCoord(block));
-				Vec3i localCoord = getLocalVoxelCoord(getVoxelCoordFromGlobalCoord(block));
-				int blockType = vm->voxels[voxelArray(localCoord.x, localCoord.y, localCoord.z)];
-
-				if(blockType > 0) {
-					intersectionBox = getGlobalCoordFromVoxelCoord(getVoxelCoordFromGlobalCoord(block));
-					intersection = boxRaycast(startPos, startDir, rect3CenDim(intersectionBox, vec3(1,1,1)));
-
-					if(intersection) {
-						glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-						drawCube(&ad->pipelineIds, intersectionBox, vec3(1.01f,1.01f,1.01f), vec4(0.9f), 0, vec3(0,0,0));
-
-						intersection = true;
-						break;						
-					}
-				}
-			}
-
-			if(intersection) break;
-		}
-
-
-		if(input->mouseButtonPressed[0] && ad->playerMode) {
-			Vec3 block = intersectionBox;
-
-			VoxelMesh* vm = getVoxelMesh(ad->vMeshs, &ad->vMeshsSize, getMeshCoordFromGlobalCoord(block));
-			Vec3i localCoord = getLocalVoxelCoord(getVoxelCoordFromGlobalCoord(block));
-
-			if(ad->pickMode) {
-				vm->voxels[voxelArray(localCoord.x, localCoord.y, localCoord.z)] = 2;
-				// vm->lighting[voxelArray(localCoord.x, localCoord.y, localCoord.z)] = 255;
-			} else {
-				vm->voxels[voxelArray(localCoord.x, localCoord.y, localCoord.z)] = 0;			
-				vm->lighting[voxelArray(localCoord.x, localCoord.y, localCoord.z)] = 255;			
-			}
-
-			generateVoxelMesh(vm);
-			makeMesh(vm, ad->vMeshs, &ad->vMeshsSize);
-		}
-	}
-
-
-
-
-
-
 	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-	drawCube(&ad->pipelineIds, ad->playerPos, ad->playerSize, vec4(1,1,1,1), 0, vec3(0,0,0));
+	if(!ad->playerMode) {
+		drawCube(&ad->pipelineIds, ad->playerPos, ad->playerSize, vec4(1,1,1,1), 0, vec3(0,0,0));
+	}
+	if(ad->blockSelected) drawCube(&ad->pipelineIds, ad->selectedBlock, vec3(1.01f,1.01f,1.01f), vec4(0.9f), 0, vec3(0,0,0));
+
 
 
 
@@ -2074,11 +2073,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// glDrawArrays(GL_LINES, 0, 2);
 
 
-	Vec3 verts[4] = {};
-	verts[0] = cursorPos; verts[1] = cursorPos + cursorDir*30;
-	glProgramUniform3fv(ids->primitiveVertex, ids->primitiveVertexVertices, 4, verts[0].e);
-	glProgramUniform4f(ids->primitiveVertex, ids->primitiveVertexColor, 1,0,0,1);
-	glDrawArrays(GL_LINES, 0, 2);
+	if(!ad->playerMode) {
+		Vec3 verts[4] = {};
+		verts[0] = pLook; verts[1] = (ad->playerPos + vec3(0,0,ad->playerCamZOffset)) + pLook*30;
+		glProgramUniform3fv(ids->primitiveVertex, ids->primitiveVertexVertices, 4, verts[0].e);
+		glProgramUniform4f(ids->primitiveVertex, ids->primitiveVertexColor, 1,0,0,1);
+		glDrawArrays(GL_LINES, 0, 2);
+	}
 
 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 	glEnable(GL_CULL_FACE);
