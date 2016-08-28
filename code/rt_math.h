@@ -1658,7 +1658,7 @@ Vec3 projectPointOnLine(Vec3 lPos, Vec3 lDir, Vec3 p) {
 	return result;
 }
 
-bool boxRaycast(Vec3 lp, Vec3 ld, Rect3 box, float* distance = 0) {
+bool boxRaycast(Vec3 lp, Vec3 ld, Rect3 box, float* distance = 0, int* face = 0) {
 	// ld is unit
 	Vec3 dirfrac;
 	dirfrac.x = 1.0f / ld.x;
@@ -1687,6 +1687,15 @@ bool boxRaycast(Vec3 lp, Vec3 ld, Rect3 box, float* distance = 0) {
 	if (tmin > tmax) {
 	    t = tmax;
 	    return false;
+	}
+
+	if(face) {
+		     if(tmin == t1) *face = 0;
+		else if(tmin == t2) *face = 1;
+		else if(tmin == t3) *face = 2;
+		else if(tmin == t4) *face = 3;
+		else if(tmin == t5) *face = 4;
+		else if(tmin == t6) *face = 5;
 	}
 
 	t = tmin;
@@ -1746,6 +1755,11 @@ inline Vec3i operator-(Vec3i a, Vec3i b) {
 inline Vec3i & operator-=(Vec3i & a, Vec3i b) {
 	a = a - b;
 	return a;
+}
+
+inline bool operator==(Vec3i a, Vec3i b) {
+	bool equal = (a.x == b.x) && (a.y == b.y) && (a.z == b.z);
+	return equal;
 }
 
 //
