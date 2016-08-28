@@ -41,6 +41,8 @@ struct Input {
 	char charBuffer[8];
 
 	bool mShift, mCtrl, mAlt;
+
+	bool captureMouse;
 };
 
 bool inputKeyPressed(Input* input, int keyCode) {
@@ -186,6 +188,21 @@ void initSystem(SystemData* systemData, WindowsData wData, uint style, int x, in
     bool result = wglMakeCurrent(systemData->deviceContext, openglContext);
     if(!result) { printf("Could not set Opengl Context.\n"); }
 
+
+    #ifndef HID_USAGE_PAGE_GENERIC
+    #define HID_USAGE_PAGE_GENERIC         ((USHORT) 0x01)
+    #endif
+    #ifndef HID_USAGE_GENERIC_MOUSE
+    #define HID_USAGE_GENERIC_MOUSE        ((USHORT) 0x02)
+    #endif
+
+    RAWINPUTDEVICE Rid[1];
+    Rid[0].usUsagePage = HID_USAGE_PAGE_GENERIC; 
+    Rid[0].usUsage = HID_USAGE_GENERIC_MOUSE; 
+    Rid[0].dwFlags = RIDEV_INPUTSINK;   
+    Rid[0].hwndTarget = systemData->windowHandle;
+    bool r = RegisterRawInputDevices(Rid, 1, sizeof(Rid[0]));
+
     printf("%Opengl Version: %s\n", (char*)glGetString(GL_VERSION));
 }
 
@@ -201,6 +218,9 @@ void updateInput(Input* input, bool* isRunning, HWND windowHandle) {
     input->mCtrl = 0;
     input->mAlt = 0;
     input->inputCharacterCount = 0;
+
+    input->mouseDeltaX = 0;
+    input->mouseDeltaY = 0;
 
     MSG message;
     while(PeekMessage(&message, 0, 0, 0, PM_REMOVE)) {
@@ -263,6 +283,21 @@ void updateInput(Input* input, bool* isRunning, HWND windowHandle) {
                 input->inputCharacterCount++;
             } break;
 
+            case WM_INPUT: {
+            	RAWINPUT inputBuffer;
+            	UINT rawInputSize = sizeof(inputBuffer);
+            	GetRawInputData((HRAWINPUT)(message.lParam), RID_INPUT, &inputBuffer, &rawInputSize, sizeof(RAWINPUTHEADER));
+            	RAWINPUT* raw = (RAWINPUT*)(&inputBuffer);
+            	
+            	if (raw->header.dwType == RIM_TYPEMOUSE) {
+            	    int xPosRelative = raw->data.mouse.lLastX;
+            	    int yPosRelative = raw->data.mouse.lLastY;
+
+            	    input->mouseDeltaX = -xPosRelative;
+            	    input->mouseDeltaY = -yPosRelative;
+            	} break;
+            } break;
+
             // case WM_SIZE: {
 
             // } break;
@@ -293,10 +328,6 @@ void updateInput(Input* input, bool* isRunning, HWND windowHandle) {
     POINT point;    
     GetCursorPos(&point);
     ScreenToClient(windowHandle, &point);
-    if(!input->firstFrame) {
-    	input->mouseDeltaX = (input->mousePosX - point.x);
-    	input->mouseDeltaY = (input->mousePosY - point.y);
-    }
     input->mousePosX = point.x;
     input->mousePosY = point.y;
 

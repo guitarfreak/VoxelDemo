@@ -1356,6 +1356,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		ad->playerMode = true;
 		ad->selectionRadius = 10;
+		input->captureMouse = true;
+		ShowCursor(false);
 
 		return; // window operations only work after first frame?
 	}
@@ -1384,6 +1386,20 @@ extern "C" APPMAINFUNCTION(appMain) {
 		setWindowMode(windowHandle, wSettings, mode);
 
 		updateAfterWindowResizing(wSettings, &ad->aspectRatio, ad->frameBuffers[0], ad->frameBuffers[1], ad->renderBuffers[0], ad->renderBuffers[1], &ad->frameBufferTextures[0], ad->msaaSamples, &ad->fboRes, &ad->curRes, ad->useNativeRes);
+	}
+
+	if(input->keysPressed[VK_F8]) {
+		input->captureMouse = !input->captureMouse;
+
+		if(input->captureMouse) ShowCursor(false);
+		else ShowCursor(true);
+	}
+
+    if(input->captureMouse) {
+		int w,h;
+		Vec2i wPos;
+		getWindowProperties(systemData->windowHandle, &w, &h, 0, 0, &wPos.x, &wPos.y);
+		SetCursorPos(wPos.x + wSettings->currentRes.x/2, wPos.y + wSettings->currentRes.y/2);
 	}
 
 	// 2d camera controls
@@ -1435,7 +1451,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	if(!ad->playerMode) {
 		// 3d camera controls
-		if(input->mouseButtonDown[1]) {
+
+		if((!input->captureMouse && input->mouseButtonDown[1]) || input->captureMouse) {
 			float dt = 0.005f;
 			ad->camRot.y += dt * input->mouseDeltaY;
 			ad->camRot.x += dt * input->mouseDeltaX;
@@ -1467,7 +1484,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		cRight = pRight;
 		cUp = pUp;
 
-		if(input->mouseButtonDown[1]) {
+		if((!input->captureMouse && input->mouseButtonDown[1]) || input->captureMouse) {
 			float dt = 0.005f;
 			ad->playerRot.y += dt * input->mouseDeltaY;
 			ad->playerRot.x += dt * input->mouseDeltaX;
