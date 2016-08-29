@@ -45,7 +45,7 @@
 - 32x32 voxel chunks
 - code duplication collision stuff in place block
 - selected block looks ugly as polygon triangulation 
-
+- ballistic motion on jumping
 
 //-------------------------------------
 //               BUGS
@@ -53,7 +53,6 @@
 - Font doesn't draw int
 - look has to be negative to work in view projection matrix
 - app stops reacting to input after a while, hotloading still works though
-- if window doesnt have focus free cursor again when in capture mode
 - deleting a block at the edge of a mesh means remaking mesh on the other side 
   of the edge too
 
@@ -177,8 +176,13 @@
 
 
 
-typedef HGLRC wglCreateContextAttribsARBFunction(HDC hDC, HGLRC hshareContext, const int *attribList);
-wglCreateContextAttribsARBFunction* wglCreateContextAttribsARB;
+// typedef HGLRC wglCreateContextAttribsARBFunction(HDC hDC, HGLRC hshareContext, const int *attribList);
+// wglCreateContextAttribsARBFunction* wglCreateContextAttribsARB;
+
+typedef int wglGetSwapIntervalEXTFunction(void);
+wglGetSwapIntervalEXTFunction* wglGetSwapIntervalEXT;
+typedef int wglSwapIntervalEXTFunction(int);
+wglSwapIntervalEXTFunction* wglSwapIntervalEXT;
 
 
 #define GLOP(returnType, name, ...) makeGLFunction(returnType, name, __VA_ARGS__)
@@ -1105,6 +1109,8 @@ void getCamData(Vec3 look, Vec2 rot, Vec3 gUp, Vec3* cLook, Vec3* cRight, Vec3* 
 struct AppData {
 	SystemData systemData;
 	Input input;
+	LONGLONG lastTimeStamp;
+	float dt;
 
 	Mesh mesh;
 	PipelineIds pipelineIds;
@@ -1203,6 +1209,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		getPMemory(sizeof(AppData));
 		*ad = {};
 
+		ad->dt = 1/(float)60;
+
 		initInput(&ad->input);
 		
 		wSettings->res.w = 1920;
@@ -1233,6 +1241,24 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		loadFunctions();
 
+
+		// typedef int wglGetSwapIntervalEXTFunction(void);
+		// wglGetSwapIntervalEXTFunction* wglGetSwapIntervalEXT;
+		// typedef int wglSwapIntervalEXTFunction(void);
+		// wglSwapIntervalEXTFunction* wglSwapIntervalEXT;
+
+
+		// gl##name = (name##Function*)wglGetProcAddress("gl" #name);
+		wglGetSwapIntervalEXT = (wglGetSwapIntervalEXTFunction*)wglGetProcAddress("wglGetSwapIntervalEXT");
+		wglSwapIntervalEXT = (wglSwapIntervalEXTFunction*)wglGetProcAddress("wglSwapIntervalEXT");
+
+		wglSwapIntervalEXT(1);
+
+
+		// BOOL wglSwapIntervalEXT(int interval)
+		// int wglGetSwapIntervalEXT(void)
+
+		int interval = wglGetSwapIntervalEXT();
 
 		glEnable(GL_DEBUG_OUTPUT);
 		glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
@@ -1413,10 +1439,32 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->pickMode = true;
 		ad->selectionRadius = 10;
 		input->captureMouse = true;
-		ShowCursor(false);
 
 		return; // window operations only work after first frame?
 	}
+
+	LARGE_INTEGER counter;
+	LARGE_INTEGER frequency;
+	QueryPerformanceFrequency(&frequency); 
+
+	if(second) {
+		QueryPerformanceCounter(&counter);
+		ad->lastTimeStamp = counter.QuadPart;
+		ad->dt = 1/(float)60;
+	} else {
+		QueryPerformanceCounter(&counter);
+		float timeStamp = counter.QuadPart;
+		ad->dt = (timeStamp - ad->lastTimeStamp);
+		ad->dt *= 1000000;
+		ad->dt = ad->dt/frequency.QuadPart;
+		ad->dt = ad->dt / 1000000;
+
+		ad->lastTimeStamp = timeStamp;
+	}
+
+	// printf("%f \n", ad->dt);
+	// ad->dt = 0.016f;
+
 
 	if(second) {
 		setWindowProperties(windowHandle, wSettings->res.w, wSettings->res.h, -1920, 0);
@@ -1446,16 +1494,20 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	if(input->keysPressed[VK_F8]) {
 		input->captureMouse = !input->captureMouse;
-
-		if(input->captureMouse) ShowCursor(false);
-		else ShowCursor(true);
 	}
 
-    if(input->captureMouse) {
+	bool focus = GetFocus() == windowHandle;
+	bool fpsMode = input->captureMouse && focus;
+
+    if(fpsMode) {
 		int w,h;
 		Vec2i wPos;
 		getWindowProperties(systemData->windowHandle, &w, &h, 0, 0, &wPos.x, &wPos.y);
 		SetCursorPos(wPos.x + wSettings->currentRes.x/2, wPos.y + wSettings->currentRes.y/2);
+
+		while(ShowCursor(false) >= 0);
+	} else {
+		while(ShowCursor(true) < 0);
 	}
 
 	// 2d camera controls
@@ -1512,18 +1564,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 	getCamData(ad->camLook, ad->camRot, gUp, &cLook, &cRight, &cUp);
 
 
-
-
-
 	ad->playerAcc = vec3(0,0,0);
 	ad->camAcc = vec3(0,0,0);
 
 	if(!ad->playerMode) {
 		// 3d camera controls
-		if((!input->captureMouse && input->mouseButtonDown[1]) || input->captureMouse) {
-			float dt = 0.005f;
-			ad->camRot.y += dt * input->mouseDeltaY;
-			ad->camRot.x += dt * input->mouseDeltaX;
+		if((!fpsMode && input->mouseButtonDown[1]) || fpsMode) {
+			float turnRate = ad->dt*0.3f;
+			ad->camRot.y += turnRate * input->mouseDeltaY;
+			ad->camRot.x += turnRate * input->mouseDeltaX;
 
 			float margin = 0.00001f;
 			clamp(&ad->camRot.y, -M_PI+margin, M_PI-margin);
@@ -1535,9 +1584,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 			Vec3 look = cLook;
 			if(input->keysDown[VK_CONTROL]) look = cross(gUp, cRight);
 
-			float runBoost = 3.0f;
-			float speed = 1;
-
+			float runBoost = 2.0f;
+			float speed = 150;
 			Vec3 acc = vec3(0,0,0);
 			if(input->keysDown[VK_SHIFT]) speed *= runBoost;
 			if(input->keysDown[VK_W]) acc += normVec3(look);
@@ -1546,14 +1594,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 			if(input->keysDown[VK_A]) acc += -normVec3(cRight);
 			if(input->keysDown[VK_E]) acc += normVec3(gUp);
 			if(input->keysDown[VK_Q]) acc += -normVec3(gUp);
-
 			ad->camAcc += normVec3(acc)*speed;
 		}
 	} else {
-		if((!input->captureMouse && input->mouseButtonDown[1]) || input->captureMouse) {
-			float dt = 0.005f;
-			ad->playerRot.y += dt * input->mouseDeltaY;
-			ad->playerRot.x += dt * input->mouseDeltaX;
+		if((!fpsMode && input->mouseButtonDown[1]) || fpsMode) {
+			float turnRate = ad->dt*0.3f;
+			ad->playerRot.y += turnRate * input->mouseDeltaY;
+			ad->playerRot.x += turnRate * input->mouseDeltaX;
 
 			float margin = 0.00001f;
 			clamp(&ad->playerRot.y, -M_PI+margin, M_PI-margin);
@@ -1563,11 +1610,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 			input->keysDown[VK_D] || input->keysDown[VK_E] || input->keysDown[VK_Q]) {
 
 			Vec3 look = pLook;
-			// if(input->keysDown[VK_CONTROL]) look = cross(gUp, pRight);
 			look = cross(gUp, pRight);
 
-			float runBoost = 2.0f;
-			float speed = 0.5f;
+			float runBoost = 1.5f;
+			float speed = 50.0f;
 
 			Vec3 acc = vec3(0,0,0);
 			if(input->keysDown[VK_SHIFT]) speed *= runBoost;
@@ -1579,30 +1625,30 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 
 		if(input->keysPressed[VK_SPACE]) {
-		// if(input->keysDown[VK_SPACE]) {
 			if(ad->playerOnGround) {
-				ad->playerAcc += gUp*4.5f;
+				ad->playerVel += gUp*7.5f;
 				ad->playerOnGround = false;
 			}
 		}
 	}
 
-	float dt = 0.166f;
+	float dt = ad->dt;
 	if(!ad->playerMode) {
 		ad->camVel += ad->camAcc*dt;
 		ad->camVel *= 0.9f;
 
 		if(ad->camVel != vec3(0,0,0)) {
-			ad->camPos = ad->camPos + 0.5f*ad->camAcc*dt*dt + ad->camVel*dt;
+			ad->camPos = ad->camPos - 0.5f*ad->camAcc*dt*dt + ad->camVel*dt;
 		}
 	} else {
-		if(!ad->playerOnGround) ad->playerAcc += -gUp*0.2f;
-		// ad->playerAcc += -gUp*0.2f;
-		ad->playerVel += ad->playerAcc*dt;
+		float gravity = 20.0f;
 
-		float friction = 0.9f;
-		ad->playerVel.x *= friction;
-		ad->playerVel.y *= friction;
+		if(!ad->playerOnGround) ad->playerAcc += -gUp*gravity;
+		ad->playerVel = ad->playerVel + ad->playerAcc*dt;
+
+		float friction = 0.01f;
+		ad->playerVel.x *= pow(friction,dt);
+		ad->playerVel.y *= pow(friction,dt);
 		// ad->playerVel *= 0.9f;
 
 		if(ad->playerOnGround) ad->playerVel.z = 0;
@@ -1612,7 +1658,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			Vec3 pPos = ad->playerPos;
 			Vec3 pSize = ad->playerSize;
 
-			Vec3 nPos = pPos + 0.5f*ad->playerAcc*dt*dt + ad->playerVel*dt;
+			Vec3 nPos = pPos + -0.5f*ad->playerAcc*dt*dt + ad->playerVel*dt;
 
 			int collisionCount = 0;
 			bool collision = true;
@@ -1690,6 +1736,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				// something went wrong and we reject the move, for now
 				if(collisionCount > 5) {
 					nPos = ad->playerPos;
+					ad->playerVel = vec3(0,0,0);
 					break;
 				}
 			}
@@ -2246,7 +2293,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		drawCube(&ad->pipelineIds, ad->playerPos, ad->playerSize, vec4(1,1,1,1), 0, vec3(0,0,0));
 	}
 	if(ad->blockSelected) drawCube(&ad->pipelineIds, ad->selectedBlock, vec3(1.01f,1.01f,1.01f), vec4(0.9f), 0, vec3(0,0,0));
-
 
 
 
