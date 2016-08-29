@@ -1703,6 +1703,16 @@ bool boxRaycast(Vec3 lp, Vec3 ld, Rect3 box, float* distance = 0, int* face = 0)
 	return true;
 }
 
+int getBiggestAxis(Vec3 v, int smallerAxis[2] = 0) {
+	int biggestAxis = maxReturnIndex(abs(v.x), abs(v.y), abs(v.z));
+	if(smallerAxis != 0) {
+		smallerAxis[0] = mod(biggestAxis-1, 3);
+		smallerAxis[1] = mod(biggestAxis+1, 3);
+	}
+
+	return biggestAxis;
+}
+
 //
 //
 //

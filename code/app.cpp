@@ -47,6 +47,7 @@
 - selected block looks ugly as polygon triangulation 
 - ballistic motion on jumping
 - timestep advancen when window not in focus (stop game when not in focus)
+- functions for obtaining least significant directions of vector
 
 //-------------------------------------
 //               BUGS
@@ -171,8 +172,8 @@
 		GLOP(void, NamedRenderbufferStorage, GLuint renderbuffer, GLenum internalformat, GLsizei width, GLsizei height) \
 		GLOP(GLenum, CheckNamedFramebufferStatus, GLuint framebuffer, GLenum target) \
 		GLOP(void, GenFramebuffers, GLsizei n, GLuint *ids) \
-		GLOP(void, FramebufferTexture, GLenum target, GLenum attachment, GLuint texture, GLint level)
-
+		GLOP(void, FramebufferTexture, GLenum target, GLenum attachment, GLuint texture, GLint level) \
+		GLOP(void, BlendFuncSeparate, GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha)
 
 
 
@@ -234,44 +235,77 @@ void loadFunctions() {
 
 
 const char* vertexShaderCube = GLSL (
+	// const vec3 cube[] = vec3[] (
+	//     vec3(-0.5f,-0.5f,-0.5f), 
+	//     vec3( 0.5f,-0.5f,-0.5f), 
+	//     vec3(-0.5f, 0.5f,-0.5f), 
+	//     vec3( 0.5f,-0.5f,-0.5f), 
+	//     vec3( 0.5f, 0.5f,-0.5f),
+	//     vec3(-0.5f, 0.5f,-0.5f),
+	//     vec3(-0.5f,-0.5f, 0.5f), 
+	//     vec3(-0.5f, 0.5f, 0.5f), 
+	//     vec3( 0.5f,-0.5f, 0.5f), 
+	//     vec3( 0.5f,-0.5f, 0.5f), 
+	//     vec3(-0.5f, 0.5f, 0.5f),
+	//     vec3( 0.5f, 0.5f, 0.5f),
+	//     vec3(-0.5f, 0.5f,-0.5f), 
+	//     vec3( 0.5f, 0.5f,-0.5f), 
+	//     vec3(-0.5f, 0.5f, 0.5f), 
+	//     vec3( 0.5f, 0.5f,-0.5f), 
+	//     vec3( 0.5f, 0.5f, 0.5f),
+	//     vec3(-0.5f, 0.5f, 0.5f),
+	//     vec3(-0.5f,-0.5f,-0.5f),
+	//     vec3(-0.5f,-0.5f, 0.5f), 
+	//     vec3( 0.5f,-0.5f,-0.5f), 
+	//     vec3( 0.5f,-0.5f,-0.5f), 
+	//     vec3(-0.5f,-0.5f, 0.5f),
+	//     vec3( 0.5f,-0.5f, 0.5f),
+	//     vec3(-0.5f,-0.5f,-0.5f), 
+	//     vec3(-0.5f, 0.5f,-0.5f), 
+	//     vec3(-0.5f,-0.5f, 0.5f), 
+	//     vec3(-0.5f, 0.5f,-0.5f), 
+	//     vec3(-0.5f, 0.5f, 0.5f),
+	//     vec3(-0.5f,-0.5f, 0.5f),
+	//     vec3( 0.5f,-0.5f,-0.5f), 
+	//     vec3( 0.5f,-0.5f, 0.5f), 
+	//     vec3( 0.5f, 0.5f,-0.5f), 
+	//     vec3( 0.5f, 0.5f,-0.5f), 
+	//     vec3( 0.5f,-0.5f, 0.5f),
+	//     vec3( 0.5f, 0.5f, 0.5f)
+	// );
+
 	const vec3 cube[] = vec3[] (
 	    vec3(-0.5f,-0.5f,-0.5f), 
 	    vec3( 0.5f,-0.5f,-0.5f), 
-	    vec3(-0.5f, 0.5f,-0.5f), 
-	    vec3( 0.5f,-0.5f,-0.5f), 
 	    vec3( 0.5f, 0.5f,-0.5f),
 	    vec3(-0.5f, 0.5f,-0.5f),
+
 	    vec3(-0.5f,-0.5f, 0.5f), 
 	    vec3(-0.5f, 0.5f, 0.5f), 
-	    vec3( 0.5f,-0.5f, 0.5f), 
-	    vec3( 0.5f,-0.5f, 0.5f), 
-	    vec3(-0.5f, 0.5f, 0.5f),
 	    vec3( 0.5f, 0.5f, 0.5f),
+	    vec3( 0.5f,-0.5f, 0.5f),
+	    
 	    vec3(-0.5f, 0.5f,-0.5f), 
 	    vec3( 0.5f, 0.5f,-0.5f), 
-	    vec3(-0.5f, 0.5f, 0.5f), 
-	    vec3( 0.5f, 0.5f,-0.5f), 
 	    vec3( 0.5f, 0.5f, 0.5f),
 	    vec3(-0.5f, 0.5f, 0.5f),
-	    vec3(-0.5f,-0.5f,-0.5f),
+	    
+	    vec3(-0.5f,-0.5f,-0.5f), 
 	    vec3(-0.5f,-0.5f, 0.5f), 
-	    vec3( 0.5f,-0.5f,-0.5f), 
-	    vec3( 0.5f,-0.5f,-0.5f), 
-	    vec3(-0.5f,-0.5f, 0.5f),
 	    vec3( 0.5f,-0.5f, 0.5f),
+	    vec3( 0.5f,-0.5f,-0.5f),
+	    
+	    vec3( 0.5f,-0.5f,-0.5f), 
+	    vec3( 0.5f,-0.5f, 0.5f), 
+	    vec3( 0.5f, 0.5f, 0.5f),
+	    vec3( 0.5f, 0.5f,-0.5f),
+	    
 	    vec3(-0.5f,-0.5f,-0.5f), 
 	    vec3(-0.5f, 0.5f,-0.5f), 
-	    vec3(-0.5f,-0.5f, 0.5f), 
-	    vec3(-0.5f, 0.5f,-0.5f), 
 	    vec3(-0.5f, 0.5f, 0.5f),
-	    vec3(-0.5f,-0.5f, 0.5f),
-	    vec3( 0.5f,-0.5f,-0.5f), 
-	    vec3( 0.5f,-0.5f, 0.5f), 
-	    vec3( 0.5f, 0.5f,-0.5f), 
-	    vec3( 0.5f, 0.5f,-0.5f), 
-	    vec3( 0.5f,-0.5f, 0.5f),
-	    vec3( 0.5f, 0.5f, 0.5f)
+	    vec3(-0.5f,-0.5f, 0.5f)
 	);
+
 
 	out gl_PerVertex { vec4 gl_Position; };
 	out vec4 Color;
@@ -634,7 +668,12 @@ void drawCube(PipelineIds* ids, Vec3 trans, Vec3 scale, Vec4 color, float degree
 	glProgramUniformMatrix4fv(ids->cubeVertex, ids->cubeVertexModel, 1, 1, model.e);
 	glProgramUniform4f(ids->cubeVertex, ids->cubeVertexColor, color.r, color.g, color.b, color.a);
 
-	glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 36, 1, 0);
+	// glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 36, 1, 0);
+	// glDrawArraysInstancedBaseInstance(GL_QUADS, 0, 24, 1, 0);
+	// glDrawArraysInstancedBaseInstance(GL_QUADS, 0, 8, 1, 0);
+	// glDrawArraysInstancedBaseInstance(GL_QUADS, 0, 8, 1, 0);
+	glDrawArrays(GL_QUADS, 0, 6*4);
+
 }
 
 uint createSampler(int wrapS, int wrapT, int magF, int minF) {
@@ -1158,6 +1197,7 @@ struct AppData {
 	int selectionRadius;
 	bool blockSelected;
 	Vec3 selectedBlock;
+	Vec3 selectedBlockFaceDir;
 
 	Vec3 activeCamPos;
 	Vec3 activeCamLook;
@@ -1223,7 +1263,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		initSystem(systemData, windowsData, 0, 0,0,0,0);
 
 		ad->msaaSamples = 4;
-		ad->fieldOfView = 50;
+		ad->fieldOfView = 55;
 		ad->fboRes = vec2i(0, 120);
 		ad->useNativeRes = true;
 
@@ -1459,6 +1499,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->dt *= 1000000;
 		ad->dt = ad->dt/frequency.QuadPart;
 		ad->dt = ad->dt / 1000000;
+		ad->dt = clampMax(ad->dt, 1/(float)20);
 
 		ad->lastTimeStamp = timeStamp;
 	}
@@ -1759,7 +1800,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			}
 
 			if(playerSideCollision) {
-				float sideFriction = 0.0020f;
+				float sideFriction = 0.0010f;
 				ad->playerVel.x *= pow(sideFriction,dt);
 				ad->playerVel.y *= pow(sideFriction,dt);
 			}
@@ -1822,6 +1863,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->activeCamRight = cRight;
 	}
 
+
+
 	// selecting blocks and modifying them
 	// if(input->mouseButtonPressed[0] && ad->playerMode) {
 	if(ad->playerMode) {
@@ -1832,10 +1875,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		Vec3 startPos = ad->playerPos + vec3(0,0,ad->playerCamZOffset);
 
 		Vec3 newPos = startPos;
-		int biggestAxis = maxReturnIndex(abs(startDir.x), abs(startDir.y), abs(startDir.z));
 		int smallerAxis[2];
-		smallerAxis[0] = mod(biggestAxis-1, 3);
-		smallerAxis[1] = mod(biggestAxis+1, 3);
+		int biggestAxis = getBiggestAxis(startDir, smallerAxis);
 
 		bool intersection = false;
 		Vec3 intersectionBox;
@@ -1907,6 +1948,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 			ad->selectedBlock = intersectionBox;
 			ad->blockSelected = true;
 
+			Vec3 faceDir = vec3(0,0,0);
+				 if(intersectionFace == 0) faceDir = vec3(-1,0,0);
+			else if(intersectionFace == 1) faceDir = vec3(1,0,0);
+			else if(intersectionFace == 2) faceDir = vec3(0,-1,0);
+			else if(intersectionFace == 3) faceDir = vec3(0,1,0);
+			else if(intersectionFace == 4) faceDir = vec3(0,0,-1);
+			else if(intersectionFace == 5) faceDir = vec3(0,0,1);
+			ad->selectedBlockFaceDir = faceDir;
+
 			if(input->mouseButtonPressed[0] && ad->playerMode) {
 				VoxelMesh* vm = getVoxelMesh(ad->vMeshs, &ad->vMeshsSize, getMeshCoordFromGlobalCoord(intersectionBox));
 
@@ -1915,15 +1965,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 				if(ad->pickMode) {
 					Vec3 boxToCamDir = startPos - intersectionBox;
-					Vec3 faceDir = vec3(0,0,0);
-
-						 if(intersectionFace == 0) faceDir = vec3(-1,0,0);
-					else if(intersectionFace == 1) faceDir = vec3(1,0,0);
-					else if(intersectionFace == 2) faceDir = vec3(0,-1,0);
-					else if(intersectionFace == 3) faceDir = vec3(0,1,0);
-					else if(intersectionFace == 4) faceDir = vec3(0,0,-1);
-					else if(intersectionFace == 5) faceDir = vec3(0,0,1);
-
 					Vec3 sideBlock = getBlockCenterFromGlobalCoord(intersectionBox + faceDir);
 					Vec3i voxelSideBlock = getVoxelCoordFromGlobalCoord(sideBlock);
 
@@ -1988,12 +2029,20 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glEnable(GL_MULTISAMPLE);
 	glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[0]);
 	glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
-
-
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
 #if 1
 
+	// Vec3 skyColor = vec3(0.95f);
+	Vec3 skyColor = vec3(0.90f, 0.90f, 0.95f);
+	Vec3 fogColor = vec3(0.75f, 0.85f, 0.95f);
+	// Vec3 fogColor = vec3(0.70f, 0.80f, 0.90f);
 
+	// for tech showcase
+	#ifdef STBVOX_CONFIG_LIGHTING_SIMPLE
+		skyColor = skyColor * vec3(0.3f);
+		fogColor = fogColor * vec3(0.3f);
+	#endif 
 
 	glEnable(GL_CULL_FACE);
 	// glDisable(GL_CULL_FACE);
@@ -2003,14 +2052,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glClearDepth(1);
 	glDepthMask(GL_TRUE);
 	glDisable(GL_SCISSOR_TEST);
-	glClearColor(0.6f,0.7f,0.9f,0.0f);
+	// glClearColor(skyColor.x, skyColor.y, skyColor.z, 0.0f);
+	glClearColor(skyColor.x, skyColor.y, skyColor.z, 0.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glFrontFace(GL_CW);
 	glEnable(GL_TEXTURE_2D);
-	glEnable(GL_ALPHA_TEST);
-	glAlphaFunc(GL_GREATER, 0.5);
+	// glEnable(GL_ALPHA_TEST);
+	// glAlphaFunc(GL_GREATER, 0.5);
 
 
 
@@ -2070,7 +2119,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	al.e2[2][3] = 0;
 
 	// fog color
-	al.e2[3][0] = 0.6f, al.e2[3][1] = 0.7f, al.e2[3][2] = 0.9f;
+	al.e2[3][0] = fogColor.x, al.e2[3][1] = fogColor.y, al.e2[3][2] = fogColor.z;
 	// al.e2[3][3] = 1.0f / (view_distance - MESH_CHUNK_SIZE_X);
 	// al.e2[3][3] *= al.e2[3][3];
 	al.e2[3][3] = (float)1.0f/(VIEW_DISTANCE - VOXEL_X);
@@ -2311,7 +2360,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 	if(!ad->playerMode) {
 		drawCube(&ad->pipelineIds, ad->playerPos, ad->playerSize, vec4(1,1,1,1), 0, vec3(0,0,0));
 	}
-	if(ad->blockSelected) drawCube(&ad->pipelineIds, ad->selectedBlock, vec3(1.01f,1.01f,1.01f), vec4(0.9f), 0, vec3(0,0,0));
+	glLineWidth(3);
+	if(ad->blockSelected) drawCube(&ad->pipelineIds, ad->selectedBlock, vec3(1.01f), vec4(0.9f), 0, vec3(0,0,0));
 
 
 
@@ -2331,6 +2381,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glEnable(GL_LINE_SMOOTH);
 
 	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+	// glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 	glLineWidth(3);
 
 	if(!ad->playerMode) {
@@ -2351,6 +2402,28 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glProgramUniform3fv(ids->primitiveVertex, ids->primitiveVertexVertices, 4, verts[0].e);
 		glProgramUniform4f(ids->primitiveVertex, ids->primitiveVertexColor, 0,0,1,1);
 		glDrawArrays(GL_LINES, 0, 2);
+	} else {
+		if(ad->blockSelected) {
+			Vec3 base = ad->selectedBlock + ad->selectedBlockFaceDir*0.5f*1.05f;
+
+			int sAxis[2];
+			int biggestAxis = getBiggestAxis(ad->selectedBlockFaceDir, sAxis);
+
+			Vec3 verts[4] = {};
+			for(int i = 0; i < 4; i++) {
+				Vec3 d = base;
+					 if(i == 0) { d.e[sAxis[0]] += -0.5f; d.e[sAxis[1]] += -0.5f; }
+				else if(i == 1) { d.e[sAxis[0]] += -0.5f; d.e[sAxis[1]] +=  0.5f; }
+				else if(i == 2) { d.e[sAxis[0]] +=  0.5f; d.e[sAxis[1]] +=  0.5f; }
+				else if(i == 3) { d.e[sAxis[0]] +=  0.5f; d.e[sAxis[1]] += -0.5f; }
+				verts[i] = d;
+			}
+
+			glProgramUniform3fv(ids->primitiveVertex, ids->primitiveVertexVertices, 4, verts[0].e);
+			glProgramUniform4f(ids->primitiveVertex, ids->primitiveVertexColor, 1,1,1,0.05f);
+			glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+			glDrawArrays(GL_QUADS, 0, 4);
+		}
 	}
 
 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
@@ -2388,6 +2461,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glProgramUniform4f(ids->quadVertex, ids->quadVertexUV, 0, 1,0,1);
 	glProgramUniform4f(ids->quadVertex, ids->quadVertexColor, 1,1,1,1);
 	glBindTexture(GL_TEXTURE_2D, ad->frameBufferTextures[0]);
+
 	glDrawArraysInstancedBaseInstance(GL_TRIANGLE_STRIP, 0, 4, 1, 0);
 
 	glBindFramebuffer (GL_DRAW_FRAMEBUFFER, ad->frameBuffers[1]);
@@ -2427,12 +2501,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Polys: (%f)", (float)triangleCount);
 	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Vec  : (%f,%f,%f)", PVEC3(ad->playerVel));
 	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Acc  : (%f,%f,%f)", PVEC3(ad->playerAcc));
-
-	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "c  : (%f)", (float)playerCeilingCollision);
-	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "c  : (%f)", (float)playerSideCollision);
-	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "c  : (%f)", (float)playerGroundCollision);
-
-
 
 	swapBuffers(&ad->systemData);
 	glFinish();
