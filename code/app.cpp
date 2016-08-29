@@ -46,6 +46,7 @@
 - code duplication collision stuff in place block
 - selected block looks ugly as polygon triangulation 
 - ballistic motion on jumping
+- timestep advancen when window not in focus (stop game when not in focus)
 
 //-------------------------------------
 //               BUGS
@@ -1321,14 +1322,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 		Font font;
-		char* path = "..\\data\\LiberationMono.ttf";
+		char* path = "..\\data\\LiberationMono-Bold.ttf";
 		font.fileBuffer = (char*)getPMemory(fileSize(path) + 1);
 		readFileToBuffer(font.fileBuffer, path);
 		font.size = vec2i(512,512);
 		unsigned char* fontBitmapBuffer = (unsigned char*)getTMemory(font.size.x*font.size.y);
 		unsigned char* fontBitmap = (unsigned char*)getTMemory(font.size.x*font.size.y*4);
 		
-		font.height = 30;
+		font.height = 22;
 		font.glyphStart = 32;
 		font.glyphCount = 95;
 		font.cData = (stbtt_bakedchar*)getPMemory(sizeof(stbtt_bakedchar)*font.glyphCount);
@@ -1632,6 +1633,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 	}
 
+	bool playerGroundCollision = false;
+	bool playerCeilingCollision = false;
+	bool playerSideCollision = false;
+
 	float dt = ad->dt;
 	if(!ad->playerMode) {
 		ad->camVel += ad->camAcc*dt;
@@ -1699,6 +1704,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 					float minDistance;
 					Vec3 dir = vec3(0,0,0);
+					int face;
 
 					// check all the 6 planes and take the one with the shortest distance
 					for(int i = 0; i < 6; i++) {
@@ -1723,15 +1729,16 @@ extern "C" APPMAINFUNCTION(appMain) {
 						if(i == 0 || distance > minDistance) {
 							minDistance = distance;
 							dir = n;
+							face = i;
 						}
 					}
 
 					float error = 0.00001f;
 					nPos += dir*(-minDistance + error);
 
-					// if(!ad->playerOnGround) ad->playerVel.z *= friction;
-					// ad->playerVel.z *= friction;
-					// ad->playerVel *= friction;
+					if(face == 5) playerCeilingCollision = true;
+					else if(face == 4) playerGroundCollision = true;
+					else playerSideCollision = true;
 				}
 
 				// something went wrong and we reject the move, for now
@@ -1747,6 +1754,16 @@ extern "C" APPMAINFUNCTION(appMain) {
 				ad->playerVel.z = 0;
 			}
 
+			if(playerCeilingCollision) {
+				ad->playerVel.z = 0;
+			}
+
+			if(playerSideCollision) {
+				float sideFriction = 0.0020f;
+				ad->playerVel.x *= pow(sideFriction,dt);
+				ad->playerVel.y *= pow(sideFriction,dt);
+			}
+
 			ad->playerPos = nPos;
 		}
 	}
@@ -1757,7 +1774,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		Vec3 size = ad->playerSize;
 		Rect3 box = rect3CenDim(pos, size);
 
-		bool collision = false;
+		bool groundCollision = false;
 
 		for(int i = 0; i < 4; i++) {
 			Vec3 gp;
@@ -1768,23 +1785,26 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			// drawCube(&ad->pipelineIds, block, vec3(1,1,1)*1.01f, vec4(1,0,1,1), 0, vec3(0,0,0));
 
-			float raycastThreshold = 0.11f;
+			float raycastThreshold = 0.01f;
 			gp -= gUp*raycastThreshold;
 
 			Vec3 block = getBlockCenterFromGlobalCoord(gp);
 			uchar* blockType = getBlockFromGlobalCoord(ad->vMeshs, &ad->vMeshsSize, gp);
 
 			if(*blockType > 0) {
-				collision = true;
+				groundCollision = true;
 				break;
 			}
 		}
 
-		if(collision) {
+		if(groundCollision) {
 			if(ad->playerVel.z <= 0) ad->playerOnGround = true;
 		} else {
 			ad->playerOnGround = false;
 		}
+
+
+
 	}
 
 
@@ -2392,15 +2412,25 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	ortho(&ad->pipelineIds, rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0));
 	glBindProgramPipeline(ad->pipelineIds.programQuad);
-	drawTextA(&ad->pipelineIds, vec2(0,-30),  vec4(1,1,1,1), &ad->fontArial, 0, 2, "Pos  : (%f,%f,%f)", ad->activeCamPos.x, ad->activeCamPos.y, ad->activeCamPos.z);
-	drawTextA(&ad->pipelineIds, vec2(0,-60),  vec4(1,1,1,1), &ad->fontArial, 0, 2, "Look : (%f,%f,%f)", ad->activeCamLook.x, ad->activeCamLook.y, ad->activeCamLook.z);
-	drawTextA(&ad->pipelineIds, vec2(0,-90),  vec4(1,1,1,1), &ad->fontArial, 0, 2, "Up   : (%f,%f,%f)", ad->activeCamUp.x, ad->activeCamUp.y, ad->activeCamUp.z);
-	drawTextA(&ad->pipelineIds, vec2(0,-120), vec4(1,1,1,1), &ad->fontArial, 0, 2, "Right: (%f,%f,%f)", ad->activeCamRight.x, ad->activeCamRight.y, ad->activeCamRight.z);
-	drawTextA(&ad->pipelineIds, vec2(0,-150), vec4(1,1,1,1), &ad->fontArial, 0, 2, "Rot  : (%f,%f)", ad->camRot.x, ad->camRot.y);
+	int fontSize = 22;
+	int pi = 0;
+	Vec4 c = vec4(1,1,0,1);
 
-	drawTextA(&ad->pipelineIds, vec2(0,-180), vec4(1,1,1,1), &ad->fontArial, 0, 2, "Poly Count  : (%f)", (float)triangleCount);
+	#define PVEC3(v) v.x, v.y, v.z
+	#define PVEC2(v) v.x, v.y
 
+	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Pos  : (%f,%f,%f)", PVEC3(ad->activeCamPos));
+	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Look : (%f,%f,%f)", PVEC3(ad->activeCamLook));
+	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Up   : (%f,%f,%f)", PVEC3(ad->activeCamUp));
+	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Right: (%f,%f,%f)", PVEC3(ad->activeCamRight));
+	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Rot  : (%f,%f)", PVEC2(ad->camRot));
+	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Polys: (%f)", (float)triangleCount);
+	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Vec  : (%f,%f,%f)", PVEC3(ad->playerVel));
+	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Acc  : (%f,%f,%f)", PVEC3(ad->playerAcc));
 
+	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "c  : (%f)", (float)playerCeilingCollision);
+	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "c  : (%f)", (float)playerSideCollision);
+	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "c  : (%f)", (float)playerGroundCollision);
 
 
 
