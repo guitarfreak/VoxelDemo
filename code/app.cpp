@@ -1635,7 +1635,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 	float dt = ad->dt;
 	if(!ad->playerMode) {
 		ad->camVel += ad->camAcc*dt;
-		ad->camVel *= 0.9f;
+		float friction = 0.01f;
+		ad->camVel *= pow(friction,dt);
 
 		if(ad->camVel != vec3(0,0,0)) {
 			ad->camPos = ad->camPos - 0.5f*ad->camAcc*dt*dt + ad->camVel*dt;
@@ -1751,8 +1752,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 	// raycast for touching ground
-	// if(!ad->playerMode) {
-	if(true) {
+	if(ad->playerMode) {
 		Vec3 pos = ad->playerPos;
 		Vec3 size = ad->playerSize;
 		Rect3 box = rect3CenDim(pos, size);
@@ -1780,7 +1780,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 			}
 		}
 
-		// if(collision && ad->playerVel.z == 0) {
 		if(collision) {
 			if(ad->playerVel.z <= 0) ad->playerOnGround = true;
 		} else {
