@@ -205,6 +205,79 @@ void loadFunctions() {
 	#undef GLOP
 }
 
+struct PipelineIds {
+	uint programQuad;
+	uint quadVertex;
+	uint quadFragment;
+	uint quadVertexMod;
+	uint quadVertexUV;
+	uint quadVertexColor;
+	uint quadVertexCamera;
+
+	uint programCube;
+	uint cubeVertex;
+	uint cubeFragment;
+	uint cubeVertexModel;
+	uint cubeVertexView;
+	uint cubeVertexProj;
+	uint cubeVertexColor;
+
+	uint programPrimitive;
+	uint primitiveVertex;
+	uint primitiveFragment;
+	// uint primitiveVertexModel;
+	uint primitiveVertexView;
+	uint primitiveVertexProj;
+	uint primitiveVertexColor;
+	uint primitiveVertexVertices;
+
+	uint programVoxel;
+	uint voxelVertex;
+	uint voxelFragment;
+};
+
+struct GraphicsState {
+	PipelineIds pipelineIds;
+
+	// // Mesh mesh;
+
+	// uint programs[16];
+	// uint textures[16];
+	// int texCount;
+	// uint samplers[16];
+
+	// uint frameBuffers[16];
+	// uint renderBuffers[16];
+	// uint frameBufferTextures[2];
+
+	// float aspectRatio;
+	// float fieldOfView;
+	// float nearPlane;
+	// float farPlane;
+
+	// // Font fontArial;
+
+	// Vec2i curRes;
+	// int msaaSamples;
+	// Vec2i fboRes;
+	// bool useNativeRes;
+
+	// // VoxelData;
+
+	// uint voxelShader;
+	// uint voxelVertex;
+	// uint voxelFragment;
+
+	// GLuint voxelSamplers[3];
+	// GLuint voxelTextures[3];
+
+	GLuint textureUnits[16];
+	GLuint samplerUnits[16];
+};
+
+GraphicsState* globalGraphicsState;
+
+
 #define GLSL(src) "#version 330\n \
 	#extension GL_ARB_gpu_shader5               : enable\n \
 	#extension GL_ARB_gpu_shader_fp64           : enable\n \
@@ -477,43 +550,12 @@ void updateAfterWindowResizing(WindowSettings* wSettings, float* ar, uint fb0, u
 }
 
 
-struct PipelineIds {
-	uint programQuad;
-	uint quadVertex;
-	uint quadFragment;
-	uint quadVertexMod;
-	uint quadVertexUV;
-	uint quadVertexColor;
-	uint quadVertexCamera;
-
-	uint programCube;
-	uint cubeVertex;
-	uint cubeFragment;
-	uint cubeVertexModel;
-	uint cubeVertexView;
-	uint cubeVertexProj;
-	uint cubeVertexColor;
-
-	uint programPrimitive;
-	uint primitiveVertex;
-	uint primitiveFragment;
-	// uint primitiveVertexModel;
-	uint primitiveVertexView;
-	uint primitiveVertexProj;
-	uint primitiveVertexColor;
-	uint primitiveVertexVertices;
-
-	uint programVoxel;
-	uint voxelVertex;
-	uint voxelFragment;
-};
-
-void drawRect(PipelineIds* ids, Rect r, Rect uv, Vec4 color, int texture) {
+void drawRect(Rect r, Rect uv, Vec4 color, int texture) {
 	uint uniformLocation;
 	Rect cd = rectGetCenDim(r);
-	glProgramUniform4f(ids->quadVertex, ids->quadVertexMod, cd.min.x, cd.min.y, cd.max.x, cd.max.y);
-	glProgramUniform4f(ids->quadVertex, ids->quadVertexUV, uv.min.x, uv.max.x, uv.max.y, uv.min.y);
-	glProgramUniform4f(ids->quadVertex, ids->quadVertexColor, color.r, color.g, color.b, color.a);
+	glProgramUniform4f(globalGraphicsState->pipelineIds.quadVertex, globalGraphicsState->pipelineIds.quadVertexMod, cd.min.x, cd.min.y, cd.max.x, cd.max.y);
+	glProgramUniform4f(globalGraphicsState->pipelineIds.quadVertex, globalGraphicsState->pipelineIds.quadVertexUV, uv.min.x, uv.max.x, uv.max.y, uv.min.y);
+	glProgramUniform4f(globalGraphicsState->pipelineIds.quadVertex, globalGraphicsState->pipelineIds.quadVertexColor, color.r, color.g, color.b, color.a);
 	glBindTexture(GL_TEXTURE_2D, texture);
 	glDrawArraysInstancedBaseInstance(GL_TRIANGLE_STRIP, 0, 4, 1, 0);
 }
@@ -562,23 +604,23 @@ uint createShader(const char* vertexShaderString, const char* fragmentShaderStri
 	return shaderId;
 }
 
-void ortho(PipelineIds* ids, Rect r) {
+void ortho(Rect r) {
 	r = rectGetCenDim(r);
-	glProgramUniform4f(1, ids->quadVertexCamera, r.cen.x, r.cen.y, r.dim.w, r.dim.h);
+	glProgramUniform4f(1, globalGraphicsState->pipelineIds.quadVertexCamera, r.cen.x, r.cen.y, r.dim.w, r.dim.h);
 }
 
-void lookAt(PipelineIds* ids, Vec3 pos, Vec3 look, Vec3 up, Vec3 right) {
+void lookAt(Vec3 pos, Vec3 look, Vec3 up, Vec3 right) {
 	Mat4 view;
 	viewMatrix(&view, pos, look, up, right);
 
-	glProgramUniformMatrix4fv(ids->cubeVertex, ids->cubeVertexView, 1, 1, view.e);
+	glProgramUniformMatrix4fv(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexView, 1, 1, view.e);
 }
 
-void perspective(PipelineIds* ids, float fov, float aspect, float n, float f) {
+void perspective(float fov, float aspect, float n, float f) {
 	Mat4 proj;
 	projMatrix(&proj, fov, aspect, n, f);
 
-	glProgramUniformMatrix4fv(ids->cubeVertex, ids->cubeVertexProj, 1, 1, proj.e);
+	glProgramUniformMatrix4fv(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexProj, 1, 1, proj.e);
 }
 
 struct Font {
@@ -590,7 +632,7 @@ struct Font {
 	int height;
 };
 
-void drawText(PipelineIds* ids, Vec2 pos, char* text, Vec4 color, Font* font, int vAlign, int hAlign) {
+void drawText(Vec2 pos, char* text, Vec4 color, Font* font, int vAlign, int hAlign) {
 	int length = strLen(text);
 	Vec2 textDim = stbtt_GetTextDim(font->cData, font->height, font->glyphStart, text);
 	pos.x -= vAlign*0.5f*textDim.w;
@@ -608,11 +650,11 @@ void drawText(PipelineIds* ids, Vec2 pos, char* text, Vec4 color, Font* font, in
 
 		stbtt_aligned_quad q;
 		stbtt_GetBakedQuad(font->cData, font->size.w, font->size.h, t-font->glyphStart, &pos.x, &pos.y, &q, 1);
-		drawRect(ids, rect(q.x0, q.y0, q.x1, q.y1), rect(q.s0,q.t0,q.s1,q.t1), color, 3);
+		drawRect(rect(q.x0, q.y0, q.x1, q.y1), rect(q.s0,q.t0,q.s1,q.t1), color, 3);
 	}
 }
 
-void drawTextA(PipelineIds* ids, Vec2 pos, Vec4 color, Font* font, int vAlign, int hAlign, char* text, ... ) {
+void drawTextA(Vec2 pos, Vec4 color, Font* font, int vAlign, int hAlign, char* text, ... ) {
 	va_list vl;
 	va_start(vl, text);
 
@@ -648,7 +690,7 @@ void drawTextA(PipelineIds* ids, Vec2 pos, Vec4 color, Font* font, int vAlign, i
 					floatToStr(valueBuffer, v, 2);
 				}
 
-				drawText(ids, oPos, valueBuffer, color, font, vAlign, hAlign);
+				drawText(oPos, valueBuffer, color, font, vAlign, hAlign);
 				t = text[++i];
 				Vec2 dim = stbtt_GetTextDim(font->cData, font->height, font->glyphStart, valueBuffer);
 				pos.x += dim.w;
@@ -657,11 +699,11 @@ void drawTextA(PipelineIds* ids, Vec2 pos, Vec4 color, Font* font, int vAlign, i
 
 		stbtt_aligned_quad q;
 		stbtt_GetBakedQuad(font->cData, font->size.w, font->size.h, t-font->glyphStart, &pos.x, &pos.y, &q, 1);
-		drawRect(ids, rect(q.x0, q.y0, q.x1, q.y1), rect(q.s0,q.t0,q.s1,q.t1), color, 3);
+		drawRect(rect(q.x0, q.y0, q.x1, q.y1), rect(q.s0,q.t0,q.s1,q.t1), color, 3);
 	}
 }
 
-void drawCube(PipelineIds* ids, Vec3 trans, Vec3 scale, Vec4 color, float degrees, Vec3 rot) {
+void drawCube(Vec3 trans, Vec3 scale, Vec4 color, float degrees, Vec3 rot) {
 	// Quat xRot = quat(dt, normVec3(vec3(1,0.7f,0.5f)));
 	// Quat yRot = quat(0, vec3(0,1,0));
 	// Quat zRot = quat(0, vec3(0,0,1));
@@ -672,8 +714,8 @@ void drawCube(PipelineIds* ids, Vec3 trans, Vec3 scale, Vec4 color, float degree
 	Mat4 tm; translationMatrix(&tm, trans);
 	Mat4 model = tm*rm*sm;
 
-	glProgramUniformMatrix4fv(ids->cubeVertex, ids->cubeVertexModel, 1, 1, model.e);
-	glProgramUniform4f(ids->cubeVertex, ids->cubeVertexColor, color.r, color.g, color.b, color.a);
+	glProgramUniformMatrix4fv(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexModel, 1, 1, model.e);
+	glProgramUniform4f(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexColor, color.r, color.g, color.b, color.a);
 
 	// glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 36, 1, 0);
 	// glDrawArraysInstancedBaseInstance(GL_QUADS, 0, 24, 1, 0);
@@ -1078,47 +1120,7 @@ Vec3 getBlockCenterFromGlobalCoord(Vec3 coord) {
 	return result;
 }
 
-
-// void drawMesh(VoxelMesh* m, uint vertexShader, uint fragmentShader, ) {
-// 	if(STBVOX_CONFIG_MODE == 0) {
-// 		// interleaved buffer - 2 uints in a row -> 8 bytes stride
-// 		glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
-// 		int vaLoc = glGetAttribLocation(ad->voxelVertex, "attr_vertex");
-// 		glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 8, (void*)0);
-// 		glEnableVertexAttribArray(vaLoc);
-// 		int fLoc = glGetAttribLocation(ad->voxelVertex, "attr_face");
-// 		glVertexAttribIPointer(fLoc, 4, GL_UNSIGNED_BYTE, 8, (void*)4);
-// 		glEnableVertexAttribArray(fLoc);
-
-// 	} else {
-// 		glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
-// 		int vaLoc = glGetAttribLocation(ad->voxelVertex, "attr_vertex");
-// 		glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 4, (void*)0);
-// 		glEnableVertexAttribArray(vaLoc);
-// 	}
-
-// 	GLuint transformUniform1 = glGetUniformLocation(ad->voxelVertex, "transform");
-// 	glProgramUniform3fv(ad->voxelVertex, transformUniform1, 3, m->transform[0]);
-// 	GLuint transformUniform2 = glGetUniformLocation(ad->voxelFragment, "transform");
-// 	glProgramUniform3fv(ad->voxelFragment, transformUniform2, 3, m->transform[0]);
-
-// 	ad->textureUnits[0] = ad->voxelTextures[0];
-// 	ad->textureUnits[1] = ad->voxelTextures[1];
-// 	ad->textureUnits[2] = m->textureId;
-// 	ad->samplerUnits[0] = ad->voxelSamplers[0];
-// 	ad->samplerUnits[1] = ad->voxelSamplers[1];
-// 	ad->samplerUnits[2] = ad->voxelSamplers[2];
-
-// 	glBindTextures(0,16,ad->textureUnits);
-// 	glBindSamplers(0,16,ad->samplerUnits);
-
-// 	glBindProgramPipeline(ad->shader);
-
-// 	glDrawArrays(GL_QUADS, 0, m->quadCount*4);
-// 	triangleCount += m->quadCount*4;
-// }
-
-void setupVoxelUniforms(uint vertexShader, uint fragmentShader, Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit, Mat4 view, Mat4 proj, Vec3 fogColor) {
+void setupVoxelUniforms(Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit, Mat4 view, Mat4 proj, Vec3 fogColor) {
 
 	Vec3 li = normVec3(vec3(0,0.5f,0.5f));
 	Mat4 ambientLighting = {
@@ -1191,11 +1193,11 @@ void setupVoxelUniforms(uint vertexShader, uint fragmentShader, Vec4 camera, uin
 				GLint location;
 				GLuint program;
 				if(shaderStage == 0) {
-					location = glGetUniformLocation(vertexShader, sui.name);
-					program = vertexShader;
+					location = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, sui.name);
+					program = globalGraphicsState->pipelineIds.voxelVertex;
 				} else {
-					location = glGetUniformLocation(fragmentShader, sui.name);
-					program = fragmentShader;
+					location = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelFragment, sui.name);
+					program = globalGraphicsState->pipelineIds.voxelFragment;
 				}
 
 				if (location != -1) {
@@ -1240,10 +1242,41 @@ void setupVoxelUniforms(uint vertexShader, uint fragmentShader, Vec4 camera, uin
 
 	// Mat4 finalMat = proj*view*model;
 	Mat4 finalMat = proj*view;
-	GLint modelViewUni = glGetUniformLocation(vertexShader, "model_view");
-	glProgramUniformMatrix4fv(vertexShader, modelViewUni, 1, 1, finalMat.e);
+	GLint modelViewUni = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "model_view");
+	glProgramUniformMatrix4fv(globalGraphicsState->pipelineIds.voxelVertex, modelViewUni, 1, 1, finalMat.e);
 }
 
+void drawVoxelMesh(VoxelMesh* m) {
+	if(STBVOX_CONFIG_MODE == 0) {
+		// interleaved buffer - 2 uints in a row -> 8 bytes stride
+		glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
+		int vaLoc = glGetAttribLocation(globalGraphicsState->pipelineIds.voxelVertex, "attr_vertex");
+		glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 8, (void*)0);
+		glEnableVertexAttribArray(vaLoc);
+		int fLoc = glGetAttribLocation(globalGraphicsState->pipelineIds.voxelVertex, "attr_face");
+		glVertexAttribIPointer(fLoc, 4, GL_UNSIGNED_BYTE, 8, (void*)4);
+		glEnableVertexAttribArray(fLoc);
+
+	} else {
+		glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
+		int vaLoc = glGetAttribLocation(globalGraphicsState->pipelineIds.voxelVertex, "attr_vertex");
+		glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 4, (void*)0);
+		glEnableVertexAttribArray(vaLoc);
+	}
+
+	GLuint transformUniform1 = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "transform");
+	glProgramUniform3fv(globalGraphicsState->pipelineIds.voxelVertex, transformUniform1, 3, m->transform[0]);
+	GLuint transformUniform2 = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelFragment, "transform");
+	glProgramUniform3fv(globalGraphicsState->pipelineIds.voxelFragment, transformUniform2, 3, m->transform[0]);
+
+	globalGraphicsState->textureUnits[2] = m->textureId;
+	glBindTextures(0,16,globalGraphicsState->textureUnits);
+	glBindSamplers(0,16,globalGraphicsState->samplerUnits);
+	
+	glBindProgramPipeline(globalGraphicsState->pipelineIds.programVoxel);
+
+	glDrawArrays(GL_QUADS, 0, m->quadCount*4);
+}
 
 void getCamData(Vec3 look, Vec2 rot, Vec3 gUp, Vec3* cLook, Vec3* cRight, Vec3* cUp) {
 	rotateVec3(&look, rot.x, gUp);
@@ -1252,46 +1285,6 @@ void getCamData(Vec3 look, Vec2 rot, Vec3 gUp, Vec3* cLook, Vec3* cRight, Vec3* 
 	*cRight = normVec3(cross(gUp, look));
 	*cLook = -look;
 }
-
-
-struct GraphicsState {
-	PipelineIds pIds;
-
-	// Mesh mesh;
-
-	uint programs[16];
-	uint textures[16];
-	int texCount;
-	uint samplers[16];
-
-	uint frameBuffers[16];
-	uint renderBuffers[16];
-	uint frameBufferTextures[2];
-
-	float aspectRatio;
-	float fieldOfView;
-	float nearPlane;
-	float farPlane;
-
-	Font fontArial;
-
-	Vec2i curRes;
-	int msaaSamples;
-	Vec2i fboRes;
-	bool useNativeRes;
-
-	// VoxelData;
-
-	uint voxelShader;
-	uint voxelVertex;
-	uint voxelFragment;
-
-	GLuint voxelSamplers[3];
-	GLuint voxelTextures[3];
-
-	GLuint textureUnits[16];
-	GLuint samplerUnits[16];
-};
 
 struct AppData {
 	SystemData systemData;
@@ -1311,7 +1304,7 @@ struct AppData {
 	Vec3 camAcc;
 
 	// Mesh mesh;
-	PipelineIds pipelineIds;
+	// PipelineIds pipelineIds;
 	uint programs[16];
 	uint textures[16];
 	int texCount;
@@ -1359,15 +1352,15 @@ struct AppData {
 	VoxelMesh* vMeshs;
 	int vMeshsSize;
 
-	uint voxelShader;
-	uint voxelVertex;
-	uint voxelFragment;
+	// uint voxelShader;
+	// uint voxelVertex;
+	// uint voxelFragment;
 
 	GLuint voxelSamplers[3];
 	GLuint voxelTextures[3];
 
-	GLuint textureUnits[16];
-	GLuint samplerUnits[16];
+	// GLuint textureUnits[16];
+	// GLuint samplerUnits[16];
 };
 
 enum DrawListCommand {
@@ -1450,7 +1443,6 @@ makeDrawCommandFunction(Viewport);
 
 
 MemoryBlock* globalMemory;
-GraphicsState* globalGraphicsState;
 
 extern "C" APPMAINFUNCTION(appMain) {
 	globalMemory = memoryBlock;
@@ -1544,7 +1536,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// glTextureParameteri(textureId, GL_TEXTURE_WRAP_S, GL_REPEAT);
 		// glTextureParameteri(textureId, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
-		PipelineIds* ids = &ad->pipelineIds;
+		PipelineIds* ids = &globalGraphicsState->pipelineIds;
 		ids->programQuad = createShader(vertexShaderQuad, fragmentShaderQuad, &ids->quadVertex, &ids->quadFragment);
 		ids->quadVertexMod = glGetUniformLocation(ids->quadVertex, "mod");
 		ids->quadVertexUV = glGetUniformLocation(ids->quadVertex, "setUV");
@@ -1611,7 +1603,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		GLenum glError = glGetError(); printf("GLError: %i\n", glError);
 
-		ad->voxelShader = createShader(stbvox_get_vertex_shader(), stbvox_get_fragment_shader(), &ad->voxelVertex, &ad->voxelFragment);
+		ids->programVoxel = createShader(stbvox_get_vertex_shader(), stbvox_get_fragment_shader(), &ids->voxelVertex, &ids->voxelFragment);
 
 		ad->voxelSamplers[0] = createSampler(GL_REPEAT, GL_REPEAT, GL_NEAREST, GL_NEAREST_MIPMAP_NEAREST);
 		ad->voxelSamplers[1] = createSampler(GL_REPEAT, GL_REPEAT, GL_NEAREST, GL_NEAREST_MIPMAP_NEAREST);
@@ -1743,7 +1735,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	updateInput(&ad->input, isRunning, windowHandle);
 
-	PipelineIds* ids = &ad->pipelineIds;
+	PipelineIds* ids = &globalGraphicsState->pipelineIds;
 
 	if(input->keysPressed[VK_F1]) {
 		int mode;
@@ -2227,7 +2219,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-	Vec3 skyColor = vec3(0.90f, 0.90f, 0.95f);
+	// Vec3 skyColor = vec3(0.90f, 0.90f, 0.95f);
+	// Vec3 skyColor = vec3(0.95f);
+	Vec3 skyColor = vec3(0.90f);
 	Vec3 fogColor = vec3(0.75f, 0.85f, 0.95f);
 
 	// for tech showcase
@@ -2265,8 +2259,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glEnable(GL_MULTISAMPLE);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-	lookAt(&ad->pipelineIds, ad->activeCamPos, -ad->activeCamLook, ad->activeCamUp, ad->activeCamRight);
-	perspective(&ad->pipelineIds, degreeToRadian(ad->fieldOfView), ad->aspectRatio, ad->nearPlane, ad->farPlane);
+	lookAt(ad->activeCamPos, -ad->activeCamLook, ad->activeCamUp, ad->activeCamRight);
+	perspective(degreeToRadian(ad->fieldOfView), ad->aspectRatio, ad->nearPlane, ad->farPlane);
 
 	Mat4 view, proj; 
 	viewMatrix(&view, ad->activeCamPos, -ad->activeCamLook, ad->activeCamUp, ad->activeCamRight);
@@ -2274,7 +2268,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 	projMatrix(&proj, degreeToRadian(ad->fieldOfView), ad->aspectRatio, ad->nearPlane, ad->farPlane);
 	glProgramUniformMatrix4fv(ids->primitiveVertex, ids->primitiveVertexProj, 1, 1, proj.e);
 
-	setupVoxelUniforms(ad->voxelVertex, ad->voxelFragment, vec4(ad->activeCamPos, 1), 0, 0, 2, view, proj, fogColor);
+
+	globalGraphicsState->textureUnits[0] = ad->voxelTextures[0];
+	globalGraphicsState->textureUnits[1] = ad->voxelTextures[1];
+	globalGraphicsState->samplerUnits[0] = ad->voxelSamplers[0];
+	globalGraphicsState->samplerUnits[1] = ad->voxelSamplers[1];
+	globalGraphicsState->samplerUnits[2] = ad->voxelSamplers[2];
+
+
+	setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 0, 2, view, proj, fogColor);
 
 
 #if 1
@@ -2395,44 +2397,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 			
 
 			if(isIntersecting) {
-				if(STBVOX_CONFIG_MODE == 0) {
-					// interleaved buffer - 2 uints in a row -> 8 bytes stride
-					glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
-					int vaLoc = glGetAttribLocation(ad->voxelVertex, "attr_vertex");
-					glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 8, (void*)0);
-					glEnableVertexAttribArray(vaLoc);
-					int fLoc = glGetAttribLocation(ad->voxelVertex, "attr_face");
-					glVertexAttribIPointer(fLoc, 4, GL_UNSIGNED_BYTE, 8, (void*)4);
-					glEnableVertexAttribArray(fLoc);
+				drawVoxelMesh(m);
 
-				} else {
-					glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
-					int vaLoc = glGetAttribLocation(ad->voxelVertex, "attr_vertex");
-					glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 4, (void*)0);
-					glEnableVertexAttribArray(vaLoc);
-				}
-
-				GLuint transformUniform1 = glGetUniformLocation(ad->voxelVertex, "transform");
-				glProgramUniform3fv(ad->voxelVertex, transformUniform1, 3, m->transform[0]);
-				GLuint transformUniform2 = glGetUniformLocation(ad->voxelFragment, "transform");
-				glProgramUniform3fv(ad->voxelFragment, transformUniform2, 3, m->transform[0]);
-
-				ad->textureUnits[0] = ad->voxelTextures[0];
-				ad->textureUnits[1] = ad->voxelTextures[1];
-				ad->textureUnits[2] = m->textureId;
-				ad->samplerUnits[0] = ad->voxelSamplers[0];
-				ad->samplerUnits[1] = ad->voxelSamplers[1];
-				ad->samplerUnits[2] = ad->voxelSamplers[2];
-
-				glBindTextures(0,16,ad->textureUnits);
-				glBindSamplers(0,16,ad->samplerUnits);
-
-				glBindProgramPipeline(ad->voxelShader);
-
-				glDrawArrays(GL_QUADS, 0, m->quadCount*4);
-				triangleCount += m->quadCount*4;
-
-				// drawMesh(m);
+				// triangleCount += m->quadCount*4;
+				triangleCount += m->quadCount;
 			}
 		}
 	}
@@ -2441,7 +2409,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-	glBindProgramPipeline(ad->pipelineIds.programCube);
+	glBindProgramPipeline(globalGraphicsState->pipelineIds.programCube);
 
 	// static float dt = 0;
 	// dt += 0.01f;
@@ -2454,12 +2422,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// for(int i = -10; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,i*10,0) + off, s, 0, normVec3(vec3(0.9f,0.6f,0.2f)));
 	// for(int i = -10; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,0,i*10) + off, s, 0, normVec3(vec3(0.9f,0.6f,0.2f)));
 
-	for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(i*10,0,0) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
-	for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,i*10,0) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
-	for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,0,i*10) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
+	for(int i = 0; i < 10; i++) drawCube(vec3(i*10,0,0) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
+	for(int i = 0; i < 10; i++) drawCube(vec3(0,i*10,0) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
+	for(int i = 0; i < 10; i++) drawCube(vec3(0,0,i*10) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
 
 	#ifdef STBVOX_CONFIG_LIGHTING_SIMPLE
-	drawCube(&ad->pipelineIds, light[0], vec3(3,3,3), vec4(1,1,1,1), 0, vec3(0,0,0));
+	drawCube(light[0], vec3(3,3,3), vec4(1,1,1,1), 0, vec3(0,0,0));
 	#endif
 
 
@@ -2469,16 +2437,16 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 	if(!ad->playerMode) {
-		drawCube(&ad->pipelineIds, ad->playerPos, ad->playerSize, vec4(1,1,1,1), 0, vec3(0,0,0));
+		drawCube(ad->playerPos, ad->playerSize, vec4(1,1,1,1), 0, vec3(0,0,0));
 	}
 	glLineWidth(3);
-	if(ad->blockSelected) drawCube(&ad->pipelineIds, ad->selectedBlock, vec3(1.01f), vec4(0.9f), 0, vec3(0,0,0));
+	if(ad->blockSelected) drawCube(ad->selectedBlock, vec3(1.01f), vec4(0.9f), 0, vec3(0,0,0));
 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
 
 
 
-	glBindProgramPipeline(ad->pipelineIds.programPrimitive);
+	glBindProgramPipeline(globalGraphicsState->pipelineIds.programPrimitive);
 
 	glDisable(GL_CULL_FACE);
 	glEnable(GL_LINE_SMOOTH);
@@ -2544,11 +2512,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 	                   GL_LINEAR);
 
 	glBindFramebuffer (GL_FRAMEBUFFER, 0);
-	// glDisable(GL_DEPTH_TEST);
+	glDisable(GL_DEPTH_TEST);
 
 	glViewport(0,0, wSettings->currentRes.x, wSettings->currentRes.y);
-	ortho(&ad->pipelineIds, rect(0,0,1,1));
-	glBindProgramPipeline(ad->pipelineIds.programQuad);
+	ortho(rect(0,0,1,1));
+	glBindProgramPipeline(globalGraphicsState->pipelineIds.programQuad);
 
 	glProgramUniform4f(ids->quadVertex, ids->quadVertexMod, 0.5f, 0.5f, 1, 1);
 	glProgramUniform4f(ids->quadVertex, ids->quadVertexUV, 0, 1,0,1);
@@ -2562,21 +2530,22 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-	ortho(&ad->pipelineIds, rectCenDim(cam->x,cam->y, cam->z, cam->z/ad->aspectRatio));
-	// glBindProgramPipeline(ad->pipelineIds.programQuad);
-	// drawRect(&ad->pipelineIds, rectCenDim(0, 0, 0.01f, 100), rect(0,0,1,1), vec4(0.4f,1,0.4f,1), ad->textures[0]);
-	// drawRect(&ad->pipelineIds, rectCenDim(0, 0, 100, 0.01f), rect(0,0,1,1), vec4(0.4f,0.4f,1,1), ad->textures[0]);
+	ortho(rectCenDim(cam->x,cam->y, cam->z, cam->z/ad->aspectRatio));
+	// glBindProgramPipeline(globalGraphicsState->pipelineIds.programQuad);
+	// drawRect(rectCenDim(0, 0, 0.01f, 100), rect(0,0,1,1), vec4(0.4f,1,0.4f,1), ad->textures[0]);
+	// drawRect(rectCenDim(0, 0, 100, 0.01f), rect(0,0,1,1), vec4(0.4f,0.4f,1,1), ad->textures[0]);
 
-	// drawRect(&ad->pipelineIds, rectCenDim(0, 0, 5, 5), rect(0,0,1,1), vec4(1,1,1,1), ad->textures[2]);
-	// drawRect(&ad->pipelineIds, rectCenDim(0, 0, 5, 5), rect(0,0,1,1), vec4(1,1,1,1), 3);
-
-
+	// drawRect(rectCenDim(0, 0, 5, 5), rect(0,0,1,1), vec4(1,1,1,1), ad->textures[2]);
+	// drawRect(rectCenDim(0, 0, 5, 5), rect(0,0,1,1), vec4(1,1,1,1), 3);
 
 
 
 
-	ortho(&ad->pipelineIds, rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0));
-	// glBindProgramPipeline(ad->pipelineIds.programQuad);
+
+
+	ortho(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0));
+	glDisable(GL_DEPTH_TEST);
+	glBindProgramPipeline(globalGraphicsState->pipelineIds.programQuad);
 	int fontSize = 22;
 	int pi = 0;
 	Vec4 c = vec4(1.0f,0.3f,0.0f,1);
@@ -2584,18 +2553,28 @@ extern "C" APPMAINFUNCTION(appMain) {
 	#define PVEC3(v) v.x, v.y, v.z
 	#define PVEC2(v) v.x, v.y
 
-	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Pos  : (%f,%f,%f)", PVEC3(ad->activeCamPos));
-	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Look : (%f,%f,%f)", PVEC3(ad->activeCamLook));
-	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Up   : (%f,%f,%f)", PVEC3(ad->activeCamUp));
-	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Right: (%f,%f,%f)", PVEC3(ad->activeCamRight));
-	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Rot  : (%f,%f)", PVEC2(ad->camRot));
-	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Polys: (%f)", (float)triangleCount);
-	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Vec  : (%f,%f,%f)", PVEC3(ad->playerVel));
-	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Acc  : (%f,%f,%f)", PVEC3(ad->playerAcc));
+	drawTextA(vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Pos  : (%f,%f,%f)", PVEC3(ad->activeCamPos));
+	drawTextA(vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Look : (%f,%f,%f)", PVEC3(ad->activeCamLook));
+	drawTextA(vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Up   : (%f,%f,%f)", PVEC3(ad->activeCamUp));
+	drawTextA(vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Right: (%f,%f,%f)", PVEC3(ad->activeCamRight));
+	drawTextA(vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Rot  : (%f,%f)", PVEC2(ad->camRot));
+	drawTextA(vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Polys: (%f)", (float)triangleCount);
+	drawTextA(vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Vec  : (%f,%f,%f)", PVEC3(ad->playerVel));
+	drawTextA(vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Acc  : (%f,%f,%f)", PVEC3(ad->playerAcc));
 
 
 
 #if 0
+
+	/*
+		3 draw lists for 3 modes:
+		1. 3d
+		2. 2d meter space (not really being used right now though)
+		3. 2d window space
+
+		struct 
+	*/
+
 
 	// Draw_Command_Cube dc = ;
 	// addDrawList(0, Draw_Command_Cube* c = {vec3(0,0,0)});
