@@ -43,11 +43,14 @@
 - pre and post functions to Main
 - memory dynamic expansion
 - 32x32 voxel chunks
-- code duplication collision stuff in place block
-- selected block looks ugly as polygon triangulation 
 - ballistic motion on jumping
+
 - timestep advancen when window not in focus (stop game when not in focus)
-- functions for obtaining least significant directions of vector
+- distance jumping collision bug
+
+- blocks with different textures on each side
+
+- make voxel drop in tutorial code for stb_voxel
 
 //-------------------------------------
 //               BUGS
@@ -58,6 +61,10 @@
 - deleting a block at the edge of a mesh means remaking mesh on the other side 
   of the edge too
 
+
+
+- gpu fucks up at some point making swapBuffers alternates between time steps 
+  which makes the game stutter, restart is required
 */
 
 
@@ -689,71 +696,7 @@ uint createSampler(int wrapS, int wrapT, int magF, int minF) {
 	return result;
 }
 
-void setupVoxelUniforms(uint vertexShader, uint fragmentShader, Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit, Mat4 ambient, Mat4 view, Mat4 proj) {
 
-	int texUnit[2] = {texUnit1, texUnit2};
-
-	for (int i=0; i < STBVOX_UNIFORM_count; ++i) {
-		stbvox_uniform_info sui;
-		if (stbvox_get_uniform_info(&sui, i)) {
-			if(i == STBVOX_UNIFORM_transform) continue;
-
-			for(int shaderStage = 0; shaderStage < 2; shaderStage++) {
-				GLint location;
-				GLuint program;
-				if(shaderStage == 0) {
-					location = glGetUniformLocation(vertexShader, sui.name);
-					program = vertexShader;
-				} else {
-					location = glGetUniformLocation(fragmentShader, sui.name);
-					program = fragmentShader;
-				}
-
-				if (location != -1) {
-					int arrayLength = sui.array_length;
-					void* data = sui.default_value;
-
-					switch (i) {
-						case STBVOX_UNIFORM_camera_pos: { // only needed for fog
-						   		data = camera.e;
-						   } break;
-
-						case STBVOX_UNIFORM_tex_array: {
-							data = texUnit;
-						} break;
-
-						case STBVOX_UNIFORM_face_data: {
-							data = &faceUnit;
-						} break;
-
-						case STBVOX_UNIFORM_ambient: {
-							data = ambient.e;
-						} break;
-
-						case STBVOX_UNIFORM_color_table: // you might want to override this
-						case STBVOX_UNIFORM_texscale:    // you may want to override this
-						case STBVOX_UNIFORM_normals:     // you never want to override this
-						case STBVOX_UNIFORM_texgen:      // you never want to override this
-							break;
-					}
-
-					switch(sui.type) {
-						case STBVOX_UNIFORM_TYPE_none: // glProgramUniformX(program, loc2, sui.array_length, sui.default_value); break;
-						case STBVOX_UNIFORM_TYPE_sampler: glProgramUniform1iv(program, location, arrayLength, (GLint*)data); break;
-						case STBVOX_UNIFORM_TYPE_vec2: glProgramUniform2fv(program, location, arrayLength, (GLfloat*)data); break;
-						case STBVOX_UNIFORM_TYPE_vec3: glProgramUniform3fv(program, location, arrayLength, (GLfloat*)data); break;
-						case STBVOX_UNIFORM_TYPE_vec4: glProgramUniform4fv(program, location, arrayLength, (GLfloat*)data); break;
-					}
-				}
-			}
-		}
-	}
-
-	// Mat4 finalMat = proj*view*model;
-	Mat4 finalMat = proj*view;
-	GLint modelViewUni = glGetUniformLocation(vertexShader, "model_view");
-	glProgramUniformMatrix4fv(vertexShader, modelViewUni, 1, 1, finalMat.e);
-}
 
 struct Texture {
 	int id;
@@ -1136,6 +1079,170 @@ Vec3 getBlockCenterFromGlobalCoord(Vec3 coord) {
 }
 
 
+// void drawMesh(VoxelMesh* m, uint vertexShader, uint fragmentShader, ) {
+// 	if(STBVOX_CONFIG_MODE == 0) {
+// 		// interleaved buffer - 2 uints in a row -> 8 bytes stride
+// 		glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
+// 		int vaLoc = glGetAttribLocation(ad->voxelVertex, "attr_vertex");
+// 		glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 8, (void*)0);
+// 		glEnableVertexAttribArray(vaLoc);
+// 		int fLoc = glGetAttribLocation(ad->voxelVertex, "attr_face");
+// 		glVertexAttribIPointer(fLoc, 4, GL_UNSIGNED_BYTE, 8, (void*)4);
+// 		glEnableVertexAttribArray(fLoc);
+
+// 	} else {
+// 		glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
+// 		int vaLoc = glGetAttribLocation(ad->voxelVertex, "attr_vertex");
+// 		glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 4, (void*)0);
+// 		glEnableVertexAttribArray(vaLoc);
+// 	}
+
+// 	GLuint transformUniform1 = glGetUniformLocation(ad->voxelVertex, "transform");
+// 	glProgramUniform3fv(ad->voxelVertex, transformUniform1, 3, m->transform[0]);
+// 	GLuint transformUniform2 = glGetUniformLocation(ad->voxelFragment, "transform");
+// 	glProgramUniform3fv(ad->voxelFragment, transformUniform2, 3, m->transform[0]);
+
+// 	ad->textureUnits[0] = ad->voxelTextures[0];
+// 	ad->textureUnits[1] = ad->voxelTextures[1];
+// 	ad->textureUnits[2] = m->textureId;
+// 	ad->samplerUnits[0] = ad->voxelSamplers[0];
+// 	ad->samplerUnits[1] = ad->voxelSamplers[1];
+// 	ad->samplerUnits[2] = ad->voxelSamplers[2];
+
+// 	glBindTextures(0,16,ad->textureUnits);
+// 	glBindSamplers(0,16,ad->samplerUnits);
+
+// 	glBindProgramPipeline(ad->shader);
+
+// 	glDrawArrays(GL_QUADS, 0, m->quadCount*4);
+// 	triangleCount += m->quadCount*4;
+// }
+
+void setupVoxelUniforms(uint vertexShader, uint fragmentShader, Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit, Mat4 view, Mat4 proj, Vec3 fogColor) {
+
+	Vec3 li = normVec3(vec3(0,0.5f,0.5f));
+	Mat4 ambientLighting = {
+		li.x, li.y, li.z ,0, // reversed lighting direction
+		0.5,0.5,0.5,0, // directional color
+		0.5,0.5,0.5,0, // constant color
+		0.5,0.5,0.5,1.0f/1000.0f/1000.0f, // fog data for simple_fog
+	};
+
+	Mat4 al;
+
+	float bright = 1.0f;
+	float amb[3][3];
+
+	#ifdef STBVOX_CONFIG_LIGHTING_SIMPLE
+	bright = 0.35f;  // when demoing lighting
+
+	static float dtl = 0;
+	dtl += 0.008f;
+	float start = 40;
+	float amp = 30;
+
+	Vec3 lColor = vec3(0.7f,0.7f,0.5f);
+	lColor *= 50;
+	Vec3 light[2] = { vec3(0,0,(amp/2)+start + sin(dtl)*amp), lColor };
+	int loc = glGetUniformLocation(ad->voxelFragment, "light_source");
+	glProgramUniform3fv(ad->voxelFragment, loc, 2, (GLfloat*)light);
+	#endif
+
+	// ambient direction is sky-colored upwards
+	// "ambient" lighting is from above
+	al.e2[0][0] =  0.3f;
+	al.e2[0][1] = -0.5f;
+	al.e2[0][2] =  0.9f;
+	al.e2[0][3] = 0;
+
+	amb[1][0] = 0.3f; amb[1][1] = 0.3f; amb[1][2] = 0.3f; // dark-grey
+	amb[2][0] = 1.0; amb[2][1] = 1.0; amb[2][2] = 1.0; // white
+
+	// convert so (table[1]*dot+table[2]) gives
+	// above interpolation
+	//     lerp((dot+1)/2, amb[1], amb[2])
+	//     amb[1] + (amb[2] - amb[1]) * (dot+1)/2
+	//     amb[1] + (amb[2] - amb[1]) * dot/2 + (amb[2]-amb[1])/2
+
+	for (int j=0; j < 3; ++j) {
+	   al.e2[1][j] = (amb[2][j] - amb[1][j])/2 * bright;
+	   al.e2[2][j] = (amb[1][j] + amb[2][j])/2 * bright;
+	}
+	al.e2[1][3] = 0;
+	al.e2[2][3] = 0;
+
+	// fog color
+	al.e2[3][0] = fogColor.x, al.e2[3][1] = fogColor.y, al.e2[3][2] = fogColor.z;
+	// al.e2[3][3] = 1.0f / (view_distance - MESH_CHUNK_SIZE_X);
+	// al.e2[3][3] *= al.e2[3][3];
+	al.e2[3][3] = (float)1.0f/(VIEW_DISTANCE - VOXEL_X);
+	al.e2[3][3] *= al.e2[3][3];
+
+	ambientLighting = al;
+
+	int texUnit[2] = {texUnit1, texUnit2};
+
+	for (int i=0; i < STBVOX_UNIFORM_count; ++i) {
+		stbvox_uniform_info sui;
+		if (stbvox_get_uniform_info(&sui, i)) {
+			if(i == STBVOX_UNIFORM_transform) continue;
+
+			for(int shaderStage = 0; shaderStage < 2; shaderStage++) {
+				GLint location;
+				GLuint program;
+				if(shaderStage == 0) {
+					location = glGetUniformLocation(vertexShader, sui.name);
+					program = vertexShader;
+				} else {
+					location = glGetUniformLocation(fragmentShader, sui.name);
+					program = fragmentShader;
+				}
+
+				if (location != -1) {
+					int arrayLength = sui.array_length;
+					void* data = sui.default_value;
+
+					switch (i) {
+						case STBVOX_UNIFORM_camera_pos: { // only needed for fog
+						   		data = camera.e;
+						   } break;
+
+						case STBVOX_UNIFORM_tex_array: {
+							data = texUnit;
+						} break;
+
+						case STBVOX_UNIFORM_face_data: {
+							data = &faceUnit;
+						} break;
+
+						case STBVOX_UNIFORM_ambient: {
+							data = ambientLighting.e;
+						} break;
+
+						case STBVOX_UNIFORM_color_table: // you might want to override this
+						case STBVOX_UNIFORM_texscale:    // you may want to override this
+						case STBVOX_UNIFORM_normals:     // you never want to override this
+						case STBVOX_UNIFORM_texgen:      // you never want to override this
+							break;
+					}
+
+					switch(sui.type) {
+						case STBVOX_UNIFORM_TYPE_none: // glProgramUniformX(program, loc2, sui.array_length, sui.default_value); break;
+						case STBVOX_UNIFORM_TYPE_sampler: glProgramUniform1iv(program, location, arrayLength, (GLint*)data); break;
+						case STBVOX_UNIFORM_TYPE_vec2: glProgramUniform2fv(program, location, arrayLength, (GLfloat*)data); break;
+						case STBVOX_UNIFORM_TYPE_vec3: glProgramUniform3fv(program, location, arrayLength, (GLfloat*)data); break;
+						case STBVOX_UNIFORM_TYPE_vec4: glProgramUniform4fv(program, location, arrayLength, (GLfloat*)data); break;
+					}
+				}
+			}
+		}
+	}
+
+	// Mat4 finalMat = proj*view*model;
+	Mat4 finalMat = proj*view;
+	GLint modelViewUni = glGetUniformLocation(vertexShader, "model_view");
+	glProgramUniformMatrix4fv(vertexShader, modelViewUni, 1, 1, finalMat.e);
+}
 
 
 void getCamData(Vec3 look, Vec2 rot, Vec3 gUp, Vec3* cLook, Vec3* cRight, Vec3* cUp) {
@@ -1146,13 +1253,64 @@ void getCamData(Vec3 look, Vec2 rot, Vec3 gUp, Vec3* cLook, Vec3* cRight, Vec3* 
 	*cLook = -look;
 }
 
+
+struct GraphicsState {
+	PipelineIds pIds;
+
+	// Mesh mesh;
+
+	uint programs[16];
+	uint textures[16];
+	int texCount;
+	uint samplers[16];
+
+	uint frameBuffers[16];
+	uint renderBuffers[16];
+	uint frameBufferTextures[2];
+
+	float aspectRatio;
+	float fieldOfView;
+	float nearPlane;
+	float farPlane;
+
+	Font fontArial;
+
+	Vec2i curRes;
+	int msaaSamples;
+	Vec2i fboRes;
+	bool useNativeRes;
+
+	// VoxelData;
+
+	uint voxelShader;
+	uint voxelVertex;
+	uint voxelFragment;
+
+	GLuint voxelSamplers[3];
+	GLuint voxelTextures[3];
+
+	GLuint textureUnits[16];
+	GLuint samplerUnits[16];
+};
+
 struct AppData {
 	SystemData systemData;
 	Input input;
+	WindowSettings wSettings;
+
+	GraphicsState graphicsState;
+
 	LONGLONG lastTimeStamp;
 	float dt;
 
-	Mesh mesh;
+	Vec3 camera;
+	Vec3 camPos;
+	Vec3 camLook;
+	Vec2 camRot;
+	Vec3 camVel;
+	Vec3 camAcc;
+
+	// Mesh mesh;
 	PipelineIds pipelineIds;
 	uint programs[16];
 	uint textures[16];
@@ -1163,16 +1321,10 @@ struct AppData {
 	uint renderBuffers[16];
 	uint frameBufferTextures[2];
 
-	WindowSettings wSettings;
-	Vec3 camera;
-	Vec3 camPos;
-	Vec3 camLook;
-	Vec2 camRot;
-	Vec3 camVel;
-	Vec3 camAcc;
-
 	float aspectRatio;
 	float fieldOfView;
+	float nearPlane;
+	float farPlane;
 
 	Font fontArial;
 
@@ -1204,39 +1356,101 @@ struct AppData {
 	Vec3 activeCamUp;
 	Vec3 activeCamRight;
 
+	VoxelMesh* vMeshs;
+	int vMeshsSize;
 
-
-	float transform[3][3];
-	int quadCount;
-	uint shader;
+	uint voxelShader;
 	uint voxelVertex;
 	uint voxelFragment;
-	uint bufferId;
-	char* meshBuffer;
-	int meshBufferSize;
+
 	GLuint voxelSamplers[3];
 	GLuint voxelTextures[3];
 
-	unsigned char* voxelBlocks;
-
-	GLuint voxelFaceTextures;
-	GLuint voxelFaceSamplers;
-
-	uint texBufferId;
-	char* texBuffer;
-	int texBufferSize;
-
 	GLuint textureUnits[16];
 	GLuint samplerUnits[16];
-
-	VoxelMesh* vMeshs;
-	int vMeshsSize;
 };
+
+enum DrawListCommand {
+	Draw_Command_Viewport_Type,
+	Draw_Command_Clear_Type,
+	Draw_Command_Enable_Type,
+	Draw_Command_Disable_Type,
+	Draw_Command_FrontFace_Type,
+	Draw_Command_BindFramebuffer_Type,
+	Draw_Command_BindBuffer_Type,
+	Draw_Command_BlendFunc,
+	// Draw_Command_DepthFunc,
+	// Draw_Command_ClearDepth,
+	Draw_Command_ClearColor,
+	// Draw_Command_GetUniformLocation,
+	Draw_Command_ProgramUniform,
+	// Draw_Command_glEnableVertexAttribArray,
+	// Draw_Command_glVertexAttribIPointer,
+	// Draw_Command_glBindTextures,
+	// Draw_Command_glBindSamplers,
+	// Draw_Command_glBindProgramPipeline,
+	// Draw_Command_glDrawArrays,
+	// Draw_Command_glError,
+	// Draw_Command_,
+	// Draw_Command_,
+	// Draw_Command_,
+	// Draw_Command_,
+	// Draw_Command_,
+	// Draw_Command_,
+	// Draw_Command_,
+	// Draw_Command_,
+
+	Draw_Command_Cube_Type,
+	Draw_Command_Rect_Type,
+};
+
+struct DrawCommandList {
+	void* data;
+	int count;
+	int bytes;
+	int maxBytes;
+};
+
+struct Draw_Command_Viewport {
+	int x,y,w,h;
+};
+
+struct Draw_Command_Cube {
+	Vec3 trans;
+	Vec3 scale;
+	Vec4 color;
+	float degrees;
+	Vec3 rot;
+};
+
+struct Draw_Command_Rect {
+	Rect r;
+	Rect uv;
+	Vec4 color;
+	int texture;
+};
+
+#define makeDrawCommandFunction(functionName) \
+	void dc##functionName(Draw_Command_##functionName d, DrawCommandList* commandList = 0) { \
+		int* cl = (int*)commandList->data; \
+		*(cl++) = Draw_Command_##functionName##_Type; \
+		*((Draw_Command_##functionName*)(cl)) = d; \
+		commandList->count++; \
+	} 
+
+makeDrawCommandFunction(Cube);
+makeDrawCommandFunction(Viewport);
+
+#define dcCase(name, var, index) \
+	Draw_Command_##name var = *((Draw_Command_##name*)index); \
+	index += sizeof(Draw_Command_Cube); \
+
 
 
 
 
 MemoryBlock* globalMemory;
+GraphicsState* globalGraphicsState;
 
 extern "C" APPMAINFUNCTION(appMain) {
 	globalMemory = memoryBlock;
@@ -1245,6 +1459,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 	SystemData* systemData = &ad->systemData;
 	HWND windowHandle = systemData->windowHandle;
 	WindowSettings* wSettings = &ad->wSettings;
+
+	globalGraphicsState = &ad->graphicsState;
 
 	if(init) {
 		getPMemory(sizeof(AppData));
@@ -1266,6 +1482,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->fieldOfView = 55;
 		ad->fboRes = vec2i(0, 120);
 		ad->useNativeRes = true;
+		ad->nearPlane = 0.1f;
+		ad->farPlane = 2000;
+
 
 		// DEVMODE devMode;
 		// int index = 0;
@@ -1392,7 +1611,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		GLenum glError = glGetError(); printf("GLError: %i\n", glError);
 
-		ad->shader = createShader(stbvox_get_vertex_shader(), stbvox_get_fragment_shader(), &ad->voxelVertex, &ad->voxelFragment);
+		ad->voxelShader = createShader(stbvox_get_vertex_shader(), stbvox_get_fragment_shader(), &ad->voxelVertex, &ad->voxelFragment);
 
 		ad->voxelSamplers[0] = createSampler(GL_REPEAT, GL_REPEAT, GL_NEAREST, GL_NEAREST_MIPMAP_NEAREST);
 		ad->voxelSamplers[1] = createSampler(GL_REPEAT, GL_REPEAT, GL_NEAREST, GL_NEAREST_MIPMAP_NEAREST);
@@ -1474,7 +1693,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->playerPos = vec3(35.5f,35.3f,30);
 		ad->playerLook = vec3(0,1,0);
 		ad->playerSize = vec3(0.8f, 0.8f, 1.8f);
-		ad->playerCamZOffset = ad->playerSize.z*0.5f - ad->playerSize.x*0.5f;
+		ad->playerCamZOffset = ad->playerSize.z*0.5f - ad->playerSize.x*0.25f;
 
 		ad->playerMode = true;
 		ad->pickMode = true;
@@ -1482,6 +1701,19 @@ extern "C" APPMAINFUNCTION(appMain) {
 		input->captureMouse = true;
 
 		return; // window operations only work after first frame?
+	}
+
+	if(second) {
+		setWindowProperties(windowHandle, wSettings->res.w, wSettings->res.h, -1920, 0);
+		// setWindowProperties(windowHandle, wSettings->res.w, wSettings->res.h, 0, 0);
+		setWindowStyle(windowHandle, wSettings->style);
+		setWindowMode(windowHandle, wSettings, WINDOW_MODE_FULLBORDERLESS);
+
+		updateAfterWindowResizing(wSettings, &ad->aspectRatio, ad->frameBuffers[0], ad->frameBuffers[1], ad->renderBuffers[0], ad->renderBuffers[1], &ad->frameBufferTextures[0], ad->msaaSamples, &ad->fboRes, &ad->curRes, ad->useNativeRes);
+	}
+
+	if(reload) {
+		loadFunctions();
 	}
 
 	LARGE_INTEGER counter;
@@ -1503,23 +1735,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		ad->lastTimeStamp = timeStamp;
 	}
-
 	// printf("%f \n", ad->dt);
 	// ad->dt = 0.016f;
 
 
-	if(second) {
-		setWindowProperties(windowHandle, wSettings->res.w, wSettings->res.h, -1920, 0);
-		// setWindowProperties(windowHandle, wSettings->res.w, wSettings->res.h, 0, 0);
-		setWindowStyle(windowHandle, wSettings->style);
-		setWindowMode(windowHandle, wSettings, WINDOW_MODE_FULLBORDERLESS);
 
-		updateAfterWindowResizing(wSettings, &ad->aspectRatio, ad->frameBuffers[0], ad->frameBuffers[1], ad->renderBuffers[0], ad->renderBuffers[1], &ad->frameBufferTextures[0], ad->msaaSamples, &ad->fboRes, &ad->curRes, ad->useNativeRes);
-	}
-
-	if(reload) {
-		loadFunctions();
-	}
 
 	updateInput(&ad->input, isRunning, windowHandle);
 
@@ -1534,7 +1754,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		updateAfterWindowResizing(wSettings, &ad->aspectRatio, ad->frameBuffers[0], ad->frameBuffers[1], ad->renderBuffers[0], ad->renderBuffers[1], &ad->frameBufferTextures[0], ad->msaaSamples, &ad->fboRes, &ad->curRes, ad->useNativeRes);
 	}
 
-	if(input->keysPressed[VK_F8]) {
+	if(input->keysPressed[VK_F2]) {
 		input->captureMouse = !input->captureMouse;
 	}
 
@@ -1600,6 +1820,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	#define VK_Q 0x51
 
 	Vec3 gUp = vec3(0,0,1);
+
 	Vec3 pLook, pRight, pUp;
 	getCamData(ad->playerLook, ad->playerRot, gUp, &pLook, &pRight, &pUp);
 	Vec3 cLook, cRight, cUp;
@@ -1655,7 +1876,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			look = cross(gUp, pRight);
 
 			float runBoost = 1.5f;
-			float speed = 50.0f;
+			float speed = 40.0f;
 
 			Vec3 acc = vec3(0,0,0);
 			if(input->keysDown[VK_SHIFT]) speed *= runBoost;
@@ -1668,7 +1889,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		if(input->keysPressed[VK_SPACE]) {
 			if(ad->playerOnGround) {
-				ad->playerVel += gUp*7.5f;
+				ad->playerVel += gUp*7.0f;
 				ad->playerOnGround = false;
 			}
 		}
@@ -1843,13 +2064,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		} else {
 			ad->playerOnGround = false;
 		}
-
-
-
 	}
-
-
-
 
 	if(ad->playerMode) {
 		ad->activeCamPos = ad->playerPos + vec3(0,0,ad->playerCamZOffset);
@@ -1862,8 +2077,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->activeCamUp = cUp;
 		ad->activeCamRight = cRight;
 	}
-
-
 
 	// selecting blocks and modifying them
 	// if(input->mouseButtonPressed[0] && ad->playerMode) {
@@ -2014,29 +2227,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-
-
-
-	glViewport(0,0, ad->curRes.x, ad->curRes.y);
-	// glClearColor(0.3f, 0.1f, 0.1f, 1.0f);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-	// glDepthRange(-1.0,1.0);
-	glEnable(GL_DEPTH_TEST);
-	glFrontFace(GL_CW);
-
-
-
-	glEnable(GL_MULTISAMPLE);
-	glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[0]);
-	glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-#if 1
-
-	// Vec3 skyColor = vec3(0.95f);
 	Vec3 skyColor = vec3(0.90f, 0.90f, 0.95f);
 	Vec3 fogColor = vec3(0.75f, 0.85f, 0.95f);
-	// Vec3 fogColor = vec3(0.70f, 0.80f, 0.90f);
 
 	// for tech showcase
 	#ifdef STBVOX_CONFIG_LIGHTING_SIMPLE
@@ -2044,101 +2236,48 @@ extern "C" APPMAINFUNCTION(appMain) {
 		fogColor = fogColor * vec3(0.3f);
 	#endif 
 
-	glEnable(GL_CULL_FACE);
-	// glDisable(GL_CULL_FACE);
-	// glDisable(GL_LIGHTING);
-	glEnable(GL_DEPTH_TEST);
-	glDepthFunc(GL_LESS);
-	glClearDepth(1);
-	glDepthMask(GL_TRUE);
-	glDisable(GL_SCISSOR_TEST);
-	// glClearColor(skyColor.x, skyColor.y, skyColor.z, 0.0f);
-	glClearColor(skyColor.x, skyColor.y, skyColor.z, 0.0f);
+	glViewport(0,0, ad->curRes.x, ad->curRes.y);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+	glBindFramebuffer (GL_DRAW_FRAMEBUFFER, ad->frameBuffers[1]);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[0]);
+	glClearColor(skyColor.x, skyColor.y, skyColor.z, 0.0f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	// glDepthRange(-1.0,1.0);
 	glFrontFace(GL_CW);
+
+	glEnable(GL_DEPTH_TEST);
+	glEnable(GL_CULL_FACE);
+	glDisable(GL_SCISSOR_TEST);
+	
 	glEnable(GL_TEXTURE_2D);
+
 	// glEnable(GL_ALPHA_TEST);
 	// glAlphaFunc(GL_GREATER, 0.5);
 
+	// glDisable(GL_LIGHTING);
+	// glDepthFunc(GL_LESS);
+	// glClearDepth(1);
+	// glDepthMask(GL_TRUE);
 
+	glEnable(GL_MULTISAMPLE);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-
-
-
-	Vec3 li = normVec3(vec3(0,0.5f,0.5f));
-	Mat4 ambientLighting = {
-		li.x, li.y, li.z ,0, // reversed lighting direction
-		0.5,0.5,0.5,0, // directional color
-		0.5,0.5,0.5,0, // constant color
-		0.5,0.5,0.5,1.0f/1000.0f/1000.0f, // fog data for simple_fog
-	};
-
-
-	Mat4 al;
-
-	float bright = 1.0f;
-	float amb[3][3];
-
-	#ifdef STBVOX_CONFIG_LIGHTING_SIMPLE
-	bright = 0.35f;  // when demoing lighting
-
-	static float dtl = 0;
-	dtl += 0.008f;
-	float start = 40;
-	float amp = 30;
-
-	Vec3 lColor = vec3(0.7f,0.7f,0.5f);
-	lColor *= 50;
-	Vec3 light[2] = { vec3(0,0,(amp/2)+start + sin(dtl)*amp), lColor };
-	int loc = glGetUniformLocation(ad->voxelFragment, "light_source");
-	glProgramUniform3fv(ad->voxelFragment, loc, 2, (GLfloat*)light);
-	#endif
-
-	// ambient direction is sky-colored upwards
-	// "ambient" lighting is from above
-	al.e2[0][0] =  0.3f;
-	al.e2[0][1] = -0.5f;
-	al.e2[0][2] =  0.9f;
-	al.e2[0][3] = 0;
-
-	amb[1][0] = 0.3f; amb[1][1] = 0.3f; amb[1][2] = 0.3f; // dark-grey
-	amb[2][0] = 1.0; amb[2][1] = 1.0; amb[2][2] = 1.0; // white
-
-	// convert so (table[1]*dot+table[2]) gives
-	// above interpolation
-	//     lerp((dot+1)/2, amb[1], amb[2])
-	//     amb[1] + (amb[2] - amb[1]) * (dot+1)/2
-	//     amb[1] + (amb[2] - amb[1]) * dot/2 + (amb[2]-amb[1])/2
-
-	for (int j=0; j < 3; ++j) {
-	   al.e2[1][j] = (amb[2][j] - amb[1][j])/2 * bright;
-	   al.e2[2][j] = (amb[1][j] + amb[2][j])/2 * bright;
-	}
-	al.e2[1][3] = 0;
-	al.e2[2][3] = 0;
-
-	// fog color
-	al.e2[3][0] = fogColor.x, al.e2[3][1] = fogColor.y, al.e2[3][2] = fogColor.z;
-	// al.e2[3][3] = 1.0f / (view_distance - MESH_CHUNK_SIZE_X);
-	// al.e2[3][3] *= al.e2[3][3];
-	al.e2[3][3] = (float)1.0f/(VIEW_DISTANCE - VOXEL_X);
-	al.e2[3][3] *= al.e2[3][3];
-
-	ambientLighting = al;
-
-
+	lookAt(&ad->pipelineIds, ad->activeCamPos, -ad->activeCamLook, ad->activeCamUp, ad->activeCamRight);
+	perspective(&ad->pipelineIds, degreeToRadian(ad->fieldOfView), ad->aspectRatio, ad->nearPlane, ad->farPlane);
 
 	Mat4 view, proj; 
 	viewMatrix(&view, ad->activeCamPos, -ad->activeCamLook, ad->activeCamUp, ad->activeCamRight);
-	projMatrix(&proj, degreeToRadian(ad->fieldOfView), ad->aspectRatio, 0.1f, 2000);
+	glProgramUniformMatrix4fv(ids->primitiveVertex, ids->primitiveVertexView, 1, 1, view.e);
+	projMatrix(&proj, degreeToRadian(ad->fieldOfView), ad->aspectRatio, ad->nearPlane, ad->farPlane);
+	glProgramUniformMatrix4fv(ids->primitiveVertex, ids->primitiveVertexProj, 1, 1, proj.e);
 
-	setupVoxelUniforms(ad->voxelVertex, ad->voxelFragment, vec4(ad->activeCamPos, 1), 0, 0, 2, ambientLighting, view, proj);
+	setupVoxelUniforms(ad->voxelVertex, ad->voxelFragment, vec4(ad->activeCamPos, 1), 0, 0, 2, view, proj, fogColor);
 
 
-
-
-
+#if 1
 	int meshGenerationCount = 0;
 	int triangleCount = 0;
 
@@ -2256,7 +2395,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 			
 
 			if(isIntersecting) {
-			// if(true) {
 				if(STBVOX_CONFIG_MODE == 0) {
 					// interleaved buffer - 2 uints in a row -> 8 bytes stride
 					glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
@@ -2289,46 +2427,20 @@ extern "C" APPMAINFUNCTION(appMain) {
 				glBindTextures(0,16,ad->textureUnits);
 				glBindSamplers(0,16,ad->samplerUnits);
 
-				glBindProgramPipeline(ad->shader);
+				glBindProgramPipeline(ad->voxelShader);
 
 				glDrawArrays(GL_QUADS, 0, m->quadCount*4);
 				triangleCount += m->quadCount*4;
+
+				// drawMesh(m);
 			}
 		}
 	}
 
-	if(second) {
-		GLenum glError = glGetError(); printf("GLError: %i\n", glError);
-	}
-
-	// // glDisableVertexAttrribArray(0);
-	// glBindBuffer(GL_ARRAY_BUFFER, 0);
-	// glActiveTexture(GL_TEXTURE0);
-
-	// glUseProgram(0);
-
-	// // glDisable(GL_BLEND);
-	// // glDisable(GL_CULL_FACE);
-	// // glDisable(GL_DEPTH_TEST);
-
-	// glDisable(GL_TEXTURE_2D);
-
-
-
-
-
 #endif
 
 
-	if(second) {
-		GLenum glError = glGetError(); printf("GLError: %i\n", glError);
-		int stop = 2;
-	}
 
-
-
-	lookAt(&ad->pipelineIds, ad->activeCamPos, -ad->activeCamLook, ad->activeCamUp, ad->activeCamRight);
-	perspective(&ad->pipelineIds, degreeToRadian(ad->fieldOfView), ad->aspectRatio, 0.1f, 2000);
 	glBindProgramPipeline(ad->pipelineIds.programCube);
 
 	// static float dt = 0;
@@ -2342,19 +2454,18 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// for(int i = -10; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,i*10,0) + off, s, 0, normVec3(vec3(0.9f,0.6f,0.2f)));
 	// for(int i = -10; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,0,i*10) + off, s, 0, normVec3(vec3(0.9f,0.6f,0.2f)));
 
-
-	// for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(i*10,0,0) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
-	// for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,i*10,0) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
-	// for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,0,i*10) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
-
+	for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(i*10,0,0) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
+	for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,i*10,0) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
+	for(int i = 0; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,0,i*10) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
 
 	#ifdef STBVOX_CONFIG_LIGHTING_SIMPLE
 	drawCube(&ad->pipelineIds, light[0], vec3(3,3,3), vec4(1,1,1,1), 0, vec3(0,0,0));
 	#endif
 
 
-	glDisable(GL_CULL_FACE);
-	glEnable(GL_CULL_FACE);
+
+	// glDisable(GL_CULL_FACE);
+	// glEnable(GL_CULL_FACE);
 
 	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 	if(!ad->playerMode) {
@@ -2362,26 +2473,16 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 	glLineWidth(3);
 	if(ad->blockSelected) drawCube(&ad->pipelineIds, ad->selectedBlock, vec3(1.01f), vec4(0.9f), 0, vec3(0,0,0));
+	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
 
 
 
-
-	// glEnable(GL_CULL_FACE);
-
-	view;
-	viewMatrix(&view, ad->activeCamPos, -ad->activeCamLook, ad->activeCamUp, ad->activeCamRight);
-	glProgramUniformMatrix4fv(ids->primitiveVertex, ids->primitiveVertexView, 1, 1, view.e);
-	proj;
-	projMatrix(&proj, degreeToRadian(ad->fieldOfView), ad->aspectRatio, 0.1f, 2000);
-	glProgramUniformMatrix4fv(ids->primitiveVertex, ids->primitiveVertexProj, 1, 1, proj.e);
 	glBindProgramPipeline(ad->pipelineIds.programPrimitive);
 
 	glDisable(GL_CULL_FACE);
 	glEnable(GL_LINE_SMOOTH);
-
 	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-	// glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 	glLineWidth(3);
 
 	if(!ad->playerMode) {
@@ -2428,17 +2529,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 	glEnable(GL_CULL_FACE);
-	glEnable(GL_LINE_SMOOTH);
 
 
 
 
 
 	glBindFramebuffer (GL_READ_FRAMEBUFFER, ad->frameBuffers[0]);
-	// glReadBuffer      (GL_COLOR_ATTACHMENT0);
 	glBindFramebuffer (GL_DRAW_FRAMEBUFFER, ad->frameBuffers[1]);
-	// glDrawBuffer      (GL_BACK);
-
 	glBlitFramebuffer (0,0, ad->curRes.x, ad->curRes.y,
 	                   0,0, ad->curRes.x, ad->curRes.y,
 	                   // GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT,
@@ -2446,14 +2543,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 	                   // GL_NEAREST);
 	                   GL_LINEAR);
 
-
 	glBindFramebuffer (GL_FRAMEBUFFER, 0);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-	glDisable(GL_DEPTH_TEST);
-
+	// glDisable(GL_DEPTH_TEST);
 
 	glViewport(0,0, wSettings->currentRes.x, wSettings->currentRes.y);
-
 	ortho(&ad->pipelineIds, rect(0,0,1,1));
 	glBindProgramPipeline(ad->pipelineIds.programQuad);
 
@@ -2462,17 +2555,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glProgramUniform4f(ids->quadVertex, ids->quadVertexColor, 1,1,1,1);
 	glBindTexture(GL_TEXTURE_2D, ad->frameBufferTextures[0]);
 
-	glDrawArraysInstancedBaseInstance(GL_TRIANGLE_STRIP, 0, 4, 1, 0);
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-	glBindFramebuffer (GL_DRAW_FRAMEBUFFER, ad->frameBuffers[1]);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glBindFramebuffer (GL_FRAMEBUFFER, 0);
 
 
 
 
 	ortho(&ad->pipelineIds, rectCenDim(cam->x,cam->y, cam->z, cam->z/ad->aspectRatio));
-	glBindProgramPipeline(ad->pipelineIds.programQuad);
+	// glBindProgramPipeline(ad->pipelineIds.programQuad);
 	// drawRect(&ad->pipelineIds, rectCenDim(0, 0, 0.01f, 100), rect(0,0,1,1), vec4(0.4f,1,0.4f,1), ad->textures[0]);
 	// drawRect(&ad->pipelineIds, rectCenDim(0, 0, 100, 0.01f), rect(0,0,1,1), vec4(0.4f,0.4f,1,1), ad->textures[0]);
 
@@ -2485,10 +2576,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 	ortho(&ad->pipelineIds, rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0));
-	glBindProgramPipeline(ad->pipelineIds.programQuad);
+	// glBindProgramPipeline(ad->pipelineIds.programQuad);
 	int fontSize = 22;
 	int pi = 0;
-	Vec4 c = vec4(1,1,0,1);
+	Vec4 c = vec4(1.0f,0.3f,0.0f,1);
 
 	#define PVEC3(v) v.x, v.y, v.z
 	#define PVEC2(v) v.x, v.y
@@ -2502,8 +2593,68 @@ extern "C" APPMAINFUNCTION(appMain) {
 	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Vec  : (%f,%f,%f)", PVEC3(ad->playerVel));
 	drawTextA(&ad->pipelineIds, vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Acc  : (%f,%f,%f)", PVEC3(ad->playerAcc));
 
+
+
+#if 0
+
+	// Draw_Command_Cube dc = ;
+	// addDrawList(0, Draw_Command_Cube* c = {vec3(0,0,0)});
+	// addDrawList(1, &dc);
+	// addDrawList(1, {{0,0,0},0,0});
+	// addDrawList(1, (int []){ 1, 2, 3, 4 });
+	// addDrawList(1, (int []){ 1, 2, 3, 4 });
+	
+	// addDrawListCube();
+	// addDrawListRect();
+
+	DrawCommandList commandList = {};
+	commandList.data = getTMemory(100);
+
+	dcCube({vec3(0,0,0), vec3(1,1,1), vec4(1,1,1,1), 0, 2}, &commandList);
+	// dcCube({1}, &commandList);
+
+	// dc(Draw_Command_Cube, {1}, &commandList);
+	// dc(Draw_Command_Cube, {1}, &commandList);
+
+	// void* globalDrawList;
+	// int globalDrawListCount;
+	
+	char* drawListIndex = (char*)commandList.data;
+	for(int i = 0; i < commandList.count; i++) {
+		int command = *((int*)drawListIndex);
+		drawListIndex += 4;
+
+		switch(command) {
+			case Draw_Command_Cube_Type: {
+				dcCase(Cube, dc, drawListIndex);
+
+				lookAt(&ad->pipelineIds, ad->activeCamPos, -ad->activeCamLook, ad->activeCamUp, ad->activeCamRight);
+				perspective(&ad->pipelineIds, degreeToRadian(ad->fieldOfView), ad->aspectRatio, 0.1f, 2000);
+				glBindProgramPipeline(ad->pipelineIds.programCube);
+
+				drawCube(&ad->pipelineIds, dc.trans, dc.scale, dc.color, dc.degrees, dc.rot);
+			} break;
+
+			case Draw_Command_Viewport_Type: {
+				dcCase(Viewport, dc, drawListIndex);
+
+				glViewport(dc.x, dc.y, dc.w, dc.h);
+			} break;
+
+			default: {
+
+			} break;
+		}
+	}
+#endif 
+
 	swapBuffers(&ad->systemData);
 	glFinish();
+
+	if(second) {
+		GLenum glError = glGetError(); printf("GLError: %i\n", glError);
+		int stop = 2;
+	}
 
 	clearTMemory();
 }
