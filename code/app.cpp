@@ -303,6 +303,10 @@ enum DrawListCommand {
 	Draw_Command_Line_Type,
 	Draw_Command_Quad_Type,
 	Draw_Command_Rect_Type,
+	Draw_Command_Text_Type,
+	Draw_Command_PolygonMode_Type,
+	Draw_Command_LineWidth_Type,
+	Draw_Command_Cull_Type,
 	// Draw_Command_Rect_Type,
 };
 
@@ -313,9 +317,12 @@ struct DrawCommandList {
 	int maxBytes;
 };
 
-// struct Draw_Command_Viewport {
-// 	int x,y,w,h;
-// };
+void drawCommandListInit(DrawCommandList* cl, char* data, int maxBytes) {
+	cl->data = data;
+	cl->count = 0;
+	cl->bytes = 0;
+	cl->maxBytes = maxBytes;
+}
 
 struct Draw_Command_Cube {
 	Vec3 trans;
@@ -341,6 +348,38 @@ struct Draw_Command_Rect {
 	int texture;
 };
 
+struct Font;
+struct Draw_Command_Text {
+	char* text;
+	Font* font;
+	Vec2 pos;
+	Vec4 color;
+
+	int vAlign;
+	int hAlign;
+	int shadow;
+	Vec4 shadowColor;
+};
+
+enum Polygon_Mode {
+	POLYGON_MODE_FILL = 0,
+	POLYGON_MODE_LINE,
+	POLYGON_MODE_POINT,
+};
+
+struct Draw_Command_PolygonMode {
+	int mode;
+};
+
+struct Draw_Command_LineWidth {
+	int width;
+};
+
+struct Draw_Command_Cull {
+	bool b;
+};
+
+
 DrawCommandList* globalCommandList3d;
 DrawCommandList* globalCommandList2d;
 GraphicsState* globalGraphicsState;
@@ -351,15 +390,20 @@ GraphicsState* globalGraphicsState;
 		else commandList = globalCommandList2d; \
 		int* cl = (int*)(((char*)commandList->data)+commandList->bytes); \
 		*(cl++) = Draw_Command_##name##_Type; \
+		assert(sizeof(Draw_Command_##name) + commandList->bytes < commandList->maxBytes); \
 		*((Draw_Command_##name*)(cl)) = d; \
 		commandList->count++; \
-		commandList->bytes += sizeof(Draw_Command_##name) + 4; \
+		commandList->bytes += sizeof(Draw_Command_##name) + sizeof(int); \
 	} 
 
 makeDrawCommandFunction(Cube, 0);
 makeDrawCommandFunction(Line, 0);
 makeDrawCommandFunction(Quad, 0);
+makeDrawCommandFunction(PolygonMode, 0);
+makeDrawCommandFunction(LineWidth, 0);
+makeDrawCommandFunction(Cull, 0);
 makeDrawCommandFunction(Rect, 1);
+makeDrawCommandFunction(Text, 1);
 
 #define dcCase(name, var, index) \
 	Draw_Command_##name var = *((Draw_Command_##name*)index); \
@@ -686,11 +730,13 @@ struct Font {
 	int height;
 };
 
-void drawText(Vec2 pos, char* text, Vec4 color, Font* font, int vAlign, int hAlign) {
+void drawText(char* text, Font* font, Vec2 pos, Vec4 color, int vAlign = 0, int hAlign = 0, int shadow = 0, Vec4 shadowColor = vec4(0,0,0,1)) {
 	int length = strLen(text);
 	Vec2 textDim = stbtt_GetTextDim(font->cData, font->height, font->glyphStart, text);
 	pos.x -= vAlign*0.5f*textDim.w;
 	pos.y -= hAlign*0.5f*textDim.h;
+
+	Vec2 shadowOffset = vec2(shadow, -shadow);
 
 	Vec2 startPos = pos;
 	for(int i = 0; i < length; i++) {
@@ -704,56 +750,12 @@ void drawText(Vec2 pos, char* text, Vec4 color, Font* font, int vAlign, int hAli
 
 		stbtt_aligned_quad q;
 		stbtt_GetBakedQuad(font->cData, font->size.w, font->size.h, t-font->glyphStart, &pos.x, &pos.y, &q, 1);
-		drawRect(rect(q.x0, q.y0, q.x1, q.y1), rect(q.s0,q.t0,q.s1,q.t1), color, 3);
-	}
-}
 
-void drawTextA(Vec2 pos, Vec4 color, Font* font, int vAlign, int hAlign, char* text, ... ) {
-	va_list vl;
-	va_start(vl, text);
-
-	int length = strLen(text);
-	Vec2 textDim = stbtt_GetTextDim(font->cData, font->height, font->glyphStart, text);
-	pos.x -= vAlign*0.5f*textDim.w;
-	pos.y -= hAlign*0.5f*textDim.h;
-
-	Vec2 startPos = pos;
-	for(int i = 0; i < length; i++) {
-		char t = text[i];
-
-		if(t == '\n') {
-			pos.y -= font->height;
-			pos.x = startPos.x;
-			continue;
+		Rect r = rect(q.x0, q.y0, q.x1, q.y1);
+		if(shadow > 0) {
+			drawRect(rectAddOffset(r, shadowOffset), rect(q.s0,q.t0,q.s1,q.t1), shadowColor, 3);
 		}
-
-		if(t == '%') {
-			i++;
-			t = text[i];
-			if(t != '%') {
-				char* valueBuffer = getTString(20);
-				Vec2 oPos = vec2(pos.x + (vAlign*0.5f*textDim.w), pos.y + (hAlign*0.5f*textDim.h));
-
-				if(t == 'i') {
-					int v = va_arg(vl, int);
-					intToStr(valueBuffer, v);
-				}
-
-				if(t == 'f') {
-					float v = va_arg(vl, double);
-					floatToStr(valueBuffer, v, 2);
-				}
-
-				drawText(oPos, valueBuffer, color, font, vAlign, hAlign);
-				t = text[++i];
-				Vec2 dim = stbtt_GetTextDim(font->cData, font->height, font->glyphStart, valueBuffer);
-				pos.x += dim.w;
-			}
-		}
-
-		stbtt_aligned_quad q;
-		stbtt_GetBakedQuad(font->cData, font->size.w, font->size.h, t-font->glyphStart, &pos.x, &pos.y, &q, 1);
-		drawRect(rect(q.x0, q.y0, q.x1, q.y1), rect(q.s0,q.t0,q.s1,q.t1), color, 3);
+		drawRect(r, rect(q.s0,q.t0,q.s1,q.t1), color, 3);
 	}
 }
 
@@ -1229,10 +1231,11 @@ void setupVoxelUniforms(Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit
 	float amp = 30;
 
 	Vec3 lColor = vec3(0.7f,0.7f,0.5f);
-	lColor *= 50;
-	Vec3 light[2] = { vec3(0,0,(amp/2)+start + sin(dtl)*amp), lColor };
-	int loc = glGetUniformLocation(ad->voxelFragment, "light_source");
-	glProgramUniform3fv(ad->voxelFragment, loc, 2, (GLfloat*)light);
+	Vec3 lColorBrightness = lColor*50;
+	Vec3 light[2] = { vec3(0,0,(amp/2)+start + sin(dtl)*amp), lColorBrightness };
+	int loc = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelFragment, "light_source");
+	glProgramUniform3fv(globalGraphicsState->pipelineIds.voxelFragment, loc, 2, (GLfloat*)light);
+	dcCube({light[0], vec3(3,3,3), vec4(lColor, 1), 0, vec3(0,0,0)});
 	#endif
 
 	// ambient direction is sky-colored upwards
@@ -1451,9 +1454,69 @@ struct AppData {
 	// GLuint samplerUnits[16];
 };
 
+char* fillString(char* text, ...) {
+	va_list vl;
+	va_start(vl, text);
 
+	int length = strLen(text);
+	char* buffer = getTString(length+1);
 
+	char valueBuffer[20] = {};
 
+	int ti = 0;
+	int bi = 0;
+	while(true) {
+		char t = text[ti];
+
+		if(text[ti] == '%' && text[ti+1] == 'f') {
+			float v = va_arg(vl, double);
+			floatToStr(valueBuffer, v, 2);
+			int sLen = strLen(valueBuffer);
+			memCpy(buffer + bi, valueBuffer, sLen);
+
+			ti += 2;
+			bi += sLen;
+			getTString(sLen);
+		} else if(text[ti] == '%' && text[ti+1] == 'i') {
+			int v = va_arg(vl, int);
+			intToStr(valueBuffer, v);
+			int sLen = strLen(valueBuffer);
+			memCpy(buffer + bi, valueBuffer, sLen);
+
+			ti += 2;
+			bi += sLen;
+			getTString(sLen);
+		} if(text[ti] == '%' && text[ti+1] == '%') {
+			buffer[bi++] = '%';
+			ti += 2;
+			getTString(1);
+		} else {
+			buffer[bi++] = text[ti++];
+			getTString(1);
+
+			if(buffer[bi-1] == '\0') break;
+		}
+	}
+
+	return buffer;
+}
+
+void getPointsFromQuadAndNormal(Vec3 p, Vec3 normal, float size, Vec3 verts[4]) {
+	int sAxis[2];
+	int biggestAxis = getBiggestAxis(normal, sAxis);
+
+	float s2 = size*0.5f;
+
+	// Vec3 verts[4] = {};
+	for(int i = 0; i < 4; i++) {
+		Vec3 d = p;
+			 if(i == 0) { d.e[sAxis[0]] += -s2; d.e[sAxis[1]] += -s2; }
+		else if(i == 1) { d.e[sAxis[0]] += -s2; d.e[sAxis[1]] +=  s2; }
+		else if(i == 2) { d.e[sAxis[0]] +=  s2; d.e[sAxis[1]] +=  s2; }
+		else if(i == 3) { d.e[sAxis[0]] +=  s2; d.e[sAxis[1]] += -s2; }
+		verts[i] = d;
+	}
+}
 
 
 MemoryBlock* globalMemory;
@@ -1689,6 +1752,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
+
+		// setup
 		int vMeshSize = sizeof(VoxelMesh)*2000;
 		ad->vMeshs = (VoxelMesh*)getPMemory(vMeshSize);
 		zeroMemory(ad->vMeshs, vMeshSize);
@@ -1720,6 +1785,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 		loadFunctions();
 	}
 
+	// alloc drawcommandlist	
+	int clSize = kiloBytes(100);
+	drawCommandListInit(globalCommandList3d, (char*)getTMemory(clSize), clSize);
+	drawCommandListInit(globalCommandList2d, (char*)getTMemory(clSize), clSize);
+
 	LARGE_INTEGER counter;
 	LARGE_INTEGER frequency;
 	QueryPerformanceFrequency(&frequency); 
@@ -1743,11 +1813,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// ad->dt = 0.016f;
 
 	updateInput(&ad->input, isRunning, windowHandle);
-
-	ad->commandList3d.data = getTMemory(kiloBytes(2));
-	ad->commandList2d.data = getTMemory(kiloBytes(2));
-
-
 
 	if(input->keysPressed[VK_F1]) {
 		int mode;
@@ -2273,7 +2338,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_CULL_FACE);
 	glDisable(GL_SCISSOR_TEST);
+	glEnable(GL_LINE_SMOOTH);
 	
+
 	glEnable(GL_TEXTURE_2D);
 
 	// glEnable(GL_ALPHA_TEST);
@@ -2432,65 +2499,69 @@ extern "C" APPMAINFUNCTION(appMain) {
 #endif
 
 
+	// Vec3 off = vec3(0.5f, 0.5f, 0.5f);
+	// Vec3 s = vec3(1.01f, 1.01f, 1.01f);
 
-	glBindProgramPipeline(globalGraphicsState->pipelineIds.programCube);
+	// for(int i = 0; i < 10; i++) dcCube({vec3(i*10,0,0) + off, s, vec4(0,1,1,1), 0, vec3(1,2,3)});
+	// for(int i = 0; i < 10; i++) dcCube({vec3(0,i*10,0) + off, s, vec4(0,1,1,1), 0, vec3(1,2,3)});
+	// for(int i = 0; i < 10; i++) dcCube({vec3(0,0,i*10) + off, s, vec4(0,1,1,1), 0, vec3(1,2,3)});
 
-	Vec3 off = vec3(0.5f, 0.5f, 0.5f);
-	Vec3 s = vec3(1.01f, 1.01f, 1.01f);
-
-	// for(int i = 0; i < 10; i++) drawCube(vec3(i*10,0,0) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
-	// for(int i = 0; i < 10; i++) drawCube(vec3(0,i*10,0) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
-	// for(int i = 0; i < 10; i++) drawCube(vec3(0,0,i*10) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
-
-	#ifdef STBVOX_CONFIG_LIGHTING_SIMPLE
-	drawCube(light[0], vec3(3,3,3), vec4(1,1,1,1), 0, vec3(0,0,0));
-	#endif
-
-
-
-	// glDisable(GL_CULL_FACE);
-	// glEnable(GL_CULL_FACE);
-
-	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-	if(!ad->playerMode) {
-		drawCube(ad->playerPos, ad->playerSize, vec4(1,1,1,1), 0, vec3(0,0,0));
-	}
-	glLineWidth(3);
-	if(ad->blockSelected) drawCube(ad->selectedBlock, vec3(1.01f), vec4(0.9f), 0, vec3(0,0,0));
-	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-
-
-
-
-	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-	glDisable(GL_CULL_FACE);
-	glEnable(GL_LINE_SMOOTH);
-	glLineWidth(3);
+	dcLineWidth({3});
 
 	if(!ad->playerMode) {
 		Vec3 pCamPos = ad->playerPos + vec3(0,0,ad->playerCamZOffset);
-		drawLine(pCamPos, pCamPos + pLook*0.5f, vec4(1,0,0,1));
-		drawLine(pCamPos, pCamPos + pUp*0.5f, vec4(0,1,0,1));
-		drawLine(pCamPos, pCamPos + pRight*0.5f, vec4(0,0,1,1));
+		dcLine({pCamPos, pCamPos + pLook*0.5f, vec4(1,0,0,1)});
+		dcLine({pCamPos, pCamPos + pUp*0.5f, vec4(0,1,0,1)});
+		dcLine({pCamPos, pCamPos + pRight*0.5f, vec4(0,0,1,1)});
+
+		dcPolygonMode({POLYGON_MODE_LINE});
+		dcCube({ad->playerPos, ad->playerSize, vec4(1,1,1,1), 0, vec3(0,0,0)});
+		dcPolygonMode({POLYGON_MODE_FILL});
+
 	} else {
 		if(ad->blockSelected) {
-			Vec3 base = ad->selectedBlock + ad->selectedBlockFaceDir*0.5f*1.01f;
-			drawQuad(base, ad->selectedBlockFaceDir, 1, vec4(1,1,1,0.05f));
+			dcCull({false});
+			Vec3 vs[4];
+			getPointsFromQuadAndNormal(ad->selectedBlock + ad->selectedBlockFaceDir*0.5f*1.01f, ad->selectedBlockFaceDir, 1, vs);
+			dcQuad({vs[0], vs[1], vs[2], vs[3], vec4(1,1,1,0.05f)});
+			dcCull({true});
+
+			dcPolygonMode({POLYGON_MODE_LINE});
+			dcCube({ad->selectedBlock, vec3(1.01f), vec4(0.9f), 0, vec3(0,0,0)});
+			dcPolygonMode({POLYGON_MODE_FILL});
 		}
 	}
 
-	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-	glEnable(GL_CULL_FACE);
+	int fontSize = 22;
+	int pi = 0;
+	Vec4 c = vec4(1.0f,0.3f,0.0f,1);
+	Vec4 c2 = vec4(0,0,0,1);
+
+	#define PVEC3(v) v.x, v.y, v.z
+	#define PVEC2(v) v.x, v.y
+	dcText({fillString("Pos  : (%f,%f,%f)", PVEC3(ad->activeCamPos)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
+	dcText({fillString("Look : (%f,%f,%f)", PVEC3(ad->activeCamLook)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
+	dcText({fillString("Up   : (%f,%f,%f)", PVEC3(ad->activeCamUp)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
+	dcText({fillString("Right: (%f,%f,%f)", PVEC3(ad->activeCamRight)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
+	dcText({fillString("Rot  : (%f,%f)", PVEC2(ad->camRot)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
+	dcText({fillString("Vec  : (%f,%f,%f)", PVEC3(ad->playerVel)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
+	dcText({fillString("Acc  : (%f,%f,%f)", PVEC3(ad->playerAcc)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
+	dcText({fillString("Quads: (%i)", triangleCount), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
 
 
-	// dcCube({vec3(0,0,0), vec3(1,1,1), vec4(1,1,1,1), 0, vec3(0,0,0)});
-	// dcLine({vec3(5,5,0), vec3(8,8,1), vec4(1,0,1,1)});
-	// dcQuad({vec3(5,5,0), vec3(5,8,1), vec3(8,8,0), vec3(8,5,0), vec4(1,0,1,1)});
+
+
+
+
+
+
+
+	glBindProgramPipeline(globalGraphicsState->pipelineIds.programCube);
 
 	char* drawListIndex = (char*)globalCommandList3d->data;
 	for(int i = 0; i < globalCommandList3d->count; i++) {
 		int command = *((int*)drawListIndex);
-		drawListIndex += 4;
+		drawListIndex += sizeof(int);
 
 		switch(command) {
 			case Draw_Command_Cube_Type: {
@@ -2508,11 +2579,27 @@ extern "C" APPMAINFUNCTION(appMain) {
 				drawQuad(dc.p0, dc.p1, dc.p2, dc.p3, dc.color);
 			} break;
 
-			// case Draw_Command_Viewport_Type: {
-			// 	dcCase(Viewport, dc, drawListIndex);
+			case Draw_Command_PolygonMode_Type: {
+				dcCase(PolygonMode, dc, drawListIndex);
+				int m;
+				switch(dc.mode) {
+					case POLYGON_MODE_FILL: m = GL_FILL; break;
+					case POLYGON_MODE_LINE: m = GL_LINE; break;
+					case POLYGON_MODE_POINT: m = GL_POINT; break;
+				}
+				glPolygonMode(GL_FRONT_AND_BACK, m);
+			} break;
 
-			// 	glViewport(dc.x, dc.y, dc.w, dc.h);
-			// } break;
+			case Draw_Command_LineWidth_Type: {
+				dcCase(LineWidth, dc, drawListIndex);
+				glLineWidth(dc.width);
+			} break;
+
+			case Draw_Command_Cull_Type: {
+				dcCase(Cull, dc, drawListIndex);
+				if(dc.b) glEnable(GL_CULL_FACE);
+				else glDisable(GL_CULL_FACE);
+			} break;
 
 			default: {
 
@@ -2520,6 +2607,21 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 	}
 
+	// ortho(rectCenDim(cam->x,cam->y, cam->z, cam->z/ad->aspectRatio));
+	// glBindProgramPipeline(globalGraphicsState->pipelineIds.programQuad);
+	// drawRect(rectCenDim(0, 0, 0.01f, 100), rect(0,0,1,1), vec4(0.4f,1,0.4f,1), ad->textures[0]);
+	// drawRect(rectCenDim(0, 0, 100, 0.01f), rect(0,0,1,1), vec4(0.4f,0.4f,1,1), ad->textures[0]);
+
+	// drawRect(rectCenDim(0, 0, 5, 5), rect(0,0,1,1), vec4(1,1,1,1), ad->textures[2]);
+	// drawRect(rectCenDim(0, 0, 5, 5), rect(0,0,1,1), vec4(1,1,1,1), 3);
+
+	// drawRect(rect(2,2,4,4), rect(0,0,1,1), vec4(1,1,0,1), 2);
+
+
+
+	ortho(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0));
+	glDisable(GL_DEPTH_TEST);
+	glBindProgramPipeline(globalGraphicsState->pipelineIds.programQuad);
 
 	glBindFramebuffer (GL_READ_FRAMEBUFFER, ad->frameBuffers[0]);
 	glBindFramebuffer (GL_DRAW_FRAMEBUFFER, ad->frameBuffers[1]);
@@ -2534,80 +2636,25 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glDisable(GL_DEPTH_TEST);
 
 	glViewport(0,0, wSettings->currentRes.x, wSettings->currentRes.y);
-	ortho(rect(0,0,1,1));
 	glBindProgramPipeline(globalGraphicsState->pipelineIds.programQuad);
+	drawRect(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0), rect(0,1,1,0), vec4(1), ad->frameBufferTextures[0]);
 
-	glProgramUniform4f(globalGraphicsState->pipelineIds.quadVertex, globalGraphicsState->pipelineIds.quadVertexMod, 0.5f, 0.5f, 1, 1);
-	glProgramUniform4f(globalGraphicsState->pipelineIds.quadVertex, globalGraphicsState->pipelineIds.quadVertexUV, 0, 1,0,1);
-	glProgramUniform4f(globalGraphicsState->pipelineIds.quadVertex, globalGraphicsState->pipelineIds.quadVertexColor, 1,1,1,1);
-	glBindTexture(GL_TEXTURE_2D, ad->frameBufferTextures[0]);
+	glBindFramebuffer (GL_FRAMEBUFFER, 0);	
 
-	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-
-	glBindFramebuffer (GL_FRAMEBUFFER, 0);
-
-
-
-
-	// ortho(rectCenDim(cam->x,cam->y, cam->z, cam->z/ad->aspectRatio));
-	// glBindProgramPipeline(globalGraphicsState->pipelineIds.programQuad);
-	// drawRect(rectCenDim(0, 0, 0.01f, 100), rect(0,0,1,1), vec4(0.4f,1,0.4f,1), ad->textures[0]);
-	// drawRect(rectCenDim(0, 0, 100, 0.01f), rect(0,0,1,1), vec4(0.4f,0.4f,1,1), ad->textures[0]);
-
-	// drawRect(rectCenDim(0, 0, 5, 5), rect(0,0,1,1), vec4(1,1,1,1), ad->textures[2]);
-	// drawRect(rectCenDim(0, 0, 5, 5), rect(0,0,1,1), vec4(1,1,1,1), 3);
-
-	// drawRect(rect(2,2,4,4), rect(0,0,1,1), vec4(1,1,0,1), 2);
-
-
-
-
-
-	ortho(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0));
-	glDisable(GL_DEPTH_TEST);
-	glBindProgramPipeline(globalGraphicsState->pipelineIds.programQuad);
-	int fontSize = 22;
-	int pi = 0;
-	Vec4 c = vec4(1.0f,0.3f,0.0f,1);
-	Vec4 c2 = vec4(0,0,0,1);
-
-	#define PVEC3(v) v.x, v.y, v.z
-	#define PVEC2(v) v.x, v.y
-
-	// shadow
-	float o = 1;
-	drawTextA(vec2(0+o,-fontSize*pi++ - o), c2, &ad->font, 0, 2, "Pos  : (%f,%f,%f)", PVEC3(ad->activeCamPos));
-	drawTextA(vec2(0+o,-fontSize*pi++ - o), c2, &ad->font, 0, 2, "Look : (%f,%f,%f)", PVEC3(ad->activeCamLook));
-	drawTextA(vec2(0+o,-fontSize*pi++ - o), c2, &ad->font, 0, 2, "Up   : (%f,%f,%f)", PVEC3(ad->activeCamUp));
-	drawTextA(vec2(0+o,-fontSize*pi++ - o), c2, &ad->font, 0, 2, "Right: (%f,%f,%f)", PVEC3(ad->activeCamRight));
-	drawTextA(vec2(0+o,-fontSize*pi++ - o), c2, &ad->font, 0, 2, "Rot  : (%f,%f)", PVEC2(ad->camRot));
-	drawTextA(vec2(0+o,-fontSize*pi++ - o), c2, &ad->font, 0, 2, "Vec  : (%f,%f,%f)", PVEC3(ad->playerVel));
-	drawTextA(vec2(0+o,-fontSize*pi++ - o), c2, &ad->font, 0, 2, "Acc  : (%f,%f,%f)", PVEC3(ad->playerAcc));
-	drawTextA(vec2(0+o,-fontSize*pi++ - o), c2, &ad->font, 0, 2, "Quads: (%f)", (float)triangleCount);
-
-	pi = 0;
-	drawTextA(vec2(0,-fontSize*pi++), c, &ad->font, 0, 2, "Pos  : (%f,%f,%f)", PVEC3(ad->activeCamPos));
-	drawTextA(vec2(0,-fontSize*pi++), c, &ad->font, 0, 2, "Look : (%f,%f,%f)", PVEC3(ad->activeCamLook));
-	drawTextA(vec2(0,-fontSize*pi++), c, &ad->font, 0, 2, "Up   : (%f,%f,%f)", PVEC3(ad->activeCamUp));
-	drawTextA(vec2(0,-fontSize*pi++), c, &ad->font, 0, 2, "Right: (%f,%f,%f)", PVEC3(ad->activeCamRight));
-	drawTextA(vec2(0,-fontSize*pi++), c, &ad->font, 0, 2, "Rot  : (%f,%f)", PVEC2(ad->camRot));
-	drawTextA(vec2(0,-fontSize*pi++), c, &ad->font, 0, 2, "Vec  : (%f,%f,%f)", PVEC3(ad->playerVel));
-	drawTextA(vec2(0,-fontSize*pi++), c, &ad->font, 0, 2, "Acc  : (%f,%f,%f)", PVEC3(ad->playerAcc));
-	drawTextA(vec2(0,-fontSize*pi++), c, &ad->font, 0, 2, "Quads: (%f)", (float)triangleCount);
-
-
-
-	// drawRect(rect(400, 600, -200, -100), rect(0,1,0,1), vec4(1,1,0,1), 2);
-
-	drawListIndex = (char*)globalCommandList2d->data;
+	char* drawListIndex2 = (char*)globalCommandList2d->data;
 	for(int i = 0; i < globalCommandList2d->count; i++) {
-		int command = *((int*)drawListIndex);
-		drawListIndex += 4;
+		int command = *((int*)drawListIndex2);
+		drawListIndex2 += sizeof(int);
 
 		switch(command) {
 			case Draw_Command_Rect_Type: {
-				dcCase(Rect, dc, drawListIndex);
+				dcCase(Rect, dc, drawListIndex2);
 				drawRect(dc.r, dc.uv, dc.color, dc.texture);
+			} break;
+
+			case Draw_Command_Text_Type: {
+				dcCase(Text, dc, drawListIndex2);
+				drawText(dc.text, dc.font, dc.pos, dc.color, dc.vAlign, dc.hAlign, dc.shadow, dc.shadowColor);
 			} break;
 
 			default: {
