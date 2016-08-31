@@ -49,13 +49,14 @@
 - distance jumping collision bug
 
 - blocks with different textures on each side
+- better perlin noise
+
 
 - make voxel drop in tutorial code for stb_voxel
 
 //-------------------------------------
 //               BUGS
 //-------------------------------------
-- Font doesn't draw int
 - look has to be negative to work in view projection matrix
 - app stops reacting to input after a while, hotloading still works though
 - deleting a block at the edge of a mesh means remaking mesh on the other side 
@@ -221,15 +222,8 @@ struct PipelineIds {
 	uint cubeVertexView;
 	uint cubeVertexProj;
 	uint cubeVertexColor;
-
-	uint programPrimitive;
-	uint primitiveVertex;
-	uint primitiveFragment;
-	// uint primitiveVertexModel;
-	uint primitiveVertexView;
-	uint primitiveVertexProj;
-	uint primitiveVertexColor;
-	uint primitiveVertexVertices;
+	uint cubeVertexMode;
+	uint cubeVertexVertices;
 
 	uint programVoxel;
 	uint voxelVertex;
@@ -275,7 +269,107 @@ struct GraphicsState {
 	GLuint samplerUnits[16];
 };
 
+enum DrawListCommand {
+	Draw_Command_Viewport_Type,
+	Draw_Command_Clear_Type,
+	Draw_Command_Enable_Type,
+	Draw_Command_Disable_Type,
+	Draw_Command_FrontFace_Type,
+	Draw_Command_BindFramebuffer_Type,
+	Draw_Command_BindBuffer_Type,
+	Draw_Command_BlendFunc,
+	// Draw_Command_DepthFunc,
+	// Draw_Command_ClearDepth,
+	Draw_Command_ClearColor,
+	// Draw_Command_GetUniformLocation,
+	Draw_Command_ProgramUniform,
+	// Draw_Command_glEnableVertexAttribArray,
+	// Draw_Command_glVertexAttribIPointer,
+	// Draw_Command_glBindTextures,
+	// Draw_Command_glBindSamplers,
+	// Draw_Command_glBindProgramPipeline,
+	// Draw_Command_glDrawArrays,
+	// Draw_Command_glError,
+	// Draw_Command_,
+	// Draw_Command_,
+	// Draw_Command_,
+	// Draw_Command_,
+	// Draw_Command_,
+	// Draw_Command_,
+	// Draw_Command_,
+	// Draw_Command_,
+
+	Draw_Command_Cube_Type,
+	Draw_Command_Line_Type,
+	Draw_Command_Quad_Type,
+	Draw_Command_Rect_Type,
+	// Draw_Command_Rect_Type,
+};
+
+struct DrawCommandList {
+	void* data;
+	int count;
+	int bytes;
+	int maxBytes;
+};
+
+// struct Draw_Command_Viewport {
+// 	int x,y,w,h;
+// };
+
+struct Draw_Command_Cube {
+	Vec3 trans;
+	Vec3 scale;
+	Vec4 color;
+	float degrees;
+	Vec3 rot;
+};
+
+struct Draw_Command_Line {
+	Vec3 p0, p1;
+	Vec4 color;
+};
+
+struct Draw_Command_Quad {
+	Vec3 p0, p1, p2, p3;
+	Vec4 color;
+};
+
+struct Draw_Command_Rect {
+	Rect r, uv;
+	Vec4 color;
+	int texture;
+};
+
+DrawCommandList* globalCommandList3d;
+DrawCommandList* globalCommandList2d;
 GraphicsState* globalGraphicsState;
+
+#define makeDrawCommandFunction(name, list) \
+	void dc##name(Draw_Command_##name d, DrawCommandList* commandList = (DrawCommandList*)list) { \
+		if(list == 0) commandList = globalCommandList3d; \
+		else commandList = globalCommandList2d; \
+		int* cl = (int*)(((char*)commandList->data)+commandList->bytes); \
+		*(cl++) = Draw_Command_##name##_Type; \
+		*((Draw_Command_##name*)(cl)) = d; \
+		commandList->count++; \
+		commandList->bytes += sizeof(Draw_Command_##name) + 4; \
+	} 
+
+makeDrawCommandFunction(Cube, 0);
+makeDrawCommandFunction(Line, 0);
+makeDrawCommandFunction(Quad, 0);
+makeDrawCommandFunction(Rect, 1);
+
+#define dcCase(name, var, index) \
+	Draw_Command_##name var = *((Draw_Command_##name*)index); \
+	index += sizeof(Draw_Command_##name); \
+
+
+
+
+
+
 
 
 #define GLSL(src) "#version 330\n \
@@ -315,77 +409,32 @@ GraphicsState* globalGraphicsState;
 
 
 const char* vertexShaderCube = GLSL (
-	// const vec3 cube[] = vec3[] (
-	//     vec3(-0.5f,-0.5f,-0.5f), 
-	//     vec3( 0.5f,-0.5f,-0.5f), 
-	//     vec3(-0.5f, 0.5f,-0.5f), 
-	//     vec3( 0.5f,-0.5f,-0.5f), 
-	//     vec3( 0.5f, 0.5f,-0.5f),
-	//     vec3(-0.5f, 0.5f,-0.5f),
-	//     vec3(-0.5f,-0.5f, 0.5f), 
-	//     vec3(-0.5f, 0.5f, 0.5f), 
-	//     vec3( 0.5f,-0.5f, 0.5f), 
-	//     vec3( 0.5f,-0.5f, 0.5f), 
-	//     vec3(-0.5f, 0.5f, 0.5f),
-	//     vec3( 0.5f, 0.5f, 0.5f),
-	//     vec3(-0.5f, 0.5f,-0.5f), 
-	//     vec3( 0.5f, 0.5f,-0.5f), 
-	//     vec3(-0.5f, 0.5f, 0.5f), 
-	//     vec3( 0.5f, 0.5f,-0.5f), 
-	//     vec3( 0.5f, 0.5f, 0.5f),
-	//     vec3(-0.5f, 0.5f, 0.5f),
-	//     vec3(-0.5f,-0.5f,-0.5f),
-	//     vec3(-0.5f,-0.5f, 0.5f), 
-	//     vec3( 0.5f,-0.5f,-0.5f), 
-	//     vec3( 0.5f,-0.5f,-0.5f), 
-	//     vec3(-0.5f,-0.5f, 0.5f),
-	//     vec3( 0.5f,-0.5f, 0.5f),
-	//     vec3(-0.5f,-0.5f,-0.5f), 
-	//     vec3(-0.5f, 0.5f,-0.5f), 
-	//     vec3(-0.5f,-0.5f, 0.5f), 
-	//     vec3(-0.5f, 0.5f,-0.5f), 
-	//     vec3(-0.5f, 0.5f, 0.5f),
-	//     vec3(-0.5f,-0.5f, 0.5f),
-	//     vec3( 0.5f,-0.5f,-0.5f), 
-	//     vec3( 0.5f,-0.5f, 0.5f), 
-	//     vec3( 0.5f, 0.5f,-0.5f), 
-	//     vec3( 0.5f, 0.5f,-0.5f), 
-	//     vec3( 0.5f,-0.5f, 0.5f),
-	//     vec3( 0.5f, 0.5f, 0.5f)
-	// );
-
 	const vec3 cube[] = vec3[] (
 	    vec3(-0.5f,-0.5f,-0.5f), 
 	    vec3( 0.5f,-0.5f,-0.5f), 
 	    vec3( 0.5f, 0.5f,-0.5f),
 	    vec3(-0.5f, 0.5f,-0.5f),
-
 	    vec3(-0.5f,-0.5f, 0.5f), 
 	    vec3(-0.5f, 0.5f, 0.5f), 
 	    vec3( 0.5f, 0.5f, 0.5f),
 	    vec3( 0.5f,-0.5f, 0.5f),
-	    
 	    vec3(-0.5f, 0.5f,-0.5f), 
 	    vec3( 0.5f, 0.5f,-0.5f), 
 	    vec3( 0.5f, 0.5f, 0.5f),
 	    vec3(-0.5f, 0.5f, 0.5f),
-	    
 	    vec3(-0.5f,-0.5f,-0.5f), 
 	    vec3(-0.5f,-0.5f, 0.5f), 
 	    vec3( 0.5f,-0.5f, 0.5f),
 	    vec3( 0.5f,-0.5f,-0.5f),
-	    
 	    vec3( 0.5f,-0.5f,-0.5f), 
 	    vec3( 0.5f,-0.5f, 0.5f), 
 	    vec3( 0.5f, 0.5f, 0.5f),
 	    vec3( 0.5f, 0.5f,-0.5f),
-	    
 	    vec3(-0.5f,-0.5f,-0.5f), 
 	    vec3(-0.5f, 0.5f,-0.5f), 
 	    vec3(-0.5f, 0.5f, 0.5f),
 	    vec3(-0.5f,-0.5f, 0.5f)
 	);
-
 
 	out gl_PerVertex { vec4 gl_Position; };
 	out vec4 Color;
@@ -395,19 +444,24 @@ const char* vertexShaderCube = GLSL (
 	uniform mat4x4 proj;
 	// uniform mat4x4 projViewModel;
 
+	uniform vec3 vertices[4];
+	uniform bool mode;
+
 	uniform vec4 setColor;
 
 	void main() {
-		float c = gl_VertexID;
-		// Color = vec4(1/(c/36),1/(c/7),1/(c/2),1);
-		// Color = vec4(c/36,c/36,c/36,1);
-		// setColor = vec4(1,1,1,1);
-		// vec4 co = vec4(1,1,1,1);
 		Color = setColor;
 	
-		vec4 pos = vec4(cube[gl_VertexID], 1);
+		vec4 pos;
+		if(mode == true) {
+			pos = vec4(vertices[gl_VertexID], 1);
+			gl_Position = proj*view*pos;
+		} else {
+			pos = vec4(cube[gl_VertexID], 1);
+			gl_Position = proj*view*model*pos;
+		}
 	
-		gl_Position = proj*view*model*pos;
+		// gl_Position = proj*view*model*pos;
 		// gl_Position = projViewModel*pos;
 	}
 );
@@ -498,33 +552,33 @@ const char* fragmentShaderQuad = GLSL (
 );
 
 
-const char* vertexShaderPrimitive = GLSL (
-	out gl_PerVertex { vec4 gl_Position; };
-	out vec4 Color;
+// const char* vertexShaderPrimitive = GLSL (
+// 	out gl_PerVertex { vec4 gl_Position; };
+// 	out vec4 Color;
 
-	uniform mat4x4 view;
-	uniform mat4x4 proj;
-	uniform vec4 setColor;
+// 	uniform mat4x4 view;
+// 	uniform mat4x4 proj;
+// 	uniform vec4 setColor;
 
-	uniform vec3 vertices[4];
+// 	uniform vec3 vertices[4];
 
-	void main() {
-		Color = setColor;
+// 	void main() {
+// 		Color = setColor;
 
-		vec4 pos = vec4(vertices[gl_VertexID], 1);
-		gl_Position = proj*view*pos;
-	}
-);
+// 		vec4 pos = vec4(vertices[gl_VertexID], 1);
+// 		gl_Position = proj*view*pos;
+// 	}
+// );
 
-const char* fragmentShaderPrimitive = GLSL (
-	in vec4 Color;
-	layout(depth_less) out float gl_FragDepth;
-	out vec4 color;
+// const char* fragmentShaderPrimitive = GLSL (
+// 	in vec4 Color;
+// 	layout(depth_less) out float gl_FragDepth;
+// 	out vec4 color;
 
-	void main() {
-		color = Color;
-	}
-);
+// 	void main() {
+// 		color = Color;
+// 	}
+// );
 
 
 void updateAfterWindowResizing(WindowSettings* wSettings, float* ar, uint fb0, uint fb1, uint rb0, uint rb1, uint* fbt, int msaaSamples, Vec2i* fboRes, Vec2i* curRes, bool useNativeRes) {
@@ -704,11 +758,6 @@ void drawTextA(Vec2 pos, Vec4 color, Font* font, int vAlign, int hAlign, char* t
 }
 
 void drawCube(Vec3 trans, Vec3 scale, Vec4 color, float degrees, Vec3 rot) {
-	// Quat xRot = quat(dt, normVec3(vec3(1,0.7f,0.5f)));
-	// Quat yRot = quat(0, vec3(0,1,0));
-	// Quat zRot = quat(0, vec3(0,0,1));
-	// quatRotationMatrix(&rm, zRot*yRot*xRot);
-
 	Mat4 sm; scaleMatrix(&sm, scale);
 	Mat4 rm; quatRotationMatrix(&rm, quat(degrees, rot));
 	Mat4 tm; translationMatrix(&tm, trans);
@@ -717,12 +766,49 @@ void drawCube(Vec3 trans, Vec3 scale, Vec4 color, float degrees, Vec3 rot) {
 	glProgramUniformMatrix4fv(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexModel, 1, 1, model.e);
 	glProgramUniform4f(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexColor, color.r, color.g, color.b, color.a);
 
-	// glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 36, 1, 0);
-	// glDrawArraysInstancedBaseInstance(GL_QUADS, 0, 24, 1, 0);
-	// glDrawArraysInstancedBaseInstance(GL_QUADS, 0, 8, 1, 0);
-	// glDrawArraysInstancedBaseInstance(GL_QUADS, 0, 8, 1, 0);
-	glDrawArrays(GL_QUADS, 0, 6*4);
+	glProgramUniform1i(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexMode, false);
 
+	// glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 36, 1, 0);
+	glDrawArrays(GL_QUADS, 0, 6*4);
+}
+
+void drawLine(Vec3 p0, Vec3 p1, Vec4 color) {
+	Vec3 verts[4] = {p0, p1};
+	glProgramUniform3fv(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexVertices, 4, verts[0].e);
+	glProgramUniform4f(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexColor, color.r, color.g, color.b, color.a);
+	glProgramUniform1i(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexMode, true);
+
+	glDrawArrays(GL_LINES, 0, 2);
+}
+
+void drawQuad(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec4 color) {
+	Vec3 verts[4] = {p0, p1, p2, p3};
+	glProgramUniform3fv(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexVertices, 4, verts[0].e);
+	glProgramUniform4f(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexColor, color.r, color.g, color.b, color.a);
+	glProgramUniform1i(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexMode, true);
+
+	glDrawArrays(GL_QUADS, 0, 4);
+}
+
+void drawQuad(Vec3 p, Vec3 normal, float size, Vec4 color) {
+	Vec3 base = p;
+
+	int sAxis[2];
+	int biggestAxis = getBiggestAxis(normal, sAxis);
+
+	float s2 = size*0.5f;
+
+	Vec3 verts[4] = {};
+	for(int i = 0; i < 4; i++) {
+		Vec3 d = base;
+			 if(i == 0) { d.e[sAxis[0]] += -s2; d.e[sAxis[1]] += -s2; }
+		else if(i == 1) { d.e[sAxis[0]] += -s2; d.e[sAxis[1]] +=  s2; }
+		else if(i == 2) { d.e[sAxis[0]] +=  s2; d.e[sAxis[1]] +=  s2; }
+		else if(i == 3) { d.e[sAxis[0]] +=  s2; d.e[sAxis[1]] += -s2; }
+		verts[i] = d;
+	}
+
+	drawQuad(verts[0], verts[1], verts[2], verts[3], color);
 }
 
 uint createSampler(int wrapS, int wrapT, int magF, int minF) {
@@ -1121,7 +1207,6 @@ Vec3 getBlockCenterFromGlobalCoord(Vec3 coord) {
 }
 
 void setupVoxelUniforms(Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit, Mat4 view, Mat4 proj, Vec3 fogColor) {
-
 	Vec3 li = normVec3(vec3(0,0.5f,0.5f));
 	Mat4 ambientLighting = {
 		li.x, li.y, li.z ,0, // reversed lighting direction
@@ -1292,6 +1377,8 @@ struct AppData {
 	WindowSettings wSettings;
 
 	GraphicsState graphicsState;
+	DrawCommandList commandList2d;
+	DrawCommandList commandList3d;
 
 	LONGLONG lastTimeStamp;
 	float dt;
@@ -1319,7 +1406,8 @@ struct AppData {
 	float nearPlane;
 	float farPlane;
 
-	Font fontArial;
+	Font font;
+	Font font2;
 
 	Vec2i curRes;
 	int msaaSamples;
@@ -1363,80 +1451,6 @@ struct AppData {
 	// GLuint samplerUnits[16];
 };
 
-enum DrawListCommand {
-	Draw_Command_Viewport_Type,
-	Draw_Command_Clear_Type,
-	Draw_Command_Enable_Type,
-	Draw_Command_Disable_Type,
-	Draw_Command_FrontFace_Type,
-	Draw_Command_BindFramebuffer_Type,
-	Draw_Command_BindBuffer_Type,
-	Draw_Command_BlendFunc,
-	// Draw_Command_DepthFunc,
-	// Draw_Command_ClearDepth,
-	Draw_Command_ClearColor,
-	// Draw_Command_GetUniformLocation,
-	Draw_Command_ProgramUniform,
-	// Draw_Command_glEnableVertexAttribArray,
-	// Draw_Command_glVertexAttribIPointer,
-	// Draw_Command_glBindTextures,
-	// Draw_Command_glBindSamplers,
-	// Draw_Command_glBindProgramPipeline,
-	// Draw_Command_glDrawArrays,
-	// Draw_Command_glError,
-	// Draw_Command_,
-	// Draw_Command_,
-	// Draw_Command_,
-	// Draw_Command_,
-	// Draw_Command_,
-	// Draw_Command_,
-	// Draw_Command_,
-	// Draw_Command_,
-
-	Draw_Command_Cube_Type,
-	Draw_Command_Rect_Type,
-};
-
-struct DrawCommandList {
-	void* data;
-	int count;
-	int bytes;
-	int maxBytes;
-};
-
-struct Draw_Command_Viewport {
-	int x,y,w,h;
-};
-
-struct Draw_Command_Cube {
-	Vec3 trans;
-	Vec3 scale;
-	Vec4 color;
-	float degrees;
-	Vec3 rot;
-};
-
-struct Draw_Command_Rect {
-	Rect r;
-	Rect uv;
-	Vec4 color;
-	int texture;
-};
-
-#define makeDrawCommandFunction(functionName) \
-	void dc##functionName(Draw_Command_##functionName d, DrawCommandList* commandList = 0) { \
-		int* cl = (int*)commandList->data; \
-		*(cl++) = Draw_Command_##functionName##_Type; \
-		*((Draw_Command_##functionName*)(cl)) = d; \
-		commandList->count++; \
-	} 
-
-makeDrawCommandFunction(Cube);
-makeDrawCommandFunction(Viewport);
-
-#define dcCase(name, var, index) \
-	Draw_Command_##name var = *((Draw_Command_##name*)index); \
-	index += sizeof(Draw_Command_Cube); \
 
 
 
@@ -1454,6 +1468,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	globalGraphicsState = &ad->graphicsState;
 
+	globalCommandList3d = &ad->commandList3d;
+	globalCommandList2d = &ad->commandList2d;
+
 	if(init) {
 		getPMemory(sizeof(AppData));
 		*ad = {};
@@ -1470,8 +1487,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		wSettings->style = (WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU  | WS_MINIMIZEBOX  | WS_VISIBLE);
 		initSystem(systemData, windowsData, 0, 0,0,0,0);
 
-		ad->msaaSamples = 4;
 		ad->fieldOfView = 55;
+		ad->msaaSamples = 4;
 		ad->fboRes = vec2i(0, 120);
 		ad->useNativeRes = true;
 		ad->nearPlane = 0.1f;
@@ -1549,15 +1566,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ids->cubeVertexView = glGetUniformLocation(ids->cubeVertex, "view");
 		ids->cubeVertexProj = glGetUniformLocation(ids->cubeVertex, "proj");
 		ids->cubeVertexColor = glGetUniformLocation(ids->cubeVertex, "setColor");
-		ad->programs[1] = ids->programCube;
 
-		ids->programPrimitive = createShader(vertexShaderPrimitive, fragmentShaderPrimitive, &ids->primitiveVertex, &ids->primitiveFragment);
-		ids->primitiveVertexView = glGetUniformLocation(ids->primitiveVertex, "view");
-		ids->primitiveVertexProj = glGetUniformLocation(ids->primitiveVertex, "proj");
-		ids->primitiveVertexColor = glGetUniformLocation(ids->primitiveVertex, "setColor");
-		ids->primitiveVertexVertices = glGetUniformLocation(ids->primitiveVertex, "vertices");
+		ids->cubeVertexMode = glGetUniformLocation(ids->cubeVertex, "mode");
+		ids->cubeVertexVertices = glGetUniformLocation(ids->cubeVertex, "vertices");
 		ad->programs[1] = ids->programCube;
-
 
 
 		ad->camera = vec3(0,0,10);
@@ -1595,7 +1607,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		uint texId = loadTexture(fontBitmap, font.size.w, font.size.h, 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
 		ad->textures[ad->texCount++] = texId;
 		font.texId = texId;
-		ad->fontArial = font;
+		ad->font = font;
 
 
 
@@ -1730,12 +1742,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// printf("%f \n", ad->dt);
 	// ad->dt = 0.016f;
 
-
-
-
 	updateInput(&ad->input, isRunning, windowHandle);
 
-	PipelineIds* ids = &globalGraphicsState->pipelineIds;
+	ad->commandList3d.data = getTMemory(kiloBytes(2));
+	ad->commandList2d.data = getTMemory(kiloBytes(2));
+
+
 
 	if(input->keysPressed[VK_F1]) {
 		int mode;
@@ -1744,6 +1756,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 		setWindowMode(windowHandle, wSettings, mode);
 
 		updateAfterWindowResizing(wSettings, &ad->aspectRatio, ad->frameBuffers[0], ad->frameBuffers[1], ad->renderBuffers[0], ad->renderBuffers[1], &ad->frameBufferTextures[0], ad->msaaSamples, &ad->fboRes, &ad->curRes, ad->useNativeRes);
+
+		// static float d = 0;
+		// d += ad->dt;
+
+		// ad->msaaSamples = 1;
+		// ad->fboRes = vec2i(0, 100 + sin(d)*100);
+		// ad->useNativeRes = false;
 	}
 
 	if(input->keysPressed[VK_F2]) {
@@ -1879,7 +1898,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 			ad->playerAcc += normVec3(acc)*speed;
 		}
 
-		if(input->keysPressed[VK_SPACE]) {
+		// if(input->keysPressed[VK_SPACE]) {
+		if(input->keysDown[VK_SPACE]) {
 			if(ad->playerOnGround) {
 				ad->playerVel += gUp*7.0f;
 				ad->playerOnGround = false;
@@ -1987,7 +2007,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 						}
 					}
 
-					float error = 0.00001f;
+					float error = 0.0001f;
+					// float error = 0;
 					nPos += dir*(-minDistance + error);
 
 					if(face == 5) playerCeilingCollision = true;
@@ -2024,37 +2045,44 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// raycast for touching ground
 	if(ad->playerMode) {
-		Vec3 pos = ad->playerPos;
-		Vec3 size = ad->playerSize;
-		Rect3 box = rect3CenDim(pos, size);
-
-		bool groundCollision = false;
-
-		for(int i = 0; i < 4; i++) {
-			Vec3 gp;
-			if(i == 0) 		gp = box.min + size*vec3(0,0,0);
-			else if(i == 1) gp = box.min + size*vec3(1,0,0);
-			else if(i == 2) gp = box.min + size*vec3(0,1,0);
-			else if(i == 3) gp = box.min + size*vec3(1,1,0);
-
-			// drawCube(&ad->pipelineIds, block, vec3(1,1,1)*1.01f, vec4(1,0,1,1), 0, vec3(0,0,0));
-
-			float raycastThreshold = 0.01f;
-			gp -= gUp*raycastThreshold;
-
-			Vec3 block = getBlockCenterFromGlobalCoord(gp);
-			uchar* blockType = getBlockFromGlobalCoord(ad->vMeshs, &ad->vMeshsSize, gp);
-
-			if(*blockType > 0) {
-				groundCollision = true;
-				break;
-			}
+		if(playerGroundCollision && ad->playerVel.z <= 0) {
+			ad->playerOnGround = true;
+			ad->playerVel.z = 0;
 		}
 
-		if(groundCollision) {
-			if(ad->playerVel.z <= 0) ad->playerOnGround = true;
-		} else {
-			ad->playerOnGround = false;
+		if(ad->playerOnGround) {
+			Vec3 pos = ad->playerPos;
+			Vec3 size = ad->playerSize;
+			Rect3 box = rect3CenDim(pos, size);
+
+			bool groundCollision = false;
+
+			for(int i = 0; i < 4; i++) {
+				Vec3 gp;
+				if(i == 0) 		gp = box.min + size*vec3(0,0,0);
+				else if(i == 1) gp = box.min + size*vec3(1,0,0);
+				else if(i == 2) gp = box.min + size*vec3(0,1,0);
+				else if(i == 3) gp = box.min + size*vec3(1,1,0);
+
+				// drawCube(&ad->pipelineIds, block, vec3(1,1,1)*1.01f, vec4(1,0,1,1), 0, vec3(0,0,0));
+
+				float raycastThreshold = 0.01f;
+				gp -= gUp*raycastThreshold;
+
+				Vec3 block = getBlockCenterFromGlobalCoord(gp);
+				uchar* blockType = getBlockFromGlobalCoord(ad->vMeshs, &ad->vMeshsSize, gp);
+
+				if(*blockType > 0) {
+					groundCollision = true;
+					break;
+				}
+			}
+
+			if(groundCollision) {
+				if(ad->playerVel.z <= 0) ad->playerOnGround = true;
+			} else {
+				ad->playerOnGround = false;
+			}
 		}
 	}
 
@@ -2264,17 +2292,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	Mat4 view, proj; 
 	viewMatrix(&view, ad->activeCamPos, -ad->activeCamLook, ad->activeCamUp, ad->activeCamRight);
-	glProgramUniformMatrix4fv(ids->primitiveVertex, ids->primitiveVertexView, 1, 1, view.e);
 	projMatrix(&proj, degreeToRadian(ad->fieldOfView), ad->aspectRatio, ad->nearPlane, ad->farPlane);
-	glProgramUniformMatrix4fv(ids->primitiveVertex, ids->primitiveVertexProj, 1, 1, proj.e);
-
 
 	globalGraphicsState->textureUnits[0] = ad->voxelTextures[0];
 	globalGraphicsState->textureUnits[1] = ad->voxelTextures[1];
 	globalGraphicsState->samplerUnits[0] = ad->voxelSamplers[0];
 	globalGraphicsState->samplerUnits[1] = ad->voxelSamplers[1];
 	globalGraphicsState->samplerUnits[2] = ad->voxelSamplers[2];
-
 
 	setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 0, 2, view, proj, fogColor);
 
@@ -2411,20 +2435,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	glBindProgramPipeline(globalGraphicsState->pipelineIds.programCube);
 
-	// static float dt = 0;
-	// dt += 0.01f;
-	// drawCube(&ad->pipelineIds, vec3(5,5,-5), vec3(6,2,1), dt, normVec3(vec3(0.9f,0.6f,0.2f)));
-
 	Vec3 off = vec3(0.5f, 0.5f, 0.5f);
 	Vec3 s = vec3(1.01f, 1.01f, 1.01f);
 
-	// for(int i = -10; i < 10; i++) drawCube(&ad->pipelineIds, vec3(i*10,0,0) + off, s, 0, normVec3(vec3(0.9f,0.6f,0.2f)));
-	// for(int i = -10; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,i*10,0) + off, s, 0, normVec3(vec3(0.9f,0.6f,0.2f)));
-	// for(int i = -10; i < 10; i++) drawCube(&ad->pipelineIds, vec3(0,0,i*10) + off, s, 0, normVec3(vec3(0.9f,0.6f,0.2f)));
-
-	for(int i = 0; i < 10; i++) drawCube(vec3(i*10,0,0) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
-	for(int i = 0; i < 10; i++) drawCube(vec3(0,i*10,0) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
-	for(int i = 0; i < 10; i++) drawCube(vec3(0,0,i*10) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
+	// for(int i = 0; i < 10; i++) drawCube(vec3(i*10,0,0) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
+	// for(int i = 0; i < 10; i++) drawCube(vec3(0,i*10,0) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
+	// for(int i = 0; i < 10; i++) drawCube(vec3(0,0,i*10) + off, s, vec4(0,1,1,1), 0, vec3(0,0,0));
 
 	#ifdef STBVOX_CONFIG_LIGHTING_SIMPLE
 	drawCube(light[0], vec3(3,3,3), vec4(1,1,1,1), 0, vec3(0,0,0));
@@ -2446,52 +2462,20 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-	glBindProgramPipeline(globalGraphicsState->pipelineIds.programPrimitive);
-
+	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 	glDisable(GL_CULL_FACE);
 	glEnable(GL_LINE_SMOOTH);
-	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 	glLineWidth(3);
 
 	if(!ad->playerMode) {
 		Vec3 pCamPos = ad->playerPos + vec3(0,0,ad->playerCamZOffset);
-
-		Vec3 verts[4] = {};
-		verts[0] = pCamPos; verts[1] = pCamPos + pLook*0.5f;
-		glProgramUniform3fv(ids->primitiveVertex, ids->primitiveVertexVertices, 4, verts[0].e);
-		glProgramUniform4f(ids->primitiveVertex, ids->primitiveVertexColor, 1,0,0,1);
-		glDrawArrays(GL_LINES, 0, 2);
-
-		verts[0] = pCamPos; verts[1] = pCamPos + pUp*0.5f;
-		glProgramUniform3fv(ids->primitiveVertex, ids->primitiveVertexVertices, 4, verts[0].e);
-		glProgramUniform4f(ids->primitiveVertex, ids->primitiveVertexColor, 0,1,0,1);
-		glDrawArrays(GL_LINES, 0, 2);
-
-		verts[0] = pCamPos; verts[1] = pCamPos + pRight*0.5f;
-		glProgramUniform3fv(ids->primitiveVertex, ids->primitiveVertexVertices, 4, verts[0].e);
-		glProgramUniform4f(ids->primitiveVertex, ids->primitiveVertexColor, 0,0,1,1);
-		glDrawArrays(GL_LINES, 0, 2);
+		drawLine(pCamPos, pCamPos + pLook*0.5f, vec4(1,0,0,1));
+		drawLine(pCamPos, pCamPos + pUp*0.5f, vec4(0,1,0,1));
+		drawLine(pCamPos, pCamPos + pRight*0.5f, vec4(0,0,1,1));
 	} else {
 		if(ad->blockSelected) {
-			Vec3 base = ad->selectedBlock + ad->selectedBlockFaceDir*0.5f*1.05f;
-
-			int sAxis[2];
-			int biggestAxis = getBiggestAxis(ad->selectedBlockFaceDir, sAxis);
-
-			Vec3 verts[4] = {};
-			for(int i = 0; i < 4; i++) {
-				Vec3 d = base;
-					 if(i == 0) { d.e[sAxis[0]] += -0.5f; d.e[sAxis[1]] += -0.5f; }
-				else if(i == 1) { d.e[sAxis[0]] += -0.5f; d.e[sAxis[1]] +=  0.5f; }
-				else if(i == 2) { d.e[sAxis[0]] +=  0.5f; d.e[sAxis[1]] +=  0.5f; }
-				else if(i == 3) { d.e[sAxis[0]] +=  0.5f; d.e[sAxis[1]] += -0.5f; }
-				verts[i] = d;
-			}
-
-			glProgramUniform3fv(ids->primitiveVertex, ids->primitiveVertexVertices, 4, verts[0].e);
-			glProgramUniform4f(ids->primitiveVertex, ids->primitiveVertexColor, 1,1,1,0.05f);
-			glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-			glDrawArrays(GL_QUADS, 0, 4);
+			Vec3 base = ad->selectedBlock + ad->selectedBlockFaceDir*0.5f*1.01f;
+			drawQuad(base, ad->selectedBlockFaceDir, 1, vec4(1,1,1,0.05f));
 		}
 	}
 
@@ -2499,7 +2483,42 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glEnable(GL_CULL_FACE);
 
 
+	// dcCube({vec3(0,0,0), vec3(1,1,1), vec4(1,1,1,1), 0, vec3(0,0,0)});
+	// dcLine({vec3(5,5,0), vec3(8,8,1), vec4(1,0,1,1)});
+	// dcQuad({vec3(5,5,0), vec3(5,8,1), vec3(8,8,0), vec3(8,5,0), vec4(1,0,1,1)});
 
+	char* drawListIndex = (char*)globalCommandList3d->data;
+	for(int i = 0; i < globalCommandList3d->count; i++) {
+		int command = *((int*)drawListIndex);
+		drawListIndex += 4;
+
+		switch(command) {
+			case Draw_Command_Cube_Type: {
+				dcCase(Cube, dc, drawListIndex);
+				drawCube(dc.trans, dc.scale, dc.color, dc.degrees, dc.rot);
+			} break;
+
+			case Draw_Command_Line_Type: {
+				dcCase(Line, dc, drawListIndex);
+				drawLine(dc.p0, dc.p1, dc.color);
+			} break;
+
+			case Draw_Command_Quad_Type: {
+				dcCase(Quad, dc, drawListIndex);
+				drawQuad(dc.p0, dc.p1, dc.p2, dc.p3, dc.color);
+			} break;
+
+			// case Draw_Command_Viewport_Type: {
+			// 	dcCase(Viewport, dc, drawListIndex);
+
+			// 	glViewport(dc.x, dc.y, dc.w, dc.h);
+			// } break;
+
+			default: {
+
+			} break;
+		}
+	}
 
 
 	glBindFramebuffer (GL_READ_FRAMEBUFFER, ad->frameBuffers[0]);
@@ -2518,9 +2537,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 	ortho(rect(0,0,1,1));
 	glBindProgramPipeline(globalGraphicsState->pipelineIds.programQuad);
 
-	glProgramUniform4f(ids->quadVertex, ids->quadVertexMod, 0.5f, 0.5f, 1, 1);
-	glProgramUniform4f(ids->quadVertex, ids->quadVertexUV, 0, 1,0,1);
-	glProgramUniform4f(ids->quadVertex, ids->quadVertexColor, 1,1,1,1);
+	glProgramUniform4f(globalGraphicsState->pipelineIds.quadVertex, globalGraphicsState->pipelineIds.quadVertexMod, 0.5f, 0.5f, 1, 1);
+	glProgramUniform4f(globalGraphicsState->pipelineIds.quadVertex, globalGraphicsState->pipelineIds.quadVertexUV, 0, 1,0,1);
+	glProgramUniform4f(globalGraphicsState->pipelineIds.quadVertex, globalGraphicsState->pipelineIds.quadVertexColor, 1,1,1,1);
 	glBindTexture(GL_TEXTURE_2D, ad->frameBufferTextures[0]);
 
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -2530,7 +2549,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-	ortho(rectCenDim(cam->x,cam->y, cam->z, cam->z/ad->aspectRatio));
+	// ortho(rectCenDim(cam->x,cam->y, cam->z, cam->z/ad->aspectRatio));
 	// glBindProgramPipeline(globalGraphicsState->pipelineIds.programQuad);
 	// drawRect(rectCenDim(0, 0, 0.01f, 100), rect(0,0,1,1), vec4(0.4f,1,0.4f,1), ad->textures[0]);
 	// drawRect(rectCenDim(0, 0, 100, 0.01f), rect(0,0,1,1), vec4(0.4f,0.4f,1,1), ad->textures[0]);
@@ -2538,6 +2557,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// drawRect(rectCenDim(0, 0, 5, 5), rect(0,0,1,1), vec4(1,1,1,1), ad->textures[2]);
 	// drawRect(rectCenDim(0, 0, 5, 5), rect(0,0,1,1), vec4(1,1,1,1), 3);
 
+	// drawRect(rect(2,2,4,4), rect(0,0,1,1), vec4(1,1,0,1), 2);
 
 
 
@@ -2549,83 +2569,51 @@ extern "C" APPMAINFUNCTION(appMain) {
 	int fontSize = 22;
 	int pi = 0;
 	Vec4 c = vec4(1.0f,0.3f,0.0f,1);
+	Vec4 c2 = vec4(0,0,0,1);
 
 	#define PVEC3(v) v.x, v.y, v.z
 	#define PVEC2(v) v.x, v.y
 
-	drawTextA(vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Pos  : (%f,%f,%f)", PVEC3(ad->activeCamPos));
-	drawTextA(vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Look : (%f,%f,%f)", PVEC3(ad->activeCamLook));
-	drawTextA(vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Up   : (%f,%f,%f)", PVEC3(ad->activeCamUp));
-	drawTextA(vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Right: (%f,%f,%f)", PVEC3(ad->activeCamRight));
-	drawTextA(vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Rot  : (%f,%f)", PVEC2(ad->camRot));
-	drawTextA(vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Polys: (%f)", (float)triangleCount);
-	drawTextA(vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Vec  : (%f,%f,%f)", PVEC3(ad->playerVel));
-	drawTextA(vec2(0,-fontSize*pi++), c, &ad->fontArial, 0, 2, "Acc  : (%f,%f,%f)", PVEC3(ad->playerAcc));
+	// shadow
+	float o = 1;
+	drawTextA(vec2(0+o,-fontSize*pi++ - o), c2, &ad->font, 0, 2, "Pos  : (%f,%f,%f)", PVEC3(ad->activeCamPos));
+	drawTextA(vec2(0+o,-fontSize*pi++ - o), c2, &ad->font, 0, 2, "Look : (%f,%f,%f)", PVEC3(ad->activeCamLook));
+	drawTextA(vec2(0+o,-fontSize*pi++ - o), c2, &ad->font, 0, 2, "Up   : (%f,%f,%f)", PVEC3(ad->activeCamUp));
+	drawTextA(vec2(0+o,-fontSize*pi++ - o), c2, &ad->font, 0, 2, "Right: (%f,%f,%f)", PVEC3(ad->activeCamRight));
+	drawTextA(vec2(0+o,-fontSize*pi++ - o), c2, &ad->font, 0, 2, "Rot  : (%f,%f)", PVEC2(ad->camRot));
+	drawTextA(vec2(0+o,-fontSize*pi++ - o), c2, &ad->font, 0, 2, "Vec  : (%f,%f,%f)", PVEC3(ad->playerVel));
+	drawTextA(vec2(0+o,-fontSize*pi++ - o), c2, &ad->font, 0, 2, "Acc  : (%f,%f,%f)", PVEC3(ad->playerAcc));
+	drawTextA(vec2(0+o,-fontSize*pi++ - o), c2, &ad->font, 0, 2, "Quads: (%f)", (float)triangleCount);
+
+	pi = 0;
+	drawTextA(vec2(0,-fontSize*pi++), c, &ad->font, 0, 2, "Pos  : (%f,%f,%f)", PVEC3(ad->activeCamPos));
+	drawTextA(vec2(0,-fontSize*pi++), c, &ad->font, 0, 2, "Look : (%f,%f,%f)", PVEC3(ad->activeCamLook));
+	drawTextA(vec2(0,-fontSize*pi++), c, &ad->font, 0, 2, "Up   : (%f,%f,%f)", PVEC3(ad->activeCamUp));
+	drawTextA(vec2(0,-fontSize*pi++), c, &ad->font, 0, 2, "Right: (%f,%f,%f)", PVEC3(ad->activeCamRight));
+	drawTextA(vec2(0,-fontSize*pi++), c, &ad->font, 0, 2, "Rot  : (%f,%f)", PVEC2(ad->camRot));
+	drawTextA(vec2(0,-fontSize*pi++), c, &ad->font, 0, 2, "Vec  : (%f,%f,%f)", PVEC3(ad->playerVel));
+	drawTextA(vec2(0,-fontSize*pi++), c, &ad->font, 0, 2, "Acc  : (%f,%f,%f)", PVEC3(ad->playerAcc));
+	drawTextA(vec2(0,-fontSize*pi++), c, &ad->font, 0, 2, "Quads: (%f)", (float)triangleCount);
 
 
 
-#if 0
+	// drawRect(rect(400, 600, -200, -100), rect(0,1,0,1), vec4(1,1,0,1), 2);
 
-	/*
-		3 draw lists for 3 modes:
-		1. 3d
-		2. 2d meter space (not really being used right now though)
-		3. 2d window space
-
-		struct 
-	*/
-
-
-	// Draw_Command_Cube dc = ;
-	// addDrawList(0, Draw_Command_Cube* c = {vec3(0,0,0)});
-	// addDrawList(1, &dc);
-	// addDrawList(1, {{0,0,0},0,0});
-	// addDrawList(1, (int []){ 1, 2, 3, 4 });
-	// addDrawList(1, (int []){ 1, 2, 3, 4 });
-	
-	// addDrawListCube();
-	// addDrawListRect();
-
-	DrawCommandList commandList = {};
-	commandList.data = getTMemory(100);
-
-	dcCube({vec3(0,0,0), vec3(1,1,1), vec4(1,1,1,1), 0, 2}, &commandList);
-	// dcCube({1}, &commandList);
-
-	// dc(Draw_Command_Cube, {1}, &commandList);
-	// dc(Draw_Command_Cube, {1}, &commandList);
-
-	// void* globalDrawList;
-	// int globalDrawListCount;
-	
-	char* drawListIndex = (char*)commandList.data;
-	for(int i = 0; i < commandList.count; i++) {
+	drawListIndex = (char*)globalCommandList2d->data;
+	for(int i = 0; i < globalCommandList2d->count; i++) {
 		int command = *((int*)drawListIndex);
 		drawListIndex += 4;
 
 		switch(command) {
-			case Draw_Command_Cube_Type: {
-				dcCase(Cube, dc, drawListIndex);
-
-				lookAt(&ad->pipelineIds, ad->activeCamPos, -ad->activeCamLook, ad->activeCamUp, ad->activeCamRight);
-				perspective(&ad->pipelineIds, degreeToRadian(ad->fieldOfView), ad->aspectRatio, 0.1f, 2000);
-				glBindProgramPipeline(ad->pipelineIds.programCube);
-
-				drawCube(&ad->pipelineIds, dc.trans, dc.scale, dc.color, dc.degrees, dc.rot);
-			} break;
-
-			case Draw_Command_Viewport_Type: {
-				dcCase(Viewport, dc, drawListIndex);
-
-				glViewport(dc.x, dc.y, dc.w, dc.h);
+			case Draw_Command_Rect_Type: {
+				dcCase(Rect, dc, drawListIndex);
+				drawRect(dc.r, dc.uv, dc.color, dc.texture);
 			} break;
 
 			default: {
-
 			} break;
 		}
 	}
-#endif 
 
 	swapBuffers(&ad->systemData);
 	glFinish();
