@@ -45,11 +45,10 @@
 - 32x32 voxel chunks
 - ballistic motion on jumping
 
-- timestep advancen when window not in focus (stop game when not in focus)
-- distance jumping collision bug
+- advance timestep when window not in focus (stop game when not in focus)
 
 - blocks with different textures on each side
-- better perlin noise
+- create nicer worlds, play with heights, as a start try to do colored blocks based on height
 
 
 - make voxel drop in tutorial code for stb_voxel
@@ -61,6 +60,7 @@
 - app stops reacting to input after a while, hotloading still works though
 - deleting a block at the edge of a mesh means remaking mesh on the other side 
   of the edge too
+- distance jumping collision bug
 
 
 
@@ -910,6 +910,7 @@ float perlin2d(float x, float y, float freq, int depth)
 
 
 
+// #define VIEW_DISTANCE 2048 // 32
 // #define VIEW_DISTANCE 1024 // 16
 // #define VIEW_DISTANCE 512  // 8
 #define VIEW_DISTANCE 256 // 4
@@ -962,14 +963,27 @@ void initVoxelMesh(VoxelMesh* m, Vec2i coord) {
 	*m = {};
 	m->coord = coord;
 
-	m->meshBufferCapacity = kiloBytes(150);
-	m->meshBuffer = (char*)getPMemory(m->meshBufferCapacity);
+	// m->meshBufferCapacity = kiloBytes(300);
+	m->meshBufferCapacity = kiloBytes(180);
+	// m->meshBufferCapacity = kiloBytes(150);
+	m->meshBuffer = (char*)malloc(m->meshBufferCapacity);
 
 	m->texBufferCapacity = m->meshBufferCapacity/4;
-	m->texBuffer = (char*)getPMemory(m->texBufferCapacity);
+	m->texBuffer = (char*)malloc(m->texBufferCapacity);
 
-	m->voxels = (uchar*)getPMemory(VOXEL_SIZE);
-	m->lighting = (uchar*)getPMemory(VOXEL_SIZE);
+	m->voxels = (uchar*)malloc(VOXEL_SIZE);
+	m->lighting = (uchar*)malloc(VOXEL_SIZE);
+
+
+	// // m->meshBufferCapacity = kiloBytes(150);
+	// m->meshBufferCapacity = kiloBytes(300);
+	// m->meshBuffer = (char*)getPMemory(m->meshBufferCapacity);
+
+	// m->texBufferCapacity = m->meshBufferCapacity/4;
+	// m->texBuffer = (char*)getPMemory(m->texBufferCapacity);
+
+	// m->voxels = (uchar*)getPMemory(VOXEL_SIZE);
+	// m->lighting = (uchar*)getPMemory(VOXEL_SIZE);
 
 	glCreateBuffers(1, &m->bufferId);
 
@@ -1021,6 +1035,11 @@ void generateVoxelMesh(VoxelMesh* m) {
 	    		float perlin = perlin2d(gx+4000, gy+4000, 0.015f, 4);
 	    		float height = perlin*50;
 	    		// float height = 5;
+
+	    		// static int startX = randomInt(0, 10000);
+	    		// static int startY = randomInt(0, 10000);
+	    		// float perlin = perlin2d(gx+4000+startX, gy+4000+startY, 0.002f, 7);
+	    		// float height = pow(perlin*7,3.0f);
 
 	    		int blockType = randomInt(8,10);
 	    		for(int z = 0; z < height; z++) {
@@ -1759,7 +1778,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		zeroMemory(ad->vMeshs, vMeshSize);
 		ad->vMeshsSize = 0;
 
-		ad->playerPos = vec3(35.5f,35.3f,30);
+		// ad->playerPos = vec3(35.5f,35.3f,30);
+		ad->playerPos = vec3(0,0,0);
 		ad->playerLook = vec3(0,1,0);
 		ad->playerSize = vec3(0.8f, 0.8f, 1.8f);
 		ad->playerCamZOffset = ad->playerSize.z*0.5f - ad->playerSize.x*0.25f;
@@ -2084,6 +2104,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 				// something went wrong and we reject the move, for now
 				if(collisionCount > 5) {
 					nPos = ad->playerPos;
+
+					nPos.z += 5;
+
 					ad->playerVel = vec3(0,0,0);
 					break;
 				}
@@ -2370,7 +2393,18 @@ extern "C" APPMAINFUNCTION(appMain) {
 	setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 0, 2, view, proj, fogColor);
 
 
-#if 1
+#if 0
+	static bool redoWorld = true;
+	if(redoWorld) {
+		for(int i = 0; i < ad->vMeshsSize; i++) {
+			ad->vMeshs[i].generated = false;
+			ad->vMeshs[i].upToDate = false;
+		}
+	}
+	redoWorld = false;
+#endif
+
+
 	int meshGenerationCount = 0;
 	int triangleCount = 0;
 
@@ -2496,7 +2530,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 	}
 
-#endif
 
 
 	// Vec3 off = vec3(0.5f, 0.5f, 0.5f);
