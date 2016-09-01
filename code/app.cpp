@@ -48,8 +48,7 @@
 - advance timestep when window not in focus (stop game when not in focus)
 
 - blocks with different textures on each side
-- create nicer worlds, play with heights, as a start try to do colored blocks based on height
-
+- make meshbuffer size the right size
 
 - make voxel drop in tutorial code for stb_voxel
 
@@ -62,12 +61,23 @@
   of the edge too
 - distance jumping collision bug
 
-
+- no alpha in voxel rendering, see glass block
 
 - gpu fucks up at some point making swapBuffers alternates between time steps 
   which makes the game stutter, restart is required
 */
 
+
+/*
+	- threading
+	- 32x32 gen chunks
+	- memory using malloc
+	- world generation:
+		- blocks based on height
+		- 
+	- placing blocks, menu
+
+*/
 
 
 // char* dataFolder = "...\\data\\";
@@ -912,8 +922,8 @@ float perlin2d(float x, float y, float freq, int depth)
 
 // #define VIEW_DISTANCE 2048 // 32
 // #define VIEW_DISTANCE 1024 // 16
-// #define VIEW_DISTANCE 512  // 8
-#define VIEW_DISTANCE 256 // 4
+#define VIEW_DISTANCE 512  // 8
+// #define VIEW_DISTANCE 256 // 4
 // #define VIEW_DISTANCE 128 // 2
 
 // #define VIEW_DISTANCE 64*10
@@ -963,9 +973,10 @@ void initVoxelMesh(VoxelMesh* m, Vec2i coord) {
 	*m = {};
 	m->coord = coord;
 
-	// m->meshBufferCapacity = kiloBytes(300);
-	m->meshBufferCapacity = kiloBytes(180);
+	// m->meshBufferCapacity = kiloBytes(500);
+	// m->meshBufferCapacity = kiloBytes(180);
 	// m->meshBufferCapacity = kiloBytes(150);
+	m->meshBufferCapacity = kiloBytes(200);
 	m->meshBuffer = (char*)malloc(m->meshBufferCapacity);
 
 	m->texBufferCapacity = m->meshBufferCapacity/4;
@@ -1032,16 +1043,36 @@ void generateVoxelMesh(VoxelMesh* m) {
 	    		int gx = (coord.x*VOXEL_X)+x;
 	    		int gy = (coord.y*VOXEL_Y)+y;
 
-	    		float perlin = perlin2d(gx+4000, gy+4000, 0.015f, 4);
-	    		float height = perlin*50;
+	    		// float perlin = perlin2d(gx+4000, gy+4000, 0.015f, 4);
+	    		// float height = perlin*50;
 	    		// float height = 5;
 
-	    		// static int startX = randomInt(0, 10000);
-	    		// static int startY = randomInt(0, 10000);
-	    		// float perlin = perlin2d(gx+4000+startX, gy+4000+startY, 0.002f, 7);
-	    		// float height = pow(perlin*7,3.0f);
+	    		static int startX = randomInt(0, 10000);
+	    		static int startY = randomInt(0, 10000);
 
-	    		int blockType = randomInt(8,10);
+	    		static int startXMod = randomInt(0,10000);
+	    		static int startYMod = randomInt(0,10000);
+
+	    		float height = perlin2d(gx+4000+startX, gy+4000+startY, 0.004f, 7);
+
+	    		// float mod = perlin2d(gx+startXMod, gy+startYMod, 0.008f, 4);
+	    		float mod = perlin2d(gx+startXMod, gy+startYMod, 0.02f, 4);
+	    		float modOffset = 0.1f;
+	    		mod = mapRange(mod, 0, 1, -modOffset, modOffset);
+
+	    		int blockType;
+	    			 if(height < 0.35f) blockType = 11; // water
+	    		else if(height < 0.4f + mod) blockType = 12; // sand
+	    		else if(height < 0.6f + mod) blockType = 13; // grass
+	    		else if(height < 0.8f + mod) blockType = 14; // stone
+	    		else if(height < 1.0f + mod) blockType = 15; // snow
+
+	    		height = clamp(height, 0, 1);
+	    		height = pow(height,3.5f);
+
+	    		height = mapRange(height, 0, 1, 20, 200);
+
+	    		// int blockType = randomInt(8,10);
 	    		for(int z = 0; z < height; z++) {
 	    			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = blockType;
 	    			m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 0;
@@ -1405,6 +1436,11 @@ struct AppData {
 	LONGLONG lastTimeStamp;
 	float dt;
 
+	Vec3 activeCamPos;
+	Vec3 activeCamLook;
+	Vec3 activeCamUp;
+	Vec3 activeCamRight;
+
 	Vec3 camera;
 	Vec3 camPos;
 	Vec3 camLook;
@@ -1412,8 +1448,6 @@ struct AppData {
 	Vec3 camVel;
 	Vec3 camAcc;
 
-	// Mesh mesh;
-	// PipelineIds pipelineIds;
 	uint programs[16];
 	uint textures[16];
 	int texCount;
@@ -1440,37 +1474,27 @@ struct AppData {
 	Vec3 playerLook;
 	Vec2 playerRot;
 	Vec3 playerSize;
+	Vec3 playerVel;
+	Vec3 playerAcc;
 	float playerCamZOffset;
 	bool playerMode;
 	bool pickMode;
 
 	bool playerOnGround;
+	int blockMenu[10];
+	int blockMenuSelected;
 
-	Vec3 playerVel;
-	Vec3 playerAcc;
 
 	int selectionRadius;
 	bool blockSelected;
 	Vec3 selectedBlock;
 	Vec3 selectedBlockFaceDir;
 
-	Vec3 activeCamPos;
-	Vec3 activeCamLook;
-	Vec3 activeCamUp;
-	Vec3 activeCamRight;
-
 	VoxelMesh* vMeshs;
 	int vMeshsSize;
 
-	// uint voxelShader;
-	// uint voxelVertex;
-	// uint voxelFragment;
-
 	GLuint voxelSamplers[3];
 	GLuint voxelTextures[3];
-
-	// GLuint textureUnits[16];
-	// GLuint samplerUnits[16];
 };
 
 char* fillString(char* text, ...) {
@@ -1628,12 +1652,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->textures[ad->texCount++] = loadTextureFile("..\\data\\white.png", 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
 		ad->textures[ad->texCount++] = loadTextureFile("..\\data\\rect.png", 2, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
 
-		// glTextureParameteri(textureId, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-		// glTextureParameteri(textureId, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		// // glTextureParameteri(textureId, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR);
-		// // glTextureParameteri(textureId, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-		// glTextureParameteri(textureId, GL_TEXTURE_WRAP_S, GL_REPEAT);
-		// glTextureParameteri(textureId, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
 
 		PipelineIds* ids = &globalGraphicsState->pipelineIds;
 		ids->programQuad = createShader(vertexShaderQuad, fragmentShaderQuad, &ids->quadVertex, &ids->quadFragment);
@@ -1757,6 +1776,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 			if(x == width && y == height) {
 				glTextureSubImage3D(texId, 0, 0, 0, tc, x, y, 1, format, GL_UNSIGNED_BYTE, stbData);
 				glGenerateTextureMipmap(texId);
+
+				ad->textures[ad->texCount++] = loadTexture(stbData, x, y, 2, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
 			}
 
 			stbi_image_free(stbData);
@@ -1786,8 +1807,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		ad->playerMode = true;
 		ad->pickMode = true;
-		ad->selectionRadius = 10;
+		ad->selectionRadius = 7;
 		input->captureMouse = true;
+
+		*ad->blockMenu = {};
+		ad->blockMenuSelected = 0;
 
 		return; // window operations only work after first frame?
 	}
@@ -1891,20 +1915,46 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->playerMode = !ad->playerMode;
 	}
 
-	// if(input->keysPressed[VK_F5]) {
-	// 	ad->pickMode = !ad->pickMode;
-	// }
-
+	#define KEYCODE_0 0x30
 	#define KEYCODE_1 0x31
 	#define KEYCODE_2 0x32
 
-	if(input->keysPressed[KEYCODE_1]) {
-		ad->pickMode = true;
+	// if(input->keysPressed[KEYCODE_1]) {
+	// 	ad->pickMode = true;
+	// }
+
+	// if(input->keysPressed[KEYCODE_2]) {
+	// 	ad->pickMode = false;
+	// }
+
+	if(input->mouseWheel) {
+		ad->blockMenuSelected += -input->mouseWheel;
+		ad->blockMenuSelected = mod(ad->blockMenuSelected, arrayCount(ad->blockMenu));
 	}
 
-	if(input->keysPressed[KEYCODE_2]) {
-		ad->pickMode = false;
+	if(input->keysPressed[KEYCODE_0]) ad->blockMenuSelected = 9;
+	for(int i = 0; i < 9; i++) {
+		if(input->keysPressed[KEYCODE_0 + i+1]) ad->blockMenuSelected = i;
 	}
+
+	if(ad->playerMode) {
+		ad->camVel = vec3(0,0,0);
+	} else {
+		ad->playerVel = vec3(0,0,0);
+	}
+
+	if(!ad->playerMode && input->keysPressed[VK_SPACE]) {
+		ad->playerPos = ad->camPos;
+		ad->playerLook = ad->camLook;
+		ad->playerRot = ad->camRot;
+		ad->playerVel = ad->camVel;
+		ad->playerMode = true;
+		input->keysPressed[VK_SPACE] = false;
+		input->keysDown[VK_SPACE] = false;
+	}
+
+
+
 
 
 
@@ -1919,70 +1969,71 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	Vec3 pLook, pRight, pUp;
 	getCamData(ad->playerLook, ad->playerRot, gUp, &pLook, &pRight, &pUp);
+	ad->playerAcc = vec3(0,0,0);
+
 	Vec3 cLook, cRight, cUp;
 	getCamData(ad->camLook, ad->camRot, gUp, &cLook, &cRight, &cUp);
-
-
-	ad->playerAcc = vec3(0,0,0);
 	ad->camAcc = vec3(0,0,0);
 
+	Vec3 look, right, up;
+	Vec2* rot;
+	Vec3* acc;
+	float runBoost;
+	float speed;
+	bool rightLock;
+
 	if(!ad->playerMode) {
-		// 3d camera controls
-		if((!fpsMode && input->mouseButtonDown[1]) || fpsMode) {
-			float turnRate = ad->dt*0.3f;
-			ad->camRot.y += turnRate * input->mouseDeltaY;
-			ad->camRot.x += turnRate * input->mouseDeltaX;
+		look = cLook;
+		right = cRight;
+		up = cUp;
+		rot = &ad->camRot;
+		acc = &ad->camAcc;
 
-			float margin = 0.00001f;
-			clamp(&ad->camRot.y, -M_PI+margin, M_PI-margin);
-		}
+		runBoost = 2.0f;
+		speed = 150;
 
-		if( input->keysDown[VK_W] || input->keysDown[VK_A] || input->keysDown[VK_S] || 
-			input->keysDown[VK_D] || input->keysDown[VK_E] || input->keysDown[VK_Q]) {
-
-			Vec3 look = cLook;
-			if(input->keysDown[VK_CONTROL]) look = cross(gUp, cRight);
-
-			float runBoost = 2.0f;
-			float speed = 150;
-			Vec3 acc = vec3(0,0,0);
-			if(input->keysDown[VK_SHIFT]) speed *= runBoost;
-			if(input->keysDown[VK_W]) acc += normVec3(look);
-			if(input->keysDown[VK_S]) acc += -normVec3(look);
-			if(input->keysDown[VK_D]) acc += normVec3(cRight);
-			if(input->keysDown[VK_A]) acc += -normVec3(cRight);
-			if(input->keysDown[VK_E]) acc += normVec3(gUp);
-			if(input->keysDown[VK_Q]) acc += -normVec3(gUp);
-			ad->camAcc += normVec3(acc)*speed;
-		}
+		rightLock = false;
 	} else {
-		if((!fpsMode && input->mouseButtonDown[1]) || fpsMode) {
-			float turnRate = ad->dt*0.3f;
-			ad->playerRot.y += turnRate * input->mouseDeltaY;
-			ad->playerRot.x += turnRate * input->mouseDeltaX;
+		look = pLook;
+		right = pRight;
+		up = pUp;
+		rot = &ad->playerRot;
+		acc = &ad->playerAcc;
 
-			float margin = 0.00001f;
-			clamp(&ad->playerRot.y, -M_PI+margin, M_PI-margin);
-		}
+		runBoost = 1.5f;
+		speed = 30;
 
-		if( input->keysDown[VK_W] || input->keysDown[VK_A] || input->keysDown[VK_S] || 
-			input->keysDown[VK_D] || input->keysDown[VK_E] || input->keysDown[VK_Q]) {
+		rightLock = true;
+	}
 
-			Vec3 look = pLook;
-			look = cross(gUp, pRight);
+	if((!fpsMode && input->mouseButtonDown[1]) || fpsMode) {
+		float turnRate = ad->dt*0.3f;
+		rot->y += turnRate * input->mouseDeltaY;
+		rot->x += turnRate * input->mouseDeltaX;
 
-			float runBoost = 1.5f;
-			float speed = 40.0f;
+		float margin = 0.00001f;
+		clamp(&rot->y, -M_PI+margin, M_PI-margin);
+	}
 
-			Vec3 acc = vec3(0,0,0);
-			if(input->keysDown[VK_SHIFT]) speed *= runBoost;
-			if(input->keysDown[VK_W]) acc += normVec3(look);
-			if(input->keysDown[VK_S]) acc += -normVec3(look);
-			if(input->keysDown[VK_D]) acc += normVec3(pRight);
-			if(input->keysDown[VK_A]) acc += -normVec3(pRight);
-			ad->playerAcc += normVec3(acc)*speed;
-		}
+	if( input->keysDown[VK_W] || input->keysDown[VK_A] || input->keysDown[VK_S] || 
+		input->keysDown[VK_D] || input->keysDown[VK_E] || input->keysDown[VK_Q]) {
 
+		if(rightLock || input->keysDown[VK_CONTROL]) look = cross(gUp, right);
+
+		Vec3 acceleration = vec3(0,0,0);
+		if(input->keysDown[VK_SHIFT]) speed *= runBoost;
+		if(input->keysDown[VK_W]) acceleration += normVec3(look);
+		if(input->keysDown[VK_S]) acceleration += -normVec3(look);
+		if(input->keysDown[VK_D]) acceleration += normVec3(right);
+		if(input->keysDown[VK_A]) acceleration += -normVec3(right);
+		if(input->keysDown[VK_E]) acceleration += normVec3(gUp);
+		if(input->keysDown[VK_Q]) acceleration += -normVec3(gUp);
+		*acc += normVec3(acceleration)*speed;
+	}
+
+	ad->playerAcc.z = 0;
+
+	if(ad->playerMode) {
 		// if(input->keysPressed[VK_SPACE]) {
 		if(input->keysDown[VK_SPACE]) {
 			if(ad->playerOnGround) {
@@ -1991,6 +2042,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 			}
 		}
 	}
+
+
+
 
 	bool playerGroundCollision = false;
 	bool playerCeilingCollision = false;
@@ -2278,13 +2332,20 @@ extern "C" APPMAINFUNCTION(appMain) {
 			else if(intersectionFace == 5) faceDir = vec3(0,0,1);
 			ad->selectedBlockFaceDir = faceDir;
 
-			if(input->mouseButtonPressed[0] && ad->playerMode) {
+			// if(input->mouseButtonPressed[0] && ad->playerMode) {
+			if(ad->playerMode) {
 				VoxelMesh* vm = getVoxelMesh(ad->vMeshs, &ad->vMeshsSize, getMeshCoordFromGlobalCoord(intersectionBox));
 
 				uchar* block = getBlockFromGlobalCoord(ad->vMeshs, &ad->vMeshsSize, intersectionBox);
 				uchar* lighting = getLightingFromGlobalCoord(ad->vMeshs, &ad->vMeshsSize, intersectionBox);
 
-				if(ad->pickMode) {
+				bool mouse1 = input->mouseButtonPressed[0];
+				bool mouse2 = input->mouseButtonPressed[1];
+				bool placeBlock = (!fpsMode && ad->pickMode && mouse1) || (fpsMode && mouse1);
+				bool removeBlock = (!fpsMode && !ad->pickMode && mouse1) || (fpsMode && mouse2);
+
+				// if(ad->pickMode) {
+				if(placeBlock) {
 					Vec3 boxToCamDir = startPos - intersectionBox;
 					Vec3 sideBlock = getBlockCenterFromGlobalCoord(intersectionBox + faceDir);
 					Vec3i voxelSideBlock = getVoxelCoordFromGlobalCoord(sideBlock);
@@ -2313,13 +2374,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 						uchar* sideBlockType = getBlockFromVoxelCoord(ad->vMeshs, &ad->vMeshsSize, voxelSideBlock);
 						uchar* sideBlockLighting = getLightingFromVoxelCoord(ad->vMeshs, &ad->vMeshsSize, voxelSideBlock);
 
-						*sideBlockType = 11;
+						// *sideBlockType = 11;
+						*sideBlockType = ad->blockMenu[ad->blockMenuSelected];
 						*sideBlockLighting = 0;
 
 						generateVoxelMesh(vm);
 						makeMesh(vm, ad->vMeshs, &ad->vMeshsSize);
 					}
-				} else {
+				// } else {
+				} else if(removeBlock) {
 					if(*block > 0) {
 						*block = 0;			
 						*lighting = 255;
@@ -2393,7 +2456,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 0, 2, view, proj, fogColor);
 
 
-#if 0
+#if 1
 	static bool redoWorld = true;
 	if(redoWorld) {
 		for(int i = 0; i < ad->vMeshsSize; i++) {
@@ -2525,7 +2588,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				drawVoxelMesh(m);
 
 				// triangleCount += m->quadCount*4;
-				triangleCount += m->quadCount;
+				triangleCount += m->quadCount/2;
 			}
 		}
 	}
@@ -2582,6 +2645,39 @@ extern "C" APPMAINFUNCTION(appMain) {
 	dcText({fillString("Quads: (%i)", triangleCount), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
 
 
+
+
+	if(ad->playerMode) {
+		for(int i = 0; i < 10; i++) {
+			ad->blockMenu[i] = i+1;
+		}
+
+		Vec2 res = vec2(wSettings->currentRes);
+		float bottom = 0.950f;
+		float size = 0.0527f;
+		float dist = 0.5f;
+		Vec2 iconSize = vec2(size * res.h);
+		float iconDist = iconSize.w * dist;
+		// int count = arrayCount(ad->blockMenu);
+		int count = 10;
+
+		float selectColor = 1.5f;
+		float trans = 0.8f;
+
+		float start = res.x*0.5f - ((count-1)*0.5f)*(iconDist+iconSize.w);
+		for(int i = 0; i < count; i++) {
+			Vec4 color = vec4(1,1,1,trans);
+			float iconOff = 1;
+			if(ad->blockMenuSelected == i) {
+				color = vec4(1*selectColor,1*selectColor,1*selectColor,trans);
+				iconOff = 1.2f;
+			}
+
+			Vec2 pos = vec2(start + i*(iconSize.w + iconDist), -res.y*bottom);
+			dcRect({rectCenDim(pos, iconSize*1.2f*iconOff), rect(0,0,1,1), vec4(vec3(0.1f),trans), 1});
+			dcRect({rectCenDim(pos, iconSize*iconOff), rect(0,0,1,1), color, 6+i});
+		}
+	}
 
 
 
