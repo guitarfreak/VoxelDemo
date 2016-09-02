@@ -59,7 +59,7 @@
 - app stops reacting to input after a while, hotloading still works though
 - deleting a block at the edge of a mesh means remaking mesh on the other side 
   of the edge too
-- distance jumping collision bug
+- distance jumping collision bug, possibly precision loss in distances
 
 - no alpha in voxel rendering, see glass block
 
