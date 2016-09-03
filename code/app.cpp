@@ -65,6 +65,8 @@
 
 - gpu fucks up at some point making swapBuffers alternates between time steps 
   which makes the game stutter, restart is required
+- game input gets stuck when buttons are pressed right at the start
+
 */
 
 
@@ -72,13 +74,16 @@
 	- threading
 	- 32x32 gen chunks
 	- memory using malloc
-	- world generation:
-		- blocks based on height
-		- 
-	- placing blocks, menu
-
 */
 
+MemoryBlock* globalMemory;
+ThreadQueue* globalThreadQueue;
+
+struct GraphicsState;
+struct DrawCommandList;
+GraphicsState* globalGraphicsState;
+DrawCommandList* globalCommandList3d;
+DrawCommandList* globalCommandList2d;
 
 // char* dataFolder = "...\\data\\";
 // #define GetFilePath(name) ...\\data\\##name
@@ -390,9 +395,7 @@ struct Draw_Command_Cull {
 };
 
 
-DrawCommandList* globalCommandList3d;
-DrawCommandList* globalCommandList2d;
-GraphicsState* globalGraphicsState;
+
 
 #define makeDrawCommandFunction(name, list) \
 	void dc##name(Draw_Command_##name d, DrawCommandList* commandList = (DrawCommandList*)list) { \
@@ -925,6 +928,7 @@ float perlin2d(float x, float y, float freq, int depth)
 #define VIEW_DISTANCE 512  // 8
 // #define VIEW_DISTANCE 256 // 4
 // #define VIEW_DISTANCE 128 // 2
+// #define VIEW_DISTANCE 64 // 1
 
 // #define VIEW_DISTANCE 64*10
 // #define VIEW_DISTANCE 64*11
@@ -941,14 +945,24 @@ float perlin2d(float x, float y, float freq, int depth)
 #define VC_X 66
 #define VC_Y 66
 #define VC_Z 256
-uchar voxelCache[VC_X][VC_Y][VC_Z];
-uchar voxelLightingCache[VC_X][VC_Y][VC_Z];
+// uchar voxelCache[VC_X][VC_Y][VC_Z];
+// uchar voxelLightingCache[VC_X][VC_Y][VC_Z];
 
-#define voxelArray(x, y, z) x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z
+uchar* voxelCache[8];
+uchar* voxelLightingCache[8];
+
+#define voxelArray(x, y, z) (x)*VOXEL_Y*VOXEL_Z + (y)*VOXEL_Z + (z)
+#define voxelCache(x, y, z) (x)*VC_Y*VC_Z + (y)*VC_Z + (z)
 
 struct VoxelMesh {
 	bool generated;
 	bool upToDate;
+	bool meshUploaded;
+
+	volatile uint activeGeneration;
+	volatile uint activeMaking;
+
+	bool modifiedByUser;
 
 	Vec2i coord;
 	uchar* voxels;
@@ -967,6 +981,9 @@ struct VoxelMesh {
 	int texBufferCapacity;
 	uint textureId;
 	uint texBufferId;
+
+	int bufferSizePerQuad;
+	int textureBufferSizePerQuad;
 };
 
 void initVoxelMesh(VoxelMesh* m, Vec2i coord) {
@@ -1028,7 +1045,26 @@ VoxelMesh* getVoxelMesh(VoxelMesh* vms, int* vmsSize, Vec2i coord) {
 	return m;
 }
 
-void generateVoxelMesh(VoxelMesh* m) {
+
+int startX = 37800;
+int startY = 48000;
+int startXMod = 58000;
+int startYMod = 68000;
+
+
+// struct GenerateVoxelMeshThreadedData {
+// 	VoxelMesh* m;
+// };
+
+void generateVoxelMeshThreaded(void* data) {
+	// GenerateVoxelMeshThreadedData* d = (GenerateVoxelMeshThreadedData*)data;
+	// VoxelMesh* m = d->m;
+
+	int id =  getThreadId();
+
+
+	VoxelMesh* m = (VoxelMesh*)data;
+
 	Vec2i coord = m->coord;
 
 	if(!m->generated) {
@@ -1047,11 +1083,11 @@ void generateVoxelMesh(VoxelMesh* m) {
 	    		// float height = perlin*50;
 	    		// float height = 5;
 
-	    		static int startX = randomInt(0, 10000);
-	    		static int startY = randomInt(0, 10000);
+	    		// static int startX = randomInt(0, 10000);
+	    		// static int startY = randomInt(0, 10000);
 
-	    		static int startXMod = randomInt(0,10000);
-	    		static int startYMod = randomInt(0,10000);
+	    		// static int startXMod = randomInt(0,10000);
+	    		// static int startYMod = randomInt(0,10000);
 
 	    		float height = perlin2d(gx+4000+startX, gy+4000+startY, 0.004f, 7);
 
@@ -1085,14 +1121,27 @@ void generateVoxelMesh(VoxelMesh* m) {
 	    	}
 	    }
 
-		m->generated = true;
 	}
+
+	atomicSub(&m->activeGeneration);
+	m->generated = true;
 }
 
+struct MakeMeshThreadedData {
+	VoxelMesh* m;
+	VoxelMesh* vms;
+	int* vmsSize;
 
-void makeMesh(VoxelMesh* m, VoxelMesh* vms, int* vmsSize) {
-	// zeroMemory(voxelCache, VC_X*VC_Y*VC_Z);
-	// zeroMemory(voxelLightingCache, VC_X*VC_Y*VC_Z);
+	int inProgress;
+};
+
+void makeMeshThreaded(void* data) {
+	MakeMeshThreadedData* d = (MakeMeshThreadedData*)data;
+	VoxelMesh* m = d->m;
+	VoxelMesh* vms = d->vms;
+	int* vmsSize = d->vmsSize;
+
+	int cacheId = getThreadQueueId();
 
 	// gather voxel data in radius and copy to cache
 	Vec2i coord = m->coord;
@@ -1100,7 +1149,8 @@ void makeMesh(VoxelMesh* m, VoxelMesh* vms, int* vmsSize) {
 		for(int x = -1; x < 2; x++) {
 			Vec2i c = coord + vec2i(x,y);
 			VoxelMesh* lm = getVoxelMesh(vms, vmsSize, c);
-			generateVoxelMesh(lm);
+
+			assert(lm->generated);
 
 			int w = x == 0 ? VOXEL_X : 1;
 			int h = y == 0 ? VOXEL_Y : 1;
@@ -1120,8 +1170,8 @@ void makeMesh(VoxelMesh* m, VoxelMesh* vms, int* vmsSize) {
 			for(int z = 0; z < VOXEL_Z; z++) {
 				for(int y = 0; y < h; y++) {
 					for(int x = 0; x < w; x++) {
-						voxelCache[x+lPos.x][y+lPos.y][z+1] = lm->voxels[(x+mPos.x)*VOXEL_Y*VOXEL_Z + (y+mPos.y)*VOXEL_Z + z];
-						voxelLightingCache[x+lPos.x][y+lPos.y][z+1] = lm->lighting[(x+mPos.x)*VOXEL_Y*VOXEL_Z + (y+mPos.y)*VOXEL_Z + z];
+						voxelCache[cacheId][voxelCache(x+lPos.x, y+lPos.y, z+1)] = lm->voxels[(x+mPos.x)*VOXEL_Y*VOXEL_Z + (y+mPos.y)*VOXEL_Z + z];
+						voxelLightingCache[cacheId][voxelCache(x+lPos.x, y+lPos.y, z+1)] = lm->lighting[(x+mPos.x)*VOXEL_Y*VOXEL_Z + (y+mPos.y)*VOXEL_Z + z];
 					}
 				}
 			}
@@ -1129,12 +1179,11 @@ void makeMesh(VoxelMesh* m, VoxelMesh* vms, int* vmsSize) {
 			// make floor solid
 			for(int y = 0; y < VC_Y; y++) {
 				for(int x = 0; x < VC_X; x++) {
-					voxelCache[x][y][0] = 1;
+					voxelCache[cacheId][voxelCache(x, y, 0)] = 1;
 				}
 			}
 		}
 	}
-
 
 	stbvox_mesh_maker mm;
 	stbvox_init_mesh_maker(&mm);
@@ -1157,8 +1206,8 @@ void makeMesh(VoxelMesh* m, VoxelMesh* vms, int* vmsSize) {
 	stbvox_set_input_stride(&mm, VC_Y*VC_Z,VC_Z);
 	stbvox_set_input_range(&mm, 0,0,0, VOXEL_X, VOXEL_Y, VOXEL_Z);
 
-	inputDesc->blocktype = &voxelCache[1][1][1];
-	inputDesc->lighting = &voxelLightingCache[1][1][1];
+	inputDesc->blocktype = &voxelCache[cacheId][voxelCache(1,1,1)];
+	inputDesc->lighting = &voxelLightingCache[cacheId][voxelCache(1,1,1)];
 
 	stbvox_set_default_mesh(&mm, 0);
 	int success = stbvox_make_mesh(&mm);
@@ -1169,19 +1218,76 @@ void makeMesh(VoxelMesh* m, VoxelMesh* vms, int* vmsSize) {
 	float bounds [2][3]; stbvox_get_bounds(&mm, bounds);
 	m->quadCount = stbvox_get_quad_count(&mm, 0);
 
-	int bufferSizePerQuad = stbvox_get_buffer_size_per_quad(&mm, 0);
-	int textureBufferSizePerQuad = stbvox_get_buffer_size_per_quad(&mm, 1);
+	m->bufferSizePerQuad = stbvox_get_buffer_size_per_quad(&mm, 0);
+	m->textureBufferSizePerQuad = stbvox_get_buffer_size_per_quad(&mm, 1);
 
+	atomicSub(&m->activeMaking);
+	m->upToDate = true;
+	d->inProgress = false;
+}
 
+MakeMeshThreadedData threadData[256];
+// MakeMeshThreadedData threadData[300];
+// MakeMeshThreadedData threadData[300];
+int threadDataCount;
 
-	glNamedBufferData(m->bufferId, bufferSizePerQuad*m->quadCount, m->meshBuffer, GL_STATIC_DRAW);
+void makeMesh(VoxelMesh* m, VoxelMesh* vms, int* vmsSize) {
+	// zeroMemory(voxelCache, VC_X*VC_Y*VC_Z);
+	// zeroMemory(voxelLightingCache, VC_X*VC_Y*VC_Z);
+
+	bool notAllMeshsAreReady = false;
+
+	Vec2i coord = m->coord;
+	for(int y = -1; y < 2; y++) {
+		for(int x = -1; x < 2; x++) {
+			Vec2i c = coord + vec2i(x,y);
+			VoxelMesh* lm = getVoxelMesh(vms, vmsSize, c);
+
+			if(lm->voxels == 0) {
+				int stop = 234;
+			}
+
+			if(!lm->generated) {
+				if(!lm->activeGeneration && !threadQueueFull(globalThreadQueue)) {
+					atomicAdd(&lm->activeGeneration);
+					threadQueueAdd(globalThreadQueue, generateVoxelMeshThreaded, lm);
+				}
+				notAllMeshsAreReady = true;
+			} 
+		}
+	}
+
+	if(notAllMeshsAreReady) return;
+
+	if(!m->upToDate) {
+		if(!m->activeMaking) {
+			if(threadQueueFull(globalThreadQueue)) return;
+
+			MakeMeshThreadedData* data;
+			for(int i = 0; i < arrayCount(threadData); i++) {
+				if(!threadData[i].inProgress) {
+					threadData[i] = {m, vms, vmsSize, true};
+					// data = threadData + i;
+					atomicAdd(&m->activeMaking);
+					threadQueueAdd(globalThreadQueue, makeMeshThreaded, &threadData[i]);
+
+					break;
+				}
+			}
+		}
+
+		return;
+	} 
+
+	glNamedBufferData(m->bufferId, m->bufferSizePerQuad*m->quadCount, m->meshBuffer, GL_STATIC_DRAW);
 	glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
 
 	if(STBVOX_CONFIG_MODE == 1) {
-		glNamedBufferData(m->texBufferId, textureBufferSizePerQuad*m->quadCount, m->texBuffer, GL_STATIC_DRAW);
+		glNamedBufferData(m->texBufferId, m->textureBufferSizePerQuad*m->quadCount, m->texBuffer, GL_STATIC_DRAW);
 		glTextureBuffer(m->textureId, GL_RGBA8UI, m->texBufferId);
 	}
 
+	m->meshUploaded = true;
 }
 
 Vec3i getVoxelCoordFromGlobalCoord(Vec3 globalCoord) {
@@ -1429,6 +1535,9 @@ struct AppData {
 	Input input;
 	WindowSettings wSettings;
 
+	ThreadQueue lowQueue;
+	ThreadQueue highQueue;
+
 	GraphicsState graphicsState;
 	DrawCommandList commandList2d;
 	DrawCommandList commandList3d;
@@ -1561,9 +1670,6 @@ void getPointsFromQuadAndNormal(Vec3 p, Vec3 normal, float size, Vec3 verts[4]) 
 	}
 }
 
-
-MemoryBlock* globalMemory;
-
 extern "C" APPMAINFUNCTION(appMain) {
 	globalMemory = memoryBlock;
 	AppData* ad = (AppData*)memoryBlock->permanent;
@@ -1571,6 +1677,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 	SystemData* systemData = &ad->systemData;
 	HWND windowHandle = systemData->windowHandle;
 	WindowSettings* wSettings = &ad->wSettings;
+
+	globalThreadQueue = &ad->highQueue;
 
 	globalGraphicsState = &ad->graphicsState;
 
@@ -1580,6 +1688,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 	if(init) {
 		getPMemory(sizeof(AppData));
 		*ad = {};
+
+		// threadInit(globalThreadQueue, 3);
+		threadInit(globalThreadQueue, 7);
 
 		ad->dt = 1/(float)60;
 
@@ -1794,10 +1905,22 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 		// setup
-		int vMeshSize = sizeof(VoxelMesh)*2000;
+		int vMeshSize = sizeof(VoxelMesh)*10000;
 		ad->vMeshs = (VoxelMesh*)getPMemory(vMeshSize);
 		zeroMemory(ad->vMeshs, vMeshSize);
 		ad->vMeshsSize = 0;
+
+		for(int i = 0; i < 8; i++) {
+			voxelCache[i] = (uchar*)getPMemory(VC_X*VC_Y*VC_Z);
+			voxelLightingCache[i] = (uchar*)getPMemory(VC_X*VC_Y*VC_Z);
+		}
+
+
+
+		for(int i = 0; i < arrayCount(threadData); i++) {
+			threadData[i] = {};
+		} 
+		threadDataCount = 0;
 
 		// ad->playerPos = vec3(35.5f,35.3f,30);
 		ad->playerPos = vec3(0,0,0);
@@ -1991,6 +2114,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		runBoost = 2.0f;
 		speed = 150;
+
+		#define VK_T 0x54
+		if(input->keysDown[VK_T]) speed = 1000;
 
 		rightLock = false;
 	} else {
@@ -2344,6 +2470,30 @@ extern "C" APPMAINFUNCTION(appMain) {
 				bool placeBlock = (!fpsMode && ad->pickMode && mouse1) || (fpsMode && mouse1);
 				bool removeBlock = (!fpsMode && !ad->pickMode && mouse1) || (fpsMode && mouse2);
 
+				if(placeBlock || removeBlock) {
+					vm->upToDate = false;
+					vm->meshUploaded = false;
+					vm->modifiedByUser = true;
+
+					// if block at edge of mesh, we have to update the mesh on the other side too
+					Vec2i currentCoord = getMeshCoordFromGlobalCoord(intersectionBox);
+					for(int i = 0; i < 4; i++) {
+						Vec3 offset;
+						if(i == 0) offset = vec3(1,0,0);
+						else if(i == 1) offset = vec3(-1,0,0);
+						else if(i == 2) offset = vec3(0,1,0);
+						else if(i == 3) offset = vec3(0,-1,0);
+
+						Vec2i mc = getMeshCoordFromGlobalCoord(intersectionBox + offset);
+						if(mc != currentCoord) {
+							VoxelMesh* edgeMesh = getVoxelMesh(ad->vMeshs, &ad->vMeshsSize, mc);
+							edgeMesh->upToDate = false;
+							edgeMesh->meshUploaded = false;
+							edgeMesh->modifiedByUser = true;
+						}
+					}
+				}
+
 				// if(ad->pickMode) {
 				if(placeBlock) {
 					Vec3 boxToCamDir = startPos - intersectionBox;
@@ -2377,18 +2527,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 						// *sideBlockType = 11;
 						*sideBlockType = ad->blockMenu[ad->blockMenuSelected];
 						*sideBlockLighting = 0;
-
-						generateVoxelMesh(vm);
-						makeMesh(vm, ad->vMeshs, &ad->vMeshsSize);
 					}
 				// } else {
 				} else if(removeBlock) {
 					if(*block > 0) {
 						*block = 0;			
 						*lighting = 255;
-
-						generateVoxelMesh(vm);
-						makeMesh(vm, ad->vMeshs, &ad->vMeshsSize);
 					}
 				}
 			}
@@ -2456,12 +2600,17 @@ extern "C" APPMAINFUNCTION(appMain) {
 	setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 0, 2, view, proj, fogColor);
 
 
-#if 1
+#if 0
 	static bool redoWorld = true;
+	if(second) redoWorld = false;
 	if(redoWorld) {
 		for(int i = 0; i < ad->vMeshsSize; i++) {
 			ad->vMeshs[i].generated = false;
 			ad->vMeshs[i].upToDate = false;
+			startX = randomInt(0, 100000);
+			startY = randomInt(0, 100000);
+			startXMod = randomInt(0, 100000);
+			startYMod = randomInt(0, 100000);
 		}
 	}
 	redoWorld = false;
@@ -2483,6 +2632,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// for(int y = min.y; y < max.y+1; y++) {
 
 	Vec2i pPos = vec2i(playerMeshCoord.x, playerMeshCoord.y);
+
+	int radCounter = 0;
 
 	// generate the meshes around the player in a spiral by drawing lines and rotating
 	// the directing every time we reach a corner
@@ -2507,20 +2658,24 @@ extern "C" APPMAINFUNCTION(appMain) {
 				lPos += lDir;
 			}
 
+			radCounter++;
+
 			Vec2i coord = lPos;
 			// Vec2i coord = vec2i(x,y);
 
 			VoxelMesh* m = getVoxelMesh(vms, vmsSize, coord);
-			if(!m->upToDate) {
-				if(meshGenerationCount < 1) {
+			// if(!m->upToDate) {
+			if(!m->meshUploaded) {
+				// if(meshGenerationCount < 1) {
 					makeMesh(m, vms, vmsSize);
-					m->upToDate = true;
 
-					meshGenerationCount++;
-				}
+					// meshGenerationCount++;
+				// }
+
+				if(!m->modifiedByUser) continue;
 			}
 
-
+			// if(!m->upToDate) continue;
 
 			Vec3 cp = ad->activeCamPos;
 			Vec3 cl = ad->activeCamLook;
@@ -2529,8 +2684,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			float ar = ad->aspectRatio;
 			float fov = degreeToRadian(ad->fieldOfView);
-			float ne = 0.1f;
-			float fa = 2000;
+			// float ne = ad->nearPlane;
+			// float fa = ad->farPlane;
 
 			Vec3 left = rotateVec3(cl, fov*ar, cu);
 			Vec3 right = rotateVec3(cl, -fov*ar, cu);
@@ -2583,12 +2738,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 				}
 			}
 			
-
 			if(isIntersecting) {
 				drawVoxelMesh(m);
 
 				// triangleCount += m->quadCount*4;
-				triangleCount += m->quadCount/2;
+				triangleCount += m->quadCount/(float)2;
 			}
 		}
 	}

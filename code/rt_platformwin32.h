@@ -79,6 +79,20 @@ enum ShellCommand {
 	SHELLCOMMAND_COUNT,
 };
 
+
+// void atomicAdd(unsigned int* n) {
+void atomicAdd(volatile unsigned int* n) {
+	// LONG __cdecl InterlockedIncrement(
+	//   _Inout_ LONG volatile *Addend
+	// );
+
+	InterlockedIncrement(n);
+}
+
+void atomicSub(volatile unsigned int* n) {
+	InterlockedDecrement(n);
+}
+
 struct ThreadQueue;
 struct PlatformData {
 	int windowX, windowY;
@@ -89,6 +103,12 @@ struct PlatformData {
 
 	// PlatformFunctions functions;
 };
+
+int getThreadId() {
+	int tId = GetCurrentThreadId();
+	return tId;
+}
+
 void platformDataInit(PlatformData* pd) {
 	*pd = {};
 }

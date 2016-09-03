@@ -20,8 +20,28 @@ struct ThreadQueue {
     volatile uint readIndex;
     HANDLE semaphore;
 
+    // int threadId[16];
+
     ThreadJob jobs[256];
+    // ThreadJob jobs[1024];
 };
+
+int globalThreadIds[16];
+
+int getThreadQueueId() {
+	int currentId = GetCurrentThreadId();
+
+	int id = -1;
+	for(int i = 0; i < arrayCount(globalThreadIds); i++) {
+		if(globalThreadIds[i] == currentId) {
+			id = i;
+			break;
+		}
+	}
+
+	assert(id != -1);
+	return id;
+}
 
 bool doNextThreadJob(ThreadQueue* queue) {
     bool shouldSleep = false;
@@ -63,14 +83,28 @@ void threadInit(ThreadQueue* queue, int numOfThreads) {
 
     for(int i = 0; i < numOfThreads; i++) {
         HANDLE thread = CreateThread(0, 0, threadProcess, (void*)(queue), 0, 0);
+        // BOOL WINAPI SetThreadPriority(
+        //   _In_ HANDLE hThread,
+        //   _In_ int    nPriority
+        // );
+
+        SetThreadPriority(thread, -2);
+
+        int id = GetThreadId(thread);
+        // queue->threadId[i] = id;
+        globalThreadIds[i] = id;
         if(!thread) printf("Could not create thread\n");
         CloseHandle(thread);
     }
 }
 
-void threadQueueAdd(ThreadQueue* queue, void (*function)(void*), void* data) {
+bool threadQueueAdd(ThreadQueue* queue, void (*function)(void*), void* data, bool skipIfFull = false) {
     int newWriteIndex = (queue->writeIndex + 1) % arrayCount(queue->jobs);
-    assert(newWriteIndex != queue->readIndex);
+    if(skipIfFull) {
+    	if(newWriteIndex == queue->readIndex) return false;
+    } else {
+	    assert(newWriteIndex != queue->readIndex);
+    }
     ThreadJob* job = queue->jobs + queue->writeIndex;
     job->function = function;
     job->data = data;
@@ -78,8 +112,15 @@ void threadQueueAdd(ThreadQueue* queue, void (*function)(void*), void* data) {
     _ReadWriteBarrier(); // doesn't work on 32 bit?
     InterlockedExchange(&queue->writeIndex, newWriteIndex);
     ReleaseSemaphore(queue->semaphore, 1, 0);
+
+    return true;
 }
 
+bool threadQueueFull(ThreadQueue* queue) {
+	int newWriteIndex = (queue->writeIndex + 1) % arrayCount(queue->jobs);
+    bool result = newWriteIndex == queue->readIndex;
+    return result;
+}
 
 void threadQueueComplete(ThreadQueue* queue) {
     while(queue->completionCount != queue->completionGoal) {
