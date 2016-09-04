@@ -51,6 +51,9 @@
 - make meshbuffer size the right size
 
 - make voxel drop in tutorial code for stb_voxel
+- reduce number of thread queue pushes
+
+- insert and init mesh not thread proof, make sure every mesh is initialized before generating
 
 //-------------------------------------
 //               BUGS
@@ -923,20 +926,13 @@ float perlin2d(float x, float y, float freq, int depth)
 
 
 
+// #define VIEW_DISTANCE 4096 // 64
 // #define VIEW_DISTANCE 2048 // 32
-// #define VIEW_DISTANCE 1024 // 16
-#define VIEW_DISTANCE 512  // 8
+#define VIEW_DISTANCE 1024 // 16
+// #define VIEW_DISTANCE 512  // 8
 // #define VIEW_DISTANCE 256 // 4
 // #define VIEW_DISTANCE 128 // 2
-// #define VIEW_DISTANCE 64 // 1
 
-// #define VIEW_DISTANCE 64*10
-// #define VIEW_DISTANCE 64*11
-// #define VIEW_DISTANCE 64*12
-// #define VIEW_DISTANCE 64*13
-// #define VIEW_DISTANCE 64*14
-// #define VIEW_DISTANCE 64*15
-// #define VIEW_DISTANCE 64*16
 
 #define VOXEL_X 64
 #define VOXEL_Y 64
@@ -945,8 +941,6 @@ float perlin2d(float x, float y, float freq, int depth)
 #define VC_X 66
 #define VC_Y 66
 #define VC_Z 256
-// uchar voxelCache[VC_X][VC_Y][VC_Z];
-// uchar voxelLightingCache[VC_X][VC_Y][VC_Z];
 
 uchar* voxelCache[8];
 uchar* voxelLightingCache[8];
@@ -955,6 +949,8 @@ uchar* voxelLightingCache[8];
 #define voxelCache(x, y, z) (x)*VC_Y*VC_Z + (y)*VC_Z + (z)
 
 struct VoxelMesh {
+	int isInitialized;
+
 	bool generated;
 	bool upToDate;
 	bool meshUploaded;
@@ -1021,50 +1017,45 @@ void initVoxelMesh(VoxelMesh* m, Vec2i coord) {
 	}
 }
 
-VoxelMesh* getVoxelMesh(VoxelMesh* vms, int* vmsSize, Vec2i coord) {
+struct VoxelNode {
+	VoxelMesh mesh;
+	VoxelNode* next;
+};
+// VoxelNode* globalVoxelHash[1024];
 
-	// find mesh at coordinate
-	int index = -1;
-	for(int i = 0; i < *vmsSize; i++) {
-		VoxelMesh* vm = vms + i;
-		if(vm->coord == coord) {
-			index = i;
+VoxelMesh* getVoxelMesh(VoxelNode** voxelHash, int voxelHashSize, Vec2i coord) {
+
+	int hashIndex = mod(coord.x*9 + coord.y*23, voxelHashSize);
+
+	VoxelMesh* m = 0;
+	VoxelNode* node = voxelHash[hashIndex];
+	while(node->next) {
+		if(node->mesh.coord == coord) {
+			m = &node->mesh;
 			break;
 		}
+
+		node = node->next;
 	}
 
-	// initialise mesh with coordinate
-	if(index == -1) {
-		index = (*vmsSize)++;
-		VoxelMesh* m = vms + index;
-
+	if(!m) {
+		m = &node->mesh;
 		initVoxelMesh(m, coord);
+
+		node->next = (VoxelNode*)getPMemory(sizeof(VoxelNode));
+		*node->next = {};
 	}
 
-	VoxelMesh* m = vms + index;
 	return m;
 }
-
 
 int startX = 37800;
 int startY = 48000;
 int startXMod = 58000;
 int startYMod = 68000;
 
-
-// struct GenerateVoxelMeshThreadedData {
-// 	VoxelMesh* m;
-// };
-
 void generateVoxelMeshThreaded(void* data) {
-	// GenerateVoxelMeshThreadedData* d = (GenerateVoxelMeshThreadedData*)data;
-	// VoxelMesh* m = d->m;
-
-	int id =  getThreadId();
-
-
 	VoxelMesh* m = (VoxelMesh*)data;
-
 	Vec2i coord = m->coord;
 
 	if(!m->generated) {
@@ -1129,8 +1120,11 @@ void generateVoxelMeshThreaded(void* data) {
 
 struct MakeMeshThreadedData {
 	VoxelMesh* m;
-	VoxelMesh* vms;
-	int* vmsSize;
+	// VoxelMesh* vms;
+	// int* vmsSize;
+
+	VoxelNode** voxelHash;
+	int voxelHashSize;
 
 	int inProgress;
 };
@@ -1138,8 +1132,11 @@ struct MakeMeshThreadedData {
 void makeMeshThreaded(void* data) {
 	MakeMeshThreadedData* d = (MakeMeshThreadedData*)data;
 	VoxelMesh* m = d->m;
-	VoxelMesh* vms = d->vms;
-	int* vmsSize = d->vmsSize;
+	// VoxelMesh* vms = d->vms;
+	// int* vmsSize = d->vmsSize;
+
+	VoxelNode** voxelHash = d->voxelHash;
+	int voxelHashSize = d->voxelHashSize;
 
 	int cacheId = getThreadQueueId();
 
@@ -1148,7 +1145,7 @@ void makeMeshThreaded(void* data) {
 	for(int y = -1; y < 2; y++) {
 		for(int x = -1; x < 2; x++) {
 			Vec2i c = coord + vec2i(x,y);
-			VoxelMesh* lm = getVoxelMesh(vms, vmsSize, c);
+			VoxelMesh* lm = getVoxelMesh(voxelHash, voxelHashSize, c);
 
 			assert(lm->generated);
 
@@ -1231,7 +1228,7 @@ MakeMeshThreadedData threadData[256];
 // MakeMeshThreadedData threadData[300];
 int threadDataCount;
 
-void makeMesh(VoxelMesh* m, VoxelMesh* vms, int* vmsSize) {
+void makeMesh(VoxelMesh* m, VoxelNode** voxelHash, int voxelHashSize) {
 	// zeroMemory(voxelCache, VC_X*VC_Y*VC_Z);
 	// zeroMemory(voxelLightingCache, VC_X*VC_Y*VC_Z);
 
@@ -1241,11 +1238,7 @@ void makeMesh(VoxelMesh* m, VoxelMesh* vms, int* vmsSize) {
 	for(int y = -1; y < 2; y++) {
 		for(int x = -1; x < 2; x++) {
 			Vec2i c = coord + vec2i(x,y);
-			VoxelMesh* lm = getVoxelMesh(vms, vmsSize, c);
-
-			if(lm->voxels == 0) {
-				int stop = 234;
-			}
+			VoxelMesh* lm = getVoxelMesh(voxelHash, voxelHashSize, c);
 
 			if(!lm->generated) {
 				if(!lm->activeGeneration && !threadQueueFull(globalThreadQueue)) {
@@ -1266,7 +1259,7 @@ void makeMesh(VoxelMesh* m, VoxelMesh* vms, int* vmsSize) {
 			MakeMeshThreadedData* data;
 			for(int i = 0; i < arrayCount(threadData); i++) {
 				if(!threadData[i].inProgress) {
-					threadData[i] = {m, vms, vmsSize, true};
+					threadData[i] = {m, voxelHash, voxelHashSize, true};
 					// data = threadData + i;
 					atomicAdd(&m->activeMaking);
 					threadQueueAdd(globalThreadQueue, makeMeshThreaded, &threadData[i]);
@@ -1327,32 +1320,32 @@ Vec3i getLocalVoxelCoord(Vec3i voxelCoord) {
 	return result;
 }
 
-uchar* getBlockFromVoxelCoord(VoxelMesh* vms, int* vmsSize, Vec3i voxelCoord) {
-	VoxelMesh* vm = getVoxelMesh(vms, vmsSize, getMeshCoordFromVoxelCoord(voxelCoord));
+uchar* getBlockFromVoxelCoord(VoxelNode** voxelHash, int voxelHashSize, Vec3i voxelCoord) {
+	VoxelMesh* vm = getVoxelMesh(voxelHash, voxelHashSize, getMeshCoordFromVoxelCoord(voxelCoord));
 	Vec3i localCoord = getLocalVoxelCoord(voxelCoord);
 	uchar* block = &vm->voxels[voxelArray(localCoord.x, localCoord.y, localCoord.z)];
 
 	return block;
 }
 
-uchar* getBlockFromGlobalCoord(VoxelMesh* vms, int* vmsSize, Vec3 coord) {
-	return getBlockFromVoxelCoord(vms, vmsSize, getVoxelCoordFromGlobalCoord(coord));
+uchar* getBlockFromGlobalCoord(VoxelNode** voxelHash, int voxelHashSize, Vec3 coord) {
+	return getBlockFromVoxelCoord(voxelHash, voxelHashSize, getVoxelCoordFromGlobalCoord(coord));
 }
 
-uchar* getLightingFromVoxelCoord(VoxelMesh* vms, int* vmsSize, Vec3i voxelCoord) {
-	VoxelMesh* vm = getVoxelMesh(vms, vmsSize, getMeshCoordFromVoxelCoord(voxelCoord));
+uchar* getLightingFromVoxelCoord(VoxelNode** voxelHash, int voxelHashSize, Vec3i voxelCoord) {
+	VoxelMesh* vm = getVoxelMesh(voxelHash, voxelHashSize, getMeshCoordFromVoxelCoord(voxelCoord));
 	Vec3i localCoord = getLocalVoxelCoord(voxelCoord);
 	uchar* block = &vm->lighting[voxelArray(localCoord.x, localCoord.y, localCoord.z)];
 
 	return block;
 }
 
-uchar* getLightingFromGlobalCoord(VoxelMesh* vms, int* vmsSize, Vec3 coord) {
-	return getLightingFromVoxelCoord(vms, vmsSize, getVoxelCoordFromGlobalCoord(coord));
+uchar* getLightingFromGlobalCoord(VoxelNode** voxelHash, int voxelHashSize, Vec3 coord) {
+	return getLightingFromVoxelCoord(voxelHash, voxelHashSize, getVoxelCoordFromGlobalCoord(coord));
 }
 
-// uchar* getLightingFromGlobalCoord(VoxelMesh* vms, int* vmsSize, Vec3 coord) {
-// 	VoxelMesh* vm = getVoxelMesh(vms, vmsSize, getMeshCoordFromGlobalCoord(coord));
+// uchar* getLightingFromGlobalCoord(VoxelNode** voxelHash, int voxelHashSize, Vec3 coord) {
+// 	VoxelMesh* vm = getVoxelMesh(voxelHash, voxelHashSize, getMeshCoordFromGlobalCoord(coord));
 // 	Vec3i localCoord = getLocalVoxelCoord(getVoxelCoordFromGlobalCoord(coord));
 // 	uchar* block = &vm->lighting[voxelArray(localCoord.x, localCoord.y, localCoord.z)];
 
@@ -1599,8 +1592,8 @@ struct AppData {
 	Vec3 selectedBlock;
 	Vec3 selectedBlockFaceDir;
 
-	VoxelMesh* vMeshs;
-	int vMeshsSize;
+	VoxelNode* voxelHash[1024];
+	int voxelHashSize;
 
 	GLuint voxelSamplers[3];
 	GLuint voxelTextures[3];
@@ -1905,16 +1898,16 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 		// setup
-		int vMeshSize = sizeof(VoxelMesh)*10000;
-		ad->vMeshs = (VoxelMesh*)getPMemory(vMeshSize);
-		zeroMemory(ad->vMeshs, vMeshSize);
-		ad->vMeshsSize = 0;
+		ad->voxelHashSize = sizeof(arrayCount(ad->voxelHash));
+		for(int i = 0; i < ad->voxelHashSize; i++) {
+			ad->voxelHash[i] = (VoxelNode*)getPMemory(sizeof(VoxelNode));
+			*ad->voxelHash[i] = {};
+		}
 
 		for(int i = 0; i < 8; i++) {
 			voxelCache[i] = (uchar*)getPMemory(VC_X*VC_Y*VC_Z);
 			voxelLightingCache[i] = (uchar*)getPMemory(VC_X*VC_Y*VC_Z);
 		}
-
 
 
 		for(int i = 0; i < arrayCount(threadData); i++) {
@@ -2077,10 +2070,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 
-
-
-
-
 	#define VK_W 0x57
 	#define VK_A 0x41
 	#define VK_S 0x53
@@ -2169,8 +2158,22 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 	}
 
+	// make sure the meshs around the player are loaded at startup
+	if(second) {
+		Vec2i pPos = getMeshCoordFromGlobalCoord(ad->activeCamPos);
+		for(int i = 0; i < 2; i++) {
+			for(int y = -1; y < 2; y++) {
+				for(int x = -1; x < 2; x++) {
+					Vec2i coord = pPos - vec2i(x,y);
 
+					VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
+					makeMesh(m, ad->voxelHash, ad->voxelHashSize);
+				}
+			}
 
+			threadQueueComplete(globalThreadQueue);
+		}
+	}
 
 	bool playerGroundCollision = false;
 	bool playerCeilingCollision = false;
@@ -2223,7 +2226,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 					for(int y = voxelMin.y; y < voxelMax.y; y++) {
 						for(int z = voxelMin.z; z < voxelMax.z; z++) {
 							Vec3i coord = vec3i(x,y,z);
-							uchar* block = getBlockFromVoxelCoord(ad->vMeshs, &ad->vMeshsSize, coord);
+							uchar* block = getBlockFromVoxelCoord(ad->voxelHash, ad->voxelHashSize, coord);
 
 							if(*block > 0) {
 								Vec3 cBox = getGlobalCoordFromVoxelCoord(coord);
@@ -2283,12 +2286,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 				// something went wrong and we reject the move, for now
 				if(collisionCount > 5) {
-					nPos = ad->playerPos;
+					// nPos = ad->playerPos;
 
 					nPos.z += 5;
-
-					ad->playerVel = vec3(0,0,0);
-					break;
+					// ad->playerVel = vec3(0,0,0);
+					// break;
 				}
 			}
 
@@ -2305,6 +2307,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 				float sideFriction = 0.0010f;
 				ad->playerVel.x *= pow(sideFriction,dt);
 				ad->playerVel.y *= pow(sideFriction,dt);
+			}
+
+			if(collisionCount > 5) {
+				ad->playerVel = vec3(0,0,0);
 			}
 
 			ad->playerPos = nPos;
@@ -2338,7 +2344,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				gp -= gUp*raycastThreshold;
 
 				Vec3 block = getBlockCenterFromGlobalCoord(gp);
-				uchar* blockType = getBlockFromGlobalCoord(ad->vMeshs, &ad->vMeshsSize, gp);
+				uchar* blockType = getBlockFromGlobalCoord(ad->voxelHash, ad->voxelHashSize, gp);
 
 				if(*blockType > 0) {
 					groundCollision = true;
@@ -2409,7 +2415,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			for(int i = 0; i < coordsSize; i++) {
 				Vec3 block = coords[i];
 
-				uchar* blockType = getBlockFromGlobalCoord(ad->vMeshs, &ad->vMeshsSize, block);
+				uchar* blockType = getBlockFromGlobalCoord(ad->voxelHash, ad->voxelHashSize, block);
 				Vec3 temp = getGlobalCoordFromVoxelCoord(getVoxelCoordFromGlobalCoord(block));
 
 				// Vec4 c;
@@ -2460,10 +2466,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			// if(input->mouseButtonPressed[0] && ad->playerMode) {
 			if(ad->playerMode) {
-				VoxelMesh* vm = getVoxelMesh(ad->vMeshs, &ad->vMeshsSize, getMeshCoordFromGlobalCoord(intersectionBox));
+				VoxelMesh* vm = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, getMeshCoordFromGlobalCoord(intersectionBox));
 
-				uchar* block = getBlockFromGlobalCoord(ad->vMeshs, &ad->vMeshsSize, intersectionBox);
-				uchar* lighting = getLightingFromGlobalCoord(ad->vMeshs, &ad->vMeshsSize, intersectionBox);
+				uchar* block = getBlockFromGlobalCoord(ad->voxelHash, ad->voxelHashSize, intersectionBox);
+				uchar* lighting = getLightingFromGlobalCoord(ad->voxelHash, ad->voxelHashSize, intersectionBox);
 
 				bool mouse1 = input->mouseButtonPressed[0];
 				bool mouse2 = input->mouseButtonPressed[1];
@@ -2486,7 +2492,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 						Vec2i mc = getMeshCoordFromGlobalCoord(intersectionBox + offset);
 						if(mc != currentCoord) {
-							VoxelMesh* edgeMesh = getVoxelMesh(ad->vMeshs, &ad->vMeshsSize, mc);
+							VoxelMesh* edgeMesh = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, mc);
 							edgeMesh->upToDate = false;
 							edgeMesh->meshUploaded = false;
 							edgeMesh->modifiedByUser = true;
@@ -2521,8 +2527,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 					} forBreak:
 
 					if(!collision) {
-						uchar* sideBlockType = getBlockFromVoxelCoord(ad->vMeshs, &ad->vMeshsSize, voxelSideBlock);
-						uchar* sideBlockLighting = getLightingFromVoxelCoord(ad->vMeshs, &ad->vMeshsSize, voxelSideBlock);
+						uchar* sideBlockType = getBlockFromVoxelCoord(ad->voxelHash, ad->voxelHashSize, voxelSideBlock);
+						uchar* sideBlockLighting = getLightingFromVoxelCoord(ad->voxelHash, ad->voxelHashSize, voxelSideBlock);
 
 						// *sideBlockType = 11;
 						*sideBlockType = ad->blockMenu[ad->blockMenuSelected];
@@ -2600,6 +2606,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 	setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 0, 2, view, proj, fogColor);
 
 
+
+
+
 #if 0
 	static bool redoWorld = true;
 	if(second) redoWorld = false;
@@ -2616,24 +2625,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 	redoWorld = false;
 #endif
 
-
 	int meshGenerationCount = 0;
+	int radCounter = 0;
 	int triangleCount = 0;
 
-	Vec2i playerMeshCoord = getMeshCoordFromGlobalCoord(ad->activeCamPos);
+	Vec2i pPos = getMeshCoordFromGlobalCoord(ad->activeCamPos);
 	int radius = VIEW_DISTANCE/VOXEL_X;
-
-	VoxelMesh* vms = ad->vMeshs;
-	int* vmsSize = &ad->vMeshsSize;
-
-	// Vec2i min = vec2i(playerMeshCoord.x-radius, playerMeshCoord.y-radius);
-	// Vec2i max = vec2i(playerMeshCoord.x+radius, playerMeshCoord.y+radius);
-	// for(int x = min.x; x < max.x+1; x++) {
-		// for(int y = min.y; y < max.y+1; y++) {
-
-	Vec2i pPos = vec2i(playerMeshCoord.x, playerMeshCoord.y);
-
-	int radCounter = 0;
+	// VoxelMesh* vms = ad->vMeshs;
+	// int* vmsSize = &ad->vMeshsSize;
 
 	// generate the meshes around the player in a spiral by drawing lines and rotating
 	// the directing every time we reach a corner
@@ -2661,22 +2660,16 @@ extern "C" APPMAINFUNCTION(appMain) {
 			radCounter++;
 
 			Vec2i coord = lPos;
-			// Vec2i coord = vec2i(x,y);
+			VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
 
-			VoxelMesh* m = getVoxelMesh(vms, vmsSize, coord);
-			// if(!m->upToDate) {
 			if(!m->meshUploaded) {
-				// if(meshGenerationCount < 1) {
-					makeMesh(m, vms, vmsSize);
-
-					// meshGenerationCount++;
-				// }
+				makeMesh(m, ad->voxelHash, ad->voxelHashSize);
+				meshGenerationCount++;
 
 				if(!m->modifiedByUser) continue;
 			}
 
-			// if(!m->upToDate) continue;
-
+			// frustum culling
 			Vec3 cp = ad->activeCamPos;
 			Vec3 cl = ad->activeCamLook;
 			Vec3 cu = ad->activeCamUp;
@@ -2746,6 +2739,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 			}
 		}
 	}
+
+
+
+
 
 
 

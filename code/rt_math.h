@@ -2305,3 +2305,4 @@ float polygonArea(Vec2* polygon, int count) {
 
 	return signedArea / 2;
 }
+

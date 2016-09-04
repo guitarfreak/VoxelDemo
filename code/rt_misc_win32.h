@@ -81,18 +81,23 @@ void threadInit(ThreadQueue* queue, int numOfThreads) {
     queue->readIndex = 0;
     queue->semaphore = CreateSemaphore(0, 0, 255, "Semaphore");
 
+    int id = GetCurrentThreadId();
+    globalThreadIds[0] = id;
+
+    HANDLE handle = GetCurrentThread();
+    // SetThreadPriority(handle, 2);
+    SetThreadPriority(handle, 1);
+
+
     for(int i = 0; i < numOfThreads; i++) {
         HANDLE thread = CreateThread(0, 0, threadProcess, (void*)(queue), 0, 0);
-        // BOOL WINAPI SetThreadPriority(
-        //   _In_ HANDLE hThread,
-        //   _In_ int    nPriority
-        // );
 
-        SetThreadPriority(thread, -2);
+        // SetThreadPriority(thread, -2);
+        SetThreadPriority(thread, -1);
 
         int id = GetThreadId(thread);
-        // queue->threadId[i] = id;
-        globalThreadIds[i] = id;
+        globalThreadIds[i+1] = id;
+
         if(!thread) printf("Could not create thread\n");
         CloseHandle(thread);
     }
