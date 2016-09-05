@@ -20,20 +20,18 @@ struct ThreadQueue {
     volatile uint readIndex;
     HANDLE semaphore;
 
-    // int threadId[16];
+    int threadIds[16];
 
     ThreadJob jobs[256];
     // ThreadJob jobs[1024];
 };
 
-int globalThreadIds[16];
-
-int getThreadQueueId() {
+int getThreadQueueId(ThreadQueue* queue) {
 	int currentId = GetCurrentThreadId();
 
 	int id = -1;
-	for(int i = 0; i < arrayCount(globalThreadIds); i++) {
-		if(globalThreadIds[i] == currentId) {
+	for(int i = 0; i < arrayCount(queue->threadIds); i++) {
+		if(queue->threadIds[i] == currentId) {
 			id = i;
 			break;
 		}
@@ -82,12 +80,11 @@ void threadInit(ThreadQueue* queue, int numOfThreads) {
     queue->semaphore = CreateSemaphore(0, 0, 255, "Semaphore");
 
     int id = GetCurrentThreadId();
-    globalThreadIds[0] = id;
+    queue->threadIds[0] = id;
 
     HANDLE handle = GetCurrentThread();
     // SetThreadPriority(handle, 2);
     SetThreadPriority(handle, 1);
-
 
     for(int i = 0; i < numOfThreads; i++) {
         HANDLE thread = CreateThread(0, 0, threadProcess, (void*)(queue), 0, 0);
@@ -96,7 +93,7 @@ void threadInit(ThreadQueue* queue, int numOfThreads) {
         SetThreadPriority(thread, -1);
 
         int id = GetThreadId(thread);
-        globalThreadIds[i+1] = id;
+        queue->threadIds[i+1] = id;
 
         if(!thread) printf("Could not create thread\n");
         CloseHandle(thread);
@@ -133,4 +130,9 @@ void threadQueueComplete(ThreadQueue* queue) {
     }
     InterlockedExchange(&queue->completionGoal, 0);
     InterlockedExchange(&queue->completionCount, 0);
+}
+
+int threadQueueOpenJobs(ThreadQueue* queue) {
+	int result = queue->completionGoal - queue->completionCount;
+	return result;
 }

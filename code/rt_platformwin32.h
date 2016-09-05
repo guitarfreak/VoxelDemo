@@ -129,34 +129,37 @@ void systemDataInit(SystemData* sd, HINSTANCE instance) {
 	sd->instance = instance;
 }
 
-LRESULT CALLBACK mainWindowCallBack(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
-    switch(message) {
-        case WM_DESTROY: {
-            PostMessage(window, message, wParam, lParam);
-        } break;
+// LRESULT CALLBACK mainWindowCallBack(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
+//     switch(message) {
+//         case WM_DESTROY: {
+//             PostMessage(window, message, wParam, lParam);
+//         } break;
 
-        case WM_CLOSE: {
-            PostMessage(window, message, wParam, lParam);
-        } break;
+//         case WM_CLOSE: {
+//             PostMessage(window, message, wParam, lParam);
+//         } break;
 
-        case WM_QUIT: {
-            PostMessage(window, message, wParam, lParam);
-        } break;
+//         case WM_QUIT: {
+//             PostMessage(window, message, wParam, lParam);
+//         } break;
 
-        default: {
-            return DefWindowProc(window, message, wParam, lParam);
-        } break;
-    }
+//         default: {
+//             return DefWindowProc(window, message, wParam, lParam);
+//         } break;
+//     }
 
-    return 1;
-}
+//     return 1;
+// }
+
+WNDPROC globalMainWindowCallBack;
 
 void initSystem(SystemData* systemData, WindowsData wData, uint style, int x, int y, int w, int h) {
 	systemData->windowsData = wData;
 
     WNDCLASS windowClass = {};
     windowClass.style = CS_OWNDC|CS_HREDRAW|CS_VREDRAW;
-    windowClass.lpfnWndProc = mainWindowCallBack;
+    // windowClass.lpfnWndProc = mainWindowCallBack;
+    windowClass.lpfnWndProc = globalMainWindowCallBack;
     windowClass.hInstance = systemData->instance;
     windowClass.lpszClassName = "CDownloaderClass";
     windowClass.hCursor = LoadCursor(0, IDC_ARROW);

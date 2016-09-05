@@ -5,7 +5,32 @@
 #include "rt_misc.h"
 #include "rt_hotload.h"
 
+
+#include "rt_misc_win32.h"
+
 MemoryBlock* globalMemory;
+
+LRESULT CALLBACK mainWindowCallBack(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
+    switch(message) {
+        case WM_DESTROY: {
+            PostMessage(window, message, wParam, lParam);
+        } break;
+
+        case WM_CLOSE: {
+            PostMessage(window, message, wParam, lParam);
+        } break;
+
+        case WM_QUIT: {
+            PostMessage(window, message, wParam, lParam);
+        } break;
+
+        default: {
+            return DefWindowProc(window, message, wParam, lParam);
+        } break;
+    }
+
+    return 1;
+}
 
 int CALLBACK WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR commandLine, int showCode) {
 
@@ -22,13 +47,19 @@ int CALLBACK WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR commandLi
 
 	WindowsData wData = windowsData(instance, prevInstance, commandLine, showCode);
 
+	ThreadQueue threadQueue;
+	threadInit(&threadQueue, 7);
+
     bool firstFrame = true;
     bool secondFrame = false;
     bool isRunning = true;
     while(isRunning) {
-        bool reload = updateDll(&hotloadDll);
+    	bool reload = false;
+    	if(threadQueue.completionCount == threadQueue.completionGoal)
+    		reload = updateDll(&hotloadDll);
+        // if(reload) Sleep(1000);
      	platform_appMain = (appMainType*)getDllFunction(&hotloadDll, "appMain");
-        platform_appMain(firstFrame, secondFrame, reload, &isRunning, globalMemory, wData);
+        platform_appMain(firstFrame, secondFrame, reload, &isRunning, globalMemory, wData, mainWindowCallBack, &threadQueue);
 
         secondFrame = false;
         if(firstFrame) secondFrame = true;

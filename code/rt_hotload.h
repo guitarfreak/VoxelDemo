@@ -74,6 +74,7 @@ WindowsData windowsData(HINSTANCE instance, HINSTANCE prevInstance, LPSTR comman
 	return wData;
 }
 
-#define APPMAINFUNCTION(name) void name(bool init, int second, bool reload, bool* isRunning, MemoryBlock* memoryBlock, WindowsData windowsData)
+struct ThreadQueue;
+#define APPMAINFUNCTION(name) void name(bool init, int second, bool reload, bool* isRunning, MemoryBlock* memoryBlock, WindowsData windowsData, WNDPROC mainWindowCallBack, ThreadQueue* threadQueue)
 typedef APPMAINFUNCTION(appMainType);
 appMainType* platform_appMain;

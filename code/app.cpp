@@ -34,7 +34,7 @@
 /*
 - Joysticks, Keyboard, Mouse, Xinput-DirectInput
 - Sound
-- Data Package - Streaming
+- Data Package - Streamingw
 - Expand Font functionality
 - Gui
 - create simpler windows.h
@@ -44,16 +44,14 @@
 - memory dynamic expansion
 - 32x32 voxel chunks
 - ballistic motion on jumping
+- round collision
 
 - advance timestep when window not in focus (stop game when not in focus)
 
-- blocks with different textures on each side
-- make meshbuffer size the right size
+- reduce number of thread queue pushes
+- insert and init mesh not thread proof, make sure every mesh is initialized before generating
 
 - make voxel drop in tutorial code for stb_voxel
-- reduce number of thread queue pushes
-
-- insert and init mesh not thread proof, make sure every mesh is initialized before generating
 
 //-------------------------------------
 //               BUGS
@@ -72,11 +70,15 @@
 
 */
 
-
 /*
-	- threading
 	- 32x32 gen chunks
-	- memory using malloc
+
+ 	- blocks with different textures on each side
+	- mak rect shader take 2d arrays to draw the voxel textures
+	- alpha for voxels
+	- trees
+
+	- in general, try to use every feature of stb_voxel at least once to see what it feels like
 */
 
 MemoryBlock* globalMemory;
@@ -927,12 +929,16 @@ float perlin2d(float x, float y, float freq, int depth)
 
 
 // #define VIEW_DISTANCE 4096 // 64
+// #define VIEW_DISTANCE 3072 // 32
+
+// #define VIEW_DISTANCE 2500 // 32
 // #define VIEW_DISTANCE 2048 // 32
-#define VIEW_DISTANCE 1024 // 16
+// #define VIEW_DISTANCE 1024 // 16
 // #define VIEW_DISTANCE 512  // 8
-// #define VIEW_DISTANCE 256 // 4
+#define VIEW_DISTANCE 256 // 4
 // #define VIEW_DISTANCE 128 // 2
 
+#define USE_MALLOC 0
 
 #define VOXEL_X 64
 #define VOXEL_Y 64
@@ -941,16 +947,15 @@ float perlin2d(float x, float y, float freq, int depth)
 #define VC_X 66
 #define VC_Y 66
 #define VC_Z 256
+#define VOXEL_CACHE_SIZE VC_X*VC_Y*VC_Z
 
 uchar* voxelCache[8];
 uchar* voxelLightingCache[8];
 
 #define voxelArray(x, y, z) (x)*VOXEL_Y*VOXEL_Z + (y)*VOXEL_Z + (z)
-#define voxelCache(x, y, z) (x)*VC_Y*VC_Z + (y)*VC_Z + (z)
+#define getVoxelCache(x, y, z) (x)*VC_Y*VC_Z + (y)*VC_Z + (z)
 
 struct VoxelMesh {
-	int isInitialized;
-
 	bool generated;
 	bool upToDate;
 	bool meshUploaded;
@@ -989,25 +994,27 @@ void initVoxelMesh(VoxelMesh* m, Vec2i coord) {
 	// m->meshBufferCapacity = kiloBytes(500);
 	// m->meshBufferCapacity = kiloBytes(180);
 	// m->meshBufferCapacity = kiloBytes(150);
-	m->meshBufferCapacity = kiloBytes(200);
-	m->meshBuffer = (char*)malloc(m->meshBufferCapacity);
 
-	m->texBufferCapacity = m->meshBufferCapacity/4;
-	m->texBuffer = (char*)malloc(m->texBufferCapacity);
+	if(USE_MALLOC) {
+		m->meshBufferCapacity = kiloBytes(200);
+		m->meshBuffer = (char*)malloc(m->meshBufferCapacity);
 
-	m->voxels = (uchar*)malloc(VOXEL_SIZE);
-	m->lighting = (uchar*)malloc(VOXEL_SIZE);
+		m->texBufferCapacity = m->meshBufferCapacity/4;
+		m->texBuffer = (char*)malloc(m->texBufferCapacity);
 
+		m->voxels = (uchar*)malloc(VOXEL_SIZE);
+		m->lighting = (uchar*)malloc(VOXEL_SIZE);
+	} else {
+		// m->meshBufferCapacity = kiloBytes(150);
+		m->meshBufferCapacity = kiloBytes(200);
+		m->meshBuffer = (char*)getPMemory(m->meshBufferCapacity);
 
-	// // m->meshBufferCapacity = kiloBytes(150);
-	// m->meshBufferCapacity = kiloBytes(300);
-	// m->meshBuffer = (char*)getPMemory(m->meshBufferCapacity);
+		m->texBufferCapacity = m->meshBufferCapacity/4;
+		m->texBuffer = (char*)getPMemory(m->texBufferCapacity);
 
-	// m->texBufferCapacity = m->meshBufferCapacity/4;
-	// m->texBuffer = (char*)getPMemory(m->texBufferCapacity);
-
-	// m->voxels = (uchar*)getPMemory(VOXEL_SIZE);
-	// m->lighting = (uchar*)getPMemory(VOXEL_SIZE);
+		m->voxels = (uchar*)getPMemory(VOXEL_SIZE);
+		m->lighting = (uchar*)getPMemory(VOXEL_SIZE);
+	}
 
 	glCreateBuffers(1, &m->bufferId);
 
@@ -1021,10 +1028,8 @@ struct VoxelNode {
 	VoxelMesh mesh;
 	VoxelNode* next;
 };
-// VoxelNode* globalVoxelHash[1024];
 
 VoxelMesh* getVoxelMesh(VoxelNode** voxelHash, int voxelHashSize, Vec2i coord) {
-
 	int hashIndex = mod(coord.x*9 + coord.y*23, voxelHashSize);
 
 	VoxelMesh* m = 0;
@@ -1080,6 +1085,7 @@ void generateVoxelMeshThreaded(void* data) {
 	    		// static int startXMod = randomInt(0,10000);
 	    		// static int startYMod = randomInt(0,10000);
 
+	    		// float height = perlin2d(gx+4000+startX, gy+4000+startY, 0.044f, 7);
 	    		float height = perlin2d(gx+4000+startX, gy+4000+startY, 0.004f, 7);
 
 	    		// float mod = perlin2d(gx+startXMod, gy+startYMod, 0.008f, 4);
@@ -1095,7 +1101,8 @@ void generateVoxelMeshThreaded(void* data) {
 	    		else if(height < 1.0f + mod) blockType = 15; // snow
 
 	    		height = clamp(height, 0, 1);
-	    		height = pow(height,3.5f);
+	    		// height = pow(height,3.5f);
+	    		height = pow(height,4.0f);
 
 	    		height = mapRange(height, 0, 1, 20, 200);
 
@@ -1120,9 +1127,6 @@ void generateVoxelMeshThreaded(void* data) {
 
 struct MakeMeshThreadedData {
 	VoxelMesh* m;
-	// VoxelMesh* vms;
-	// int* vmsSize;
-
 	VoxelNode** voxelHash;
 	int voxelHashSize;
 
@@ -1138,7 +1142,7 @@ void makeMeshThreaded(void* data) {
 	VoxelNode** voxelHash = d->voxelHash;
 	int voxelHashSize = d->voxelHashSize;
 
-	int cacheId = getThreadQueueId();
+	int cacheId = getThreadQueueId(globalThreadQueue);
 
 	// gather voxel data in radius and copy to cache
 	Vec2i coord = m->coord;
@@ -1167,8 +1171,8 @@ void makeMeshThreaded(void* data) {
 			for(int z = 0; z < VOXEL_Z; z++) {
 				for(int y = 0; y < h; y++) {
 					for(int x = 0; x < w; x++) {
-						voxelCache[cacheId][voxelCache(x+lPos.x, y+lPos.y, z+1)] = lm->voxels[(x+mPos.x)*VOXEL_Y*VOXEL_Z + (y+mPos.y)*VOXEL_Z + z];
-						voxelLightingCache[cacheId][voxelCache(x+lPos.x, y+lPos.y, z+1)] = lm->lighting[(x+mPos.x)*VOXEL_Y*VOXEL_Z + (y+mPos.y)*VOXEL_Z + z];
+						voxelCache[cacheId][getVoxelCache(x+lPos.x, y+lPos.y, z+1)] = lm->voxels[(x+mPos.x)*VOXEL_Y*VOXEL_Z + (y+mPos.y)*VOXEL_Z + z];
+						voxelLightingCache[cacheId][getVoxelCache(x+lPos.x, y+lPos.y, z+1)] = lm->lighting[(x+mPos.x)*VOXEL_Y*VOXEL_Z + (y+mPos.y)*VOXEL_Z + z];
 					}
 				}
 			}
@@ -1176,7 +1180,7 @@ void makeMeshThreaded(void* data) {
 			// make floor solid
 			for(int y = 0; y < VC_Y; y++) {
 				for(int x = 0; x < VC_X; x++) {
-					voxelCache[cacheId][voxelCache(x, y, 0)] = 1;
+					voxelCache[cacheId][getVoxelCache(x, y, 0)] = 1;
 				}
 			}
 		}
@@ -1186,6 +1190,14 @@ void makeMeshThreaded(void* data) {
 	stbvox_init_mesh_maker(&mm);
 	stbvox_input_description* inputDesc = stbvox_get_input_description(&mm);
 	*inputDesc = {};
+
+	if(USE_MALLOC) {
+		m->meshBufferCapacity = kiloBytes(500);
+		m->meshBuffer = (char*)malloc(m->meshBufferCapacity);
+
+		m->texBufferCapacity = m->meshBufferCapacity/4;
+		m->texBuffer = (char*)malloc(m->texBufferCapacity);
+	}
 
 	stbvox_set_buffer(&mm, 0, 0, m->meshBuffer, m->meshBufferCapacity);
 
@@ -1200,11 +1212,24 @@ void makeMeshThreaded(void* data) {
 
 	inputDesc->block_tex2 = (unsigned char*)tex2;
 
+
+	// unsigned char tex1[256];
+	// for(int i = 0; i < arrayCount(tex1)-1; i++) tex1[1+i] = 20+i;
+
+	// inputDesc->block_tex1 = (unsigned char*)tex1;
+
+
+	// unsigned char tLerp[256];
+	// for(int i = 0; i < arrayCount(tLerp)-1; i++) tLerp[1+i] = 1;
+	// inputDesc->block_texlerp = tLerp;
+
+
+
 	stbvox_set_input_stride(&mm, VC_Y*VC_Z,VC_Z);
 	stbvox_set_input_range(&mm, 0,0,0, VOXEL_X, VOXEL_Y, VOXEL_Z);
 
-	inputDesc->blocktype = &voxelCache[cacheId][voxelCache(1,1,1)];
-	inputDesc->lighting = &voxelLightingCache[cacheId][voxelCache(1,1,1)];
+	inputDesc->blocktype = &voxelCache[cacheId][getVoxelCache(1,1,1)];
+	inputDesc->lighting = &voxelLightingCache[cacheId][getVoxelCache(1,1,1)];
 
 	stbvox_set_default_mesh(&mm, 0);
 	int success = stbvox_make_mesh(&mm);
@@ -1223,17 +1248,12 @@ void makeMeshThreaded(void* data) {
 	d->inProgress = false;
 }
 
-MakeMeshThreadedData threadData[256];
-// MakeMeshThreadedData threadData[300];
-// MakeMeshThreadedData threadData[300];
-int threadDataCount;
+MakeMeshThreadedData* threadData;
 
 void makeMesh(VoxelMesh* m, VoxelNode** voxelHash, int voxelHashSize) {
-	// zeroMemory(voxelCache, VC_X*VC_Y*VC_Z);
-	// zeroMemory(voxelLightingCache, VC_X*VC_Y*VC_Z);
+	// int threadJobsMax = 20;
 
 	bool notAllMeshsAreReady = false;
-
 	Vec2i coord = m->coord;
 	for(int y = -1; y < 2; y++) {
 		for(int x = -1; x < 2; x++) {
@@ -1242,6 +1262,7 @@ void makeMesh(VoxelMesh* m, VoxelNode** voxelHash, int voxelHashSize) {
 
 			if(!lm->generated) {
 				if(!lm->activeGeneration && !threadQueueFull(globalThreadQueue)) {
+				// if(!lm->activeGeneration && threadQueueOpenJobs(globalThreadQueue) < threadJobsMax) {
 					atomicAdd(&lm->activeGeneration);
 					threadQueueAdd(globalThreadQueue, generateVoxelMeshThreaded, lm);
 				}
@@ -1255,9 +1276,10 @@ void makeMesh(VoxelMesh* m, VoxelNode** voxelHash, int voxelHashSize) {
 	if(!m->upToDate) {
 		if(!m->activeMaking) {
 			if(threadQueueFull(globalThreadQueue)) return;
+			// if(threadQueueOpenJobs(globalThreadQueue) < threadJobsMax) return;
 
 			MakeMeshThreadedData* data;
-			for(int i = 0; i < arrayCount(threadData); i++) {
+			for(int i = 0; i < 256; i++) {
 				if(!threadData[i].inProgress) {
 					threadData[i] = {m, voxelHash, voxelHashSize, true};
 					// data = threadData + i;
@@ -1278,6 +1300,11 @@ void makeMesh(VoxelMesh* m, VoxelNode** voxelHash, int voxelHashSize) {
 	if(STBVOX_CONFIG_MODE == 1) {
 		glNamedBufferData(m->texBufferId, m->textureBufferSizePerQuad*m->quadCount, m->texBuffer, GL_STATIC_DRAW);
 		glTextureBuffer(m->textureId, GL_RGBA8UI, m->texBufferId);
+	}
+
+	if(USE_MALLOC) {
+		free(m->meshBuffer);
+		free(m->texBuffer);
 	}
 
 	m->meshUploaded = true;
@@ -1528,9 +1555,6 @@ struct AppData {
 	Input input;
 	WindowSettings wSettings;
 
-	ThreadQueue lowQueue;
-	ThreadQueue highQueue;
-
 	GraphicsState graphicsState;
 	DrawCommandList commandList2d;
 	DrawCommandList commandList3d;
@@ -1594,6 +1618,10 @@ struct AppData {
 
 	VoxelNode* voxelHash[1024];
 	int voxelHashSize;
+	uchar* voxelCache[8];
+	uchar* voxelLightingCache[8];
+
+	MakeMeshThreadedData threadData[256];
 
 	GLuint voxelSamplers[3];
 	GLuint voxelTextures[3];
@@ -1652,7 +1680,6 @@ void getPointsFromQuadAndNormal(Vec3 p, Vec3 normal, float size, Vec3 verts[4]) 
 
 	float s2 = size*0.5f;
 
-	// Vec3 verts[4] = {};
 	for(int i = 0; i < 4; i++) {
 		Vec3 d = p;
 			 if(i == 0) { d.e[sAxis[0]] += -s2; d.e[sAxis[1]] += -s2; }
@@ -1671,19 +1698,32 @@ extern "C" APPMAINFUNCTION(appMain) {
 	HWND windowHandle = systemData->windowHandle;
 	WindowSettings* wSettings = &ad->wSettings;
 
-	globalThreadQueue = &ad->highQueue;
+	// globalThreadQueue = &ad->highQueue;
+	globalThreadQueue = threadQueue;
 
 	globalGraphicsState = &ad->graphicsState;
 
 	globalCommandList3d = &ad->commandList3d;
 	globalCommandList2d = &ad->commandList2d;
 
+	threadData = ad->threadData;
+
+	// HWND window, UINT message, WPARAM wParam, LPARAM lParam
+	// mainWindowCallBack(0,0,0,0);
+	globalMainWindowCallBack = mainWindowCallBack;
+
+
+	for(int i = 0; i < 8; i++) {
+		voxelCache[i] = ad->voxelCache[i];
+		voxelLightingCache[i] = ad->voxelLightingCache[i];
+	}
+
 	if(init) {
 		getPMemory(sizeof(AppData));
 		*ad = {};
 
 		// threadInit(globalThreadQueue, 3);
-		threadInit(globalThreadQueue, 7);
+		// threadInit(globalThreadQueue, 7);
 
 		ad->dt = 1/(float)60;
 
@@ -1702,7 +1742,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->fboRes = vec2i(0, 120);
 		ad->useNativeRes = true;
 		ad->nearPlane = 0.1f;
-		ad->farPlane = 2000;
+		// ad->farPlane = 2000;
+		ad->farPlane = 3000;
 
 
 		// DEVMODE devMode;
@@ -1904,16 +1945,26 @@ extern "C" APPMAINFUNCTION(appMain) {
 			*ad->voxelHash[i] = {};
 		}
 
-		for(int i = 0; i < 8; i++) {
-			voxelCache[i] = (uchar*)getPMemory(VC_X*VC_Y*VC_Z);
-			voxelLightingCache[i] = (uchar*)getPMemory(VC_X*VC_Y*VC_Z);
+		for(int i = 0; i < arrayCount(ad->threadData); i++) {
+			ad->threadData[i] = {};
+		} 
+
+		for(int i = 0; i < arrayCount(ad->voxelCache); i++) {
+			ad->voxelCache[i] = (uchar*)getPMemory(sizeof(uchar)*VOXEL_CACHE_SIZE);
+			ad->voxelLightingCache[i] = (uchar*)getPMemory(sizeof(uchar)*VOXEL_CACHE_SIZE);
 		}
 
 
-		for(int i = 0; i < arrayCount(threadData); i++) {
-			threadData[i] = {};
-		} 
-		threadDataCount = 0;
+		#if 0
+		int radius = 10;
+		for(int y = -radius; y < radius; y++) {
+			for(int x = -radius; x < radius; x++) {
+				Vec2i coord = vec2i(x,y);
+				getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
+			}
+		}
+		#endif
+
 
 		// ad->playerPos = vec3(35.5f,35.3f,30);
 		ad->playerPos = vec3(0,0,0);
@@ -2609,20 +2660,30 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-#if 0
-	static bool redoWorld = true;
-	if(second) redoWorld = false;
-	if(redoWorld) {
-		for(int i = 0; i < ad->vMeshsSize; i++) {
-			ad->vMeshs[i].generated = false;
-			ad->vMeshs[i].upToDate = false;
-			startX = randomInt(0, 100000);
-			startY = randomInt(0, 100000);
-			startXMod = randomInt(0, 100000);
-			startYMod = randomInt(0, 100000);
+#if 1
+	if(reload) {
+		// for(int i = 0; i < ad->vMeshsSize; i++) {
+			// ad->vMeshs[i].generated = false;
+			// ad->vMeshs[i].upToDate = false;
+
+			// startX = randomInt(0, 100000);
+			// startXMod = randomInt(0, 100000);
+			// startYMod = randomInt(0, 100000);
+		// }
+
+		int radius = VIEW_DISTANCE/VOXEL_X;
+
+		for(int y = -radius; y < radius; y++) {
+			for(int x = -radius; x < radius; x++) {
+				Vec2i coord = vec2i(y, x);
+				// Vec2i coord = vec2i(0,0);	
+				VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
+				m->upToDate = false;
+				m->meshUploaded = false;
+			}
 		}
+		return;
 	}
-	redoWorld = false;
 #endif
 
 	int meshGenerationCount = 0;
@@ -2794,6 +2855,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 	dcText({fillString("Vec  : (%f,%f,%f)", PVEC3(ad->playerVel)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
 	dcText({fillString("Acc  : (%f,%f,%f)", PVEC3(ad->playerAcc)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
 	dcText({fillString("Quads: (%i)", triangleCount), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
+
+	dcText({fillString("Quads: (%i %i)", (int)input->mouseButtonDown[0], (int)input->mouseButtonDown[1]), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
+	if(input->keysDown[VK_W])
+	dcText({fillString("W", (int)input->mouseButtonDown[1]), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
 
 
 
