@@ -58,6 +58,8 @@
 - change bubblesort to mergesort\radixsort
 - implement sun and clouds that block beams of light
 
+- setup proper blocktype enums and properties
+
 //-------------------------------------
 //               BUGS
 //-------------------------------------
@@ -72,7 +74,7 @@
 - gpu fucks up at some point making swapBuffers alternates between time steps 
   which makes the game stutter, restart is required
 - game input gets stuck when buttons are pressed right at the start
-
+- sort key assert firing randomly
 */
 
 /*
@@ -80,7 +82,6 @@
 
  	- blocks with different textures on each side
 	- mak rect shader take 2d arrays to draw the voxel textures
-	- alpha for voxels
 	- trees
 
 	- in general, try to use every feature of stb_voxel at least once to see what it feels like
@@ -935,6 +936,65 @@ float perlin2d(float x, float y, float freq, int depth)
 
 
 
+enum BlockTypes {
+	BT_None = 0,
+	BT_Water,
+	BT_Sand,
+	BT_Grass,
+	BT_Stone,
+	BT_Snow,
+	// BT_Trunk,
+	// BT_Leaves,
+	// BT_Water,
+	// BT_Water,
+	// BT_Water,
+
+	BT_Size,
+};
+
+enum BlockTextures {
+	BX_None = 0,
+	BX_Water,
+	BX_Sand,
+	BX_GrassTop, BX_GrassSide, BX_GrassBottom,
+	BX_Stone,
+	BX_Snow,
+
+	BX_Size,
+};
+
+const char* textureFilePaths[BX_Size] = {
+	"..\\data\\minecraft textures\\none.png",
+	"..\\data\\minecraft textures\\water.png",
+	"..\\data\\minecraft textures\\sand.png",
+	"..\\data\\minecraft textures\\grass_top.png",
+	"..\\data\\minecraft textures\\grass_side.png",
+	"..\\data\\minecraft textures\\grass_bottom.png",
+	"..\\data\\minecraft textures\\stone.png",
+	"..\\data\\minecraft textures\\snow.png",
+};
+
+#define allTexSame(t) t,t,t,t,t,t
+
+uchar texture2[BT_Size] = {0,1,1,1,1,1};
+uchar texture1Faces[BT_Size][6] = {
+	{0,0,0,0,0,0},
+	{allTexSame(BX_Water)},
+	{allTexSame(BX_Sand)},
+	{BX_GrassSide, BX_GrassSide, BX_GrassSide, BX_GrassSide, BX_GrassTop, BX_GrassBottom},
+	{allTexSame(BX_Stone)},
+	{allTexSame(BX_Snow)},
+};
+uchar geometry[BT_Size] = {
+	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_empty,0,0),
+	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_transp,0,0),
+	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_solid,0,0),
+	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_solid,0,0),
+	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_solid,0,0),
+	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_solid,0,0),
+};
+uchar meshSelection[BT_Size] = {0,1,0,0,0,0};
+
 // #define VIEW_DISTANCE 4096 // 64
 // #define VIEW_DISTANCE 3072 // 32
 
@@ -979,6 +1039,8 @@ struct VoxelMesh {
 	float transform[3][3];
 	int quadCount;
 
+	int quadCountTrans;
+
 	char* meshBuffer;
 	int meshBufferSize;
 	int meshBufferCapacity;
@@ -990,6 +1052,14 @@ struct VoxelMesh {
 	uint textureId;
 	uint texBufferId;
 
+	char* meshBufferTrans;
+	int meshBufferTransCapacity;
+	uint bufferTransId;
+	char* texBufferTrans;
+	int texBufferTransCapacity;
+	uint textureTransId;
+	uint texBufferTransId;
+
 	int bufferSizePerQuad;
 	int textureBufferSizePerQuad;
 };
@@ -998,36 +1068,34 @@ void initVoxelMesh(VoxelMesh* m, Vec2i coord) {
 	*m = {};
 	m->coord = coord;
 
-	// m->meshBufferCapacity = kiloBytes(500);
-	// m->meshBufferCapacity = kiloBytes(180);
-	// m->meshBufferCapacity = kiloBytes(150);
-
 	if(USE_MALLOC) {
-		m->meshBufferCapacity = kiloBytes(200);
-		m->meshBuffer = (char*)malloc(m->meshBufferCapacity);
-
-		m->texBufferCapacity = m->meshBufferCapacity/4;
-		m->texBuffer = (char*)malloc(m->texBufferCapacity);
-
 		m->voxels = (uchar*)malloc(VOXEL_SIZE);
 		m->lighting = (uchar*)malloc(VOXEL_SIZE);
 	} else {
 		// m->meshBufferCapacity = kiloBytes(150);
 		m->meshBufferCapacity = kiloBytes(200);
 		m->meshBuffer = (char*)getPMemory(m->meshBufferCapacity);
-
 		m->texBufferCapacity = m->meshBufferCapacity/4;
 		m->texBuffer = (char*)getPMemory(m->texBufferCapacity);
+
+		m->meshBufferTransCapacity = kiloBytes(200);
+		m->meshBufferTrans = (char*)getPMemory(m->meshBufferTransCapacity);
+		m->texBufferTransCapacity = m->meshBufferTransCapacity/4;
+		m->texBufferTrans = (char*)getPMemory(m->texBufferTransCapacity);
 
 		m->voxels = (uchar*)getPMemory(VOXEL_SIZE);
 		m->lighting = (uchar*)getPMemory(VOXEL_SIZE);
 	}
 
 	glCreateBuffers(1, &m->bufferId);
+	glCreateBuffers(1, &m->bufferTransId);
 
 	if(STBVOX_CONFIG_MODE == 1) {
 		glCreateBuffers(1, &m->texBufferId);
 		glCreateTextures(GL_TEXTURE_BUFFER, 1, &m->textureId);
+
+		glCreateBuffers(1, &m->texBufferTransId);
+		glCreateTextures(GL_TEXTURE_BUFFER, 1, &m->textureTransId);
 	}
 }
 
@@ -1070,14 +1138,11 @@ int startY = 47850;
 int startXMod = 58000;
 int startYMod = 68000;
 
-void generateVoxelMeshThreaded(void* data) {
+void s(void* data) {
 	VoxelMesh* m = (VoxelMesh*)data;
 	Vec2i coord = m->coord;
 
 	if(!m->generated) {
-		// zeroMemory(m->voxels, VOXEL_SIZE);
-		// memSet(m->lighting, 255, VOXEL_SIZE);
-
 		Vec3i min = vec3i(0,0,0);
 		Vec3i max = vec3i(VOXEL_X,VOXEL_Y,VOXEL_Z);
 
@@ -1108,17 +1173,15 @@ void generateVoxelMeshThreaded(void* data) {
 	    		int blockType;
 	    		// 	 if(height < 0.35f) blockType = 10; // water
 	    		// else if(height < 0.4f + mod) blockType = 11; // sand
-	    		if(height < 0.4f + mod) blockType = 11; // sand
-	    		else if(height < 0.6f + mod) blockType = 12; // grass
-	    		else if(height < 0.8f + mod) blockType = 13; // stone
-	    		else if(height < 1.0f + mod) blockType = 14; // snow
+	    		if(height < 0.4f + mod) blockType = BT_Sand; // sand
+	    		else if(height < 0.6f + mod) blockType = BT_Grass; // grass
+	    		else if(height < 0.8f + mod) blockType = BT_Stone; // stone
+	    		else if(height <= 1.0f + mod) blockType = BT_Snow; // snow
 
 	    		float heightPercent = height;
-
 	    		height = clamp(height, 0, 1);
 	    		// height = pow(height,3.5f);
 	    		height = pow(height,4.0f);
-
 	    		height = mapRange(height, 0, 1, 20, 200);
 
 	    		for(int z = 0; z < height; z++) {
@@ -1134,27 +1197,16 @@ void generateVoxelMeshThreaded(void* data) {
 	    		int waterLevel = 22;
 	    		if(height < waterLevel) {
 	    			for(int z = height; z < waterLevel; z++) {
-	    				m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 10;
-	    				m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + ((int)height)] = 180;
+	    				m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = BT_Water;
+
+	    				int lightValue;
+	    				if(z == 20)  lightValue = 50;
+	    				else if(z == 21) lightValue = 150;
+	    				m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = lightValue;
 	    			}
 	    		}
 	    	}
 	    }
-
-	    // for(int y = min.y; y < max.y; y++) {
-	    // 	for(int x = min.x; x < max.x; x++) {
-	    // 		int gx = (coord.x*VOXEL_X)+x;
-	    // 		int gy = (coord.y*VOXEL_Y)+y;
-
-	    // 		float height = mapRange(0.4f, 0, 1, 20, 200);
-
-	    // 		for(int z = 0; z < height; z++) {
-	    // 			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = blockType;
-	    // 			m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 0;
-	    // 		}
-	    // 	}
-	    // }
-
 	}
 
 	atomicSub(&m->activeGeneration);
@@ -1216,7 +1268,7 @@ void makeMeshThreaded(void* data) {
 			// make floor solid
 			for(int y = 0; y < VC_Y; y++) {
 				for(int x = 0; x < VC_X; x++) {
-					voxelCache[cacheId][getVoxelCache(x, y, 0)] = 1;
+					voxelCache[cacheId][getVoxelCache(x, y, 0)] = BT_Sand; // change
 				}
 			}
 		}
@@ -1230,39 +1282,38 @@ void makeMeshThreaded(void* data) {
 	if(USE_MALLOC) {
 		m->meshBufferCapacity = kiloBytes(500);
 		m->meshBuffer = (char*)malloc(m->meshBufferCapacity);
-
 		m->texBufferCapacity = m->meshBufferCapacity/4;
 		m->texBuffer = (char*)malloc(m->texBufferCapacity);
+
+		m->meshBufferTransCapacity = kiloBytes(500);
+		m->meshBufferTrans = (char*)malloc(m->meshBufferTransCapacity);
+		m->texBufferTransCapacity = m->meshBufferTransCapacity/4;
+		m->texBufferTrans = (char*)malloc(m->texBufferTransCapacity);
 	}
 
 	stbvox_set_buffer(&mm, 0, 0, m->meshBuffer, m->meshBufferCapacity);
-
 	if(STBVOX_CONFIG_MODE == 1) {
 		stbvox_set_buffer(&mm, 0, 1, m->texBuffer, m->texBufferCapacity);
 	}
 
-	int count = stbvox_get_buffer_count(&mm);
+	stbvox_set_buffer(&mm, 1, 0, m->meshBufferTrans, m->meshBufferTransCapacity);
+	if(STBVOX_CONFIG_MODE == 1) {
+		stbvox_set_buffer(&mm, 1, 1, m->texBufferTrans, m->texBufferTransCapacity);
+	}
+
+	// int count = stbvox_get_buffer_count(&mm);
 
 
 
-	unsigned char tex1[256];
-	for(int i = 1; i < arrayCount(tex1)-1; i++) tex1[i] = i;
-	inputDesc->block_tex1 = (unsigned char*)tex1;
+	inputDesc->block_tex2 = texture2;
+	inputDesc->block_tex1_face = texture1Faces;
+	inputDesc->block_geometry = geometry;
+	inputDesc->block_selector = meshSelection;
 
-	unsigned char tex2[256];
-	for(int i = 1; i < arrayCount(tex2)-1; i++) tex2[i] = i;
-	inputDesc->block_tex2 = (unsigned char*)tex2;
-
-	unsigned char tLerp[256] = {};
-	// for(int i = 1; i < arrayCount(tLerp)-1; i++) tLerp[i] = 200;
+	unsigned char tLerp[50] = {};
+	// for(int i = 1; i < arrayCount(tLerp)-1; i++) tLerp[i] = 6;
 	// tLerp[10] = 4;
 	inputDesc->block_texlerp = tLerp;
-
-	unsigned char geometry[256] = {};
-	for(int i = 1; i < arrayCount(geometry)-1; i++) geometry[i] = STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_solid,0,0);
-	geometry[6] = STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_transp,0,0);
-	geometry[10] = STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_transp,0,0);
-	inputDesc->block_geometry = geometry;
 
 
 
@@ -1272,19 +1323,21 @@ void makeMeshThreaded(void* data) {
 	inputDesc->blocktype = &voxelCache[cacheId][getVoxelCache(1,1,1)];
 	inputDesc->lighting = &voxelLightingCache[cacheId][getVoxelCache(1,1,1)];
 
-
-
-	stbvox_set_default_mesh(&mm, 0);
+	// stbvox_set_default_mesh(&mm, 0);
 	int success = stbvox_make_mesh(&mm);
 
 	stbvox_set_mesh_coordinates(&mm, coord.x*VOXEL_X, coord.y*VOXEL_Y,0);
 
 	stbvox_get_transform(&mm, m->transform);
 	float bounds [2][3]; stbvox_get_bounds(&mm, bounds);
+
 	m->quadCount = stbvox_get_quad_count(&mm, 0);
+	m->quadCountTrans = stbvox_get_quad_count(&mm, 1);
 
 	m->bufferSizePerQuad = stbvox_get_buffer_size_per_quad(&mm, 0);
 	m->textureBufferSizePerQuad = stbvox_get_buffer_size_per_quad(&mm, 1);
+
+
 
 	atomicSub(&m->activeMaking);
 	m->upToDate = true;
@@ -1348,6 +1401,19 @@ void makeMesh(VoxelMesh* m, VoxelNode** voxelHash, int voxelHashSize) {
 	if(USE_MALLOC) {
 		free(m->meshBuffer);
 		free(m->texBuffer);
+	}
+
+	glNamedBufferData(m->bufferTransId, m->bufferSizePerQuad*m->quadCountTrans, m->meshBufferTrans, GL_STATIC_DRAW);
+	glBindBuffer(GL_ARRAY_BUFFER, m->bufferTransId);
+
+	if(STBVOX_CONFIG_MODE == 1) {
+		glNamedBufferData(m->texBufferTransId, m->textureBufferSizePerQuad*m->quadCountTrans, m->texBufferTrans, GL_STATIC_DRAW);
+		glTextureBuffer(m->textureTransId, GL_RGBA8UI, m->texBufferTransId);
+	}
+
+	if(USE_MALLOC) {
+		free(m->meshBufferTrans);
+		free(m->texBufferTrans);
 	}
 
 	m->meshUploaded = true;
@@ -1588,6 +1654,32 @@ void drawVoxelMesh(VoxelMesh* m) {
 	glBindProgramPipeline(globalGraphicsState->pipelineIds.programVoxel);
 
 	glDrawArrays(GL_QUADS, 0, m->quadCount*4);
+
+
+
+
+	if(STBVOX_CONFIG_MODE == 0) {
+		// interleaved buffer - 2 uints in a row -> 8 bytes stride
+		glBindBuffer(GL_ARRAY_BUFFER, m->bufferTransId);
+		int vaLoc = glGetAttribLocation(globalGraphicsState->pipelineIds.voxelVertex, "attr_vertex");
+		glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 8, (void*)0);
+		glEnableVertexAttribArray(vaLoc);
+		int fLoc = glGetAttribLocation(globalGraphicsState->pipelineIds.voxelVertex, "attr_face");
+		glVertexAttribIPointer(fLoc, 4, GL_UNSIGNED_BYTE, 8, (void*)4);
+		glEnableVertexAttribArray(fLoc);
+
+	} else {
+		glBindBuffer(GL_ARRAY_BUFFER, m->bufferTransId);
+		int vaLoc = glGetAttribLocation(globalGraphicsState->pipelineIds.voxelVertex, "attr_vertex");
+		glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 4, (void*)0);
+		glEnableVertexAttribArray(vaLoc);
+	}
+
+	globalGraphicsState->textureUnits[2] = m->textureTransId;
+	glBindTextures(0,16,globalGraphicsState->textureUnits);
+	glBindSamplers(0,16,globalGraphicsState->samplerUnits);
+	
+	glDrawArrays(GL_QUADS, 0, m->quadCountTrans*4);
 }
 
 void getCamData(Vec3 look, Vec2 rot, Vec3 gUp, Vec3* cLook, Vec3* cRight, Vec3* cUp) {
@@ -1955,51 +2047,74 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		char* fullPath = getTString(234);
 
-		texId = ad->voxelTextures[0];
-		glTextureStorage3D(texId, 6, internalFormat, width, height, texCount);
-		for(int tc = 0; tc < texCount; tc++) {
-			unsigned char* stbData;
-			int x,y,n;
+		// texId = ad->voxelTextures[0];
+		// glTextureStorage3D(texId, 6, internalFormat, width, height, texCount);
+		// for(int tc = 0; tc < texCount; tc++) {
+		// 	unsigned char* stbData;
+		// 	int x,y,n;
 
-			strClear(fullPath);
-			strAppend(fullPath, p);
-			strAppend(fullPath, files[tc]);
-			stbData = stbi_load(fullPath, &x, &y, &n, 4);
+		// 	strClear(fullPath);
+		// 	strAppend(fullPath, p);
+		// 	strAppend(fullPath, files[tc]);
+		// 	stbData = stbi_load(fullPath, &x, &y, &n, 4);
 
-			if(x == width && y == height) {
-				glTextureSubImage3D(texId, 0, 0, 0, tc, x, y, 1, format, GL_UNSIGNED_BYTE, stbData);
-				glGenerateTextureMipmap(texId);
+		// 	if(x == width && y == height) {
+		// 		glTextureSubImage3D(texId, 0, 0, 0, tc, x, y, 1, format, GL_UNSIGNED_BYTE, stbData);
+		// 		glGenerateTextureMipmap(texId);
 
-				ad->textures[ad->texCount++] = loadTexture(stbData, x, y, 2, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+		// 		ad->textures[ad->texCount++] = loadTexture(stbData, x, y, 2, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+		// 	}
+
+		// 	stbi_image_free(stbData);
+		// }
+
+
+		// glTextureStorage3D(ad->voxelTextures[0], 6, GL_RGBA8, 32, 32, BX_Size);
+
+		// for(int layerIndex = 0; layerIndex < BX_Size; layerIndex++) {
+		// 	char* filePath;
+		// 	if(layerIndex == 0) filePath = "..\\data\\minecraft textures\\none.png";
+		// 	else if(layerIndex == 1) filePath = "..\\data\\minecraft textures\\water.png";
+		// 	else if(layerIndex == 2) filePath = "..\\data\\minecraft textures\\sand.png";
+		// 	else if(layerIndex == 3) filePath = "..\\data\\minecraft textures\\grass.png";
+		// 	else if(layerIndex == 4) filePath = "..\\data\\minecraft textures\\stone.png";
+		// 	else if(layerIndex == 5) filePath = "..\\data\\minecraft textures\\snow.png";
+
+		// 	int x,y,n;
+		// 	unsigned char* stbData = stbi_load(filePath, &x, &y, &n, 4);
+			
+		// 	glTextureSubImage3D(ad->voxelTextures[0], 0, 0, 0, layerIndex, x, y, 1, GL_RGBA, GL_UNSIGNED_BYTE, stbData);
+		// 	glGenerateTextureMipmap(ad->voxelTextures[0]);
+
+		// 	stbi_image_free(stbData);
+		// }
+
+			glTextureStorage3D(ad->voxelTextures[0], 6, GL_RGBA8, 32, 32, BX_Size);
+
+			for(int layerIndex = 0; layerIndex < BX_Size; layerIndex++) {
+				int x,y,n;
+				unsigned char* stbData = stbi_load(textureFilePaths[layerIndex], &x, &y, &n, 4);
+				
+				glTextureSubImage3D(ad->voxelTextures[0], 0, 0, 0, layerIndex, x, y, 1, GL_RGBA, GL_UNSIGNED_BYTE, stbData);
+				glGenerateTextureMipmap(ad->voxelTextures[0]);
+
+				stbi_image_free(stbData);
 			}
 
-			stbi_image_free(stbData);
-		}
 
-		texId = ad->voxelTextures[1];
-		glTextureStorage3D(texId, 6, internalFormat, width, height, texCount);
-		for(int tc = 0; tc < 1; tc++) {
-			unsigned char* stbData;
-			int x,y,n;
+		// ad->textures[ad->texCount++] = loadTexture("..\\data\\minecraft textures\\water.png", x, y, 2, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
 
-			strClear(fullPath);
-			strAppend(fullPath, p);
-			strAppend(fullPath, files[tc]);
-			stbData = stbi_load(fullPath, &x, &y, &n, 4);
 
-			bool stop = false;
-			if(x == width && y == height) {
-				for(int i = 0; i < texCount; i++) {
-					glTextureSubImage3D(texId, 0, 0, 0, i, x, y, 1, format, GL_UNSIGNED_BYTE, stbData);
-					glGenerateTextureMipmap(texId);
-				}
-				stop = true;
-			}
+		glTextureStorage3D(ad->voxelTextures[1], 6, GL_RGBA8, 32, 32, 1);
 
-			stbi_image_free(stbData);
+		int x,y,n;
+		unsigned char* stbData = stbi_load("..\\data\\minecraft textures\\test.png", &x, &y, &n, 4);
+		
+		glTextureSubImage3D(ad->voxelTextures[1], 0, 0, 0, 0, x, y, 1, GL_RGBA, GL_UNSIGNED_BYTE, stbData);
+		glGenerateTextureMipmap(ad->voxelTextures[1]);
 
-			if(stop) break;
-		}
+		stbi_image_free(stbData);
+
 
 
 
@@ -2659,6 +2774,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 						// *sideBlockType = 11;
 						*sideBlockType = ad->blockMenu[ad->blockMenuSelected];
 						*sideBlockLighting = 0;
+						// if(*sideBlockType == 6) {
+							// *sideBlockLighting = 255;
+						// }
 					}
 				// } else {
 				} else if(removeBlock) {
@@ -2768,7 +2886,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				m->upToDate = false;
 				m->meshUploaded = false;
 
-				m->generated = false;
+				// m->generated = fwalse;
 			}
 		}
 		return;
@@ -2899,8 +3017,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 	float* distanceList = (float*)getTMemory(sizeof(float)*2000);
 	int distanceListSize = 0;
 
-	dcCube({vec3(0,0,30), vec3(2,2,2), vec4(1,1,0,1), 0, vec3(0.0f)});
-	dcCube({vec3(VOXEL_X,VOXEL_Y,30), vec3(2,2,2), vec4(1,0,1,1), 0, vec3(0.0f)});
+	// dcCube({vec3(0,0,30), vec3(2,2,2), vec4(1,1,0,1), 0, vec3(0.0f)});
+	// dcCube({vec3(VOXEL_X,VOXEL_Y,30), vec3(2,2,2), vec4(1,0,1,1), 0, vec3(0.0f)});
 
 	Vec3 mc = getGlobalMeshCoord(vec2i(0,0));
 	dcCube({mc, vec3(2,2,2), vec4(1,0,0,1), 0, vec3(0.0f)});
@@ -2961,7 +3079,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 	dcCube({vec3(0,0,40), vec3(10,1,10), vec4(1,0,0,0.2f), 0, vec3(0.0f)});
-
 	dcCube({vec3(0,-10,40), vec3(10,1,10), vec4(0,1,0,0.2f), 0, vec3(0.0f)});
 
 

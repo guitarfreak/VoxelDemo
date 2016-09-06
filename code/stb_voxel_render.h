@@ -221,6 +221,8 @@
 //   license: you are granted a perpetual, irrevocable license to copy, modify,
 //   publish, and distribute this file as you see fit.
 
+#define BSELECTOR 1
+
 #ifndef INCLUDE_STB_VOXEL_RENDER_H
 #define INCLUDE_STB_VOXEL_RENDER_H
 
@@ -2905,6 +2907,11 @@ static void stbvox_make_mesh_for_block(stbvox_mesh_maker *mm, stbvox_pos pos, in
    if (mm->input.selector)
       mesh = mm->input.selector[v_off];
 
+   #ifdef BSELECTOR
+   if (mm->input.block_selector)
+      mesh = mm->input.block_selector[mm->input.blocktype[v_off]];
+   #endif
+
    // check if we're going off the end
    if (mm->output_cur[mesh][0] + mm->output_size[mesh][0]*6 > mm->output_end[mesh][0]) {
       mm->full = 1;
@@ -3010,7 +3017,25 @@ static void stbvox_make_mesh_for_block_with_geo(stbvox_mesh_maker *mm, stbvox_po
             nrot[5] = (mm->input.selector[v_off -      1] >> 4) & 3;
          }
          #endif
-      } else {
+      } 
+
+      #ifdef BSELECTOR
+      else if (mm->input.block_selector) {
+         #ifndef STBVOX_CONFIG_ROTATION_IN_LIGHTING
+         if (mm->input.packed_compact == NULL) {
+            rot     = (mm->input.block_selector[bt    ] >> 4) & 3;
+            nrot[0] = (mm->input.block_selector[nbt[0]] >> 4) & 3;
+            nrot[1] = (mm->input.block_selector[nbt[1]] >> 4) & 3;
+            nrot[2] = (mm->input.block_selector[nbt[2]] >> 4) & 3;
+            nrot[3] = (mm->input.block_selector[nbt[3]] >> 4) & 3;
+            nrot[4] = (mm->input.block_selector[nbt[4]] >> 4) & 3;
+            nrot[5] = (mm->input.block_selector[nbt[5]] >> 4) & 3;
+         }
+         #endif
+      }       
+      #endif 
+
+      else {
          #ifndef STBVOX_CONFIG_ROTATION_IN_LIGHTING
          if (mm->input.packed_compact == NULL) {
             rot = (geo>>4)&3;
@@ -3114,6 +3139,11 @@ static void stbvox_make_mesh_for_block_with_geo(stbvox_mesh_maker *mm, stbvox_po
    if (mm->input.selector)
       mesh = mm->input.selector[v_off];
 
+   #ifdef BSELECTOR
+   if (mm->input.block_selector)
+     mesh = mm->input.block_selector[bt];
+   #endif
+
    if (geo <= STBVOX_GEOM_ceil_slope_north_is_bottom) {
       // this is the simple case, we can just use regular block gen with special vmesh calculated with vheight
       stbvox_mesh_vertex basevert;
@@ -3135,6 +3165,11 @@ static void stbvox_make_mesh_for_block_with_geo(stbvox_mesh_maker *mm, stbvox_po
       if (mm->input.selector) {
          mesh = mm->input.selector[v_off];
       }
+
+      #ifdef BSELECTOR
+      if (mm->input.block_selector)
+        mesh = mm->input.block_selector[bt];
+      #endif
 
       // check if we're going off the end
       if (mm->output_cur[mesh][0] + mm->output_size[mesh][0]*6 > mm->output_end[mesh][0]) {
@@ -3333,6 +3368,12 @@ static void stbvox_make_mesh_for_block_with_geo(stbvox_mesh_maker *mm, stbvox_po
       } else if (mm->input.selector) {
          rotate.block = rotate.overlay = rotate.ecolor = simple_rot;
       }
+      
+      #ifdef BSELECTOR
+      else if (mm->input.selector) {
+        rotate.block = rotate.overlay = rotate.ecolor = simple_rot;
+      }
+      #endif
 
       if ((visible_faces & (1 << STBVOX_FACE_north)) || (extreme && (ht[2] == 3 || ht[3] == 3)))
          stbvox_make_mesh_for_face(mm, rotate, STBVOX_FACE_north, v_off, pos, basevert, vmesh[STBVOX_FACE_north], mesh, STBVOX_FACE_north);
@@ -3356,6 +3397,14 @@ static void stbvox_make_mesh_for_block_with_geo(stbvox_mesh_maker *mm, stbvox_po
          mesh &= 15;
       }
 
+      #ifdef BSELECTOR
+      if (mm->input.block_selector) {
+         mesh = mm->input.block_selector[bt];
+         simple_rot = mesh >> 4;
+         mesh &= 15;
+      }
+      #endif 
+
       // check if we're going off the end
       if (mm->output_cur[mesh][0] + mm->output_size[mesh][0]*4 > mm->output_end[mesh][0]) {
          mm->full = 1;
@@ -3371,6 +3420,13 @@ static void stbvox_make_mesh_for_block_with_geo(stbvox_mesh_maker *mm, stbvox_po
       } else if (mm->input.selector) {
          rot.block = rot.overlay = rot.ecolor = simple_rot;
       }
+
+      #ifdef BSELECTOR
+      else if (mm->input.block_selector) {
+        rot.block = rot.overlay = rot.ecolor = simple_rot;
+      }      
+      #endif
+
       rot.facerot = 0;
 
       stbvox_make_mesh_for_face(mm, rot, STBVOX_FACE_north, v_off, pos, basevert, stbvox_vmesh_crossed_pair[STBVOX_FACE_north], mesh, STBVF_ne_u_cross);
