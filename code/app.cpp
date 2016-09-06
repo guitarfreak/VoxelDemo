@@ -53,6 +53,11 @@
 
 - make voxel drop in tutorial code for stb_voxel
 
+- hotload still gets stuck sometimes, thread that won't complete
+
+- change bubblesort to mergesort\radixsort
+- implement sun and clouds that block beams of light
+
 //-------------------------------------
 //               BUGS
 //-------------------------------------
@@ -201,7 +206,9 @@ DrawCommandList* globalCommandList2d;
 		GLOP(GLenum, CheckNamedFramebufferStatus, GLuint framebuffer, GLenum target) \
 		GLOP(void, GenFramebuffers, GLsizei n, GLuint *ids) \
 		GLOP(void, FramebufferTexture, GLenum target, GLenum attachment, GLuint texture, GLint level) \
-		GLOP(void, BlendFuncSeparate, GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha)
+		GLOP(void, BlendFuncSeparate, GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha) \
+		GLOP(void, BlendEquation, GLenum mode)
+
 
 
 
@@ -938,7 +945,7 @@ float perlin2d(float x, float y, float freq, int depth)
 #define VIEW_DISTANCE 256 // 4
 // #define VIEW_DISTANCE 128 // 2
 
-#define USE_MALLOC 0
+#define USE_MALLOC 1
 
 #define VOXEL_X 64
 #define VOXEL_Y 64
@@ -1054,8 +1061,12 @@ VoxelMesh* getVoxelMesh(VoxelNode** voxelHash, int voxelHashSize, Vec2i coord) {
 	return m;
 }
 
-int startX = 37800;
-int startY = 48000;
+// int startX = 37800;
+// int startY = 48000;
+
+int startX = 37750;
+int startY = 47850;
+
 int startXMod = 58000;
 int startYMod = 68000;
 
@@ -1085,8 +1096,9 @@ void generateVoxelMeshThreaded(void* data) {
 	    		// static int startXMod = randomInt(0,10000);
 	    		// static int startYMod = randomInt(0,10000);
 
-	    		// float height = perlin2d(gx+4000+startX, gy+4000+startY, 0.044f, 7);
-	    		float height = perlin2d(gx+4000+startX, gy+4000+startY, 0.004f, 7);
+	    		// float height = perlin2d(gx+4000+startX, gy+4000+startY, 0.004f, 7);w
+	    		float height = perlin2d(gx+4000+startX, gy+4000+startY, 0.004f, 6);
+	    		height -= 0.1f; 
 
 	    		// float mod = perlin2d(gx+startXMod, gy+startYMod, 0.008f, 4);
 	    		float mod = perlin2d(gx+startXMod, gy+startYMod, 0.02f, 4);
@@ -1094,11 +1106,14 @@ void generateVoxelMeshThreaded(void* data) {
 	    		mod = mapRange(mod, 0, 1, -modOffset, modOffset);
 
 	    		int blockType;
-	    			 if(height < 0.35f) blockType = 11; // water
-	    		else if(height < 0.4f + mod) blockType = 12; // sand
-	    		else if(height < 0.6f + mod) blockType = 13; // grass
-	    		else if(height < 0.8f + mod) blockType = 14; // stone
-	    		else if(height < 1.0f + mod) blockType = 15; // snow
+	    		// 	 if(height < 0.35f) blockType = 10; // water
+	    		// else if(height < 0.4f + mod) blockType = 11; // sand
+	    		if(height < 0.4f + mod) blockType = 11; // sand
+	    		else if(height < 0.6f + mod) blockType = 12; // grass
+	    		else if(height < 0.8f + mod) blockType = 13; // stone
+	    		else if(height < 1.0f + mod) blockType = 14; // snow
+
+	    		float heightPercent = height;
 
 	    		height = clamp(height, 0, 1);
 	    		// height = pow(height,3.5f);
@@ -1106,7 +1121,6 @@ void generateVoxelMeshThreaded(void* data) {
 
 	    		height = mapRange(height, 0, 1, 20, 200);
 
-	    		// int blockType = randomInt(8,10);
 	    		for(int z = 0; z < height; z++) {
 	    			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = blockType;
 	    			m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 0;
@@ -1116,8 +1130,30 @@ void generateVoxelMeshThreaded(void* data) {
 	    			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 0;
 	    			m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 255;
 	    		}
+
+	    		int waterLevel = 22;
+	    		if(height < waterLevel) {
+	    			for(int z = height; z < waterLevel; z++) {
+	    				m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 10;
+	    				m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + ((int)height)] = 180;
+	    			}
+	    		}
 	    	}
 	    }
+
+	    // for(int y = min.y; y < max.y; y++) {
+	    // 	for(int x = min.x; x < max.x; x++) {
+	    // 		int gx = (coord.x*VOXEL_X)+x;
+	    // 		int gy = (coord.y*VOXEL_Y)+y;
+
+	    // 		float height = mapRange(0.4f, 0, 1, 20, 200);
+
+	    // 		for(int z = 0; z < height; z++) {
+	    // 			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = blockType;
+	    // 			m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 0;
+	    // 		}
+	    // 	}
+	    // }
 
 	}
 
@@ -1207,21 +1243,26 @@ void makeMeshThreaded(void* data) {
 
 	int count = stbvox_get_buffer_count(&mm);
 
-	unsigned char tex2[256];
-	for(int i = 0; i < arrayCount(tex2)-1; i++) tex2[1+i] = i;
 
+
+	unsigned char tex1[256];
+	for(int i = 1; i < arrayCount(tex1)-1; i++) tex1[i] = i;
+	inputDesc->block_tex1 = (unsigned char*)tex1;
+
+	unsigned char tex2[256];
+	for(int i = 1; i < arrayCount(tex2)-1; i++) tex2[i] = i;
 	inputDesc->block_tex2 = (unsigned char*)tex2;
 
+	unsigned char tLerp[256] = {};
+	// for(int i = 1; i < arrayCount(tLerp)-1; i++) tLerp[i] = 200;
+	// tLerp[10] = 4;
+	inputDesc->block_texlerp = tLerp;
 
-	// unsigned char tex1[256];
-	// for(int i = 0; i < arrayCount(tex1)-1; i++) tex1[1+i] = 20+i;
-
-	// inputDesc->block_tex1 = (unsigned char*)tex1;
-
-
-	// unsigned char tLerp[256];
-	// for(int i = 0; i < arrayCount(tLerp)-1; i++) tLerp[1+i] = 1;
-	// inputDesc->block_texlerp = tLerp;
+	unsigned char geometry[256] = {};
+	for(int i = 1; i < arrayCount(geometry)-1; i++) geometry[i] = STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_solid,0,0);
+	geometry[6] = STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_transp,0,0);
+	geometry[10] = STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_transp,0,0);
+	inputDesc->block_geometry = geometry;
 
 
 
@@ -1230,6 +1271,8 @@ void makeMeshThreaded(void* data) {
 
 	inputDesc->blocktype = &voxelCache[cacheId][getVoxelCache(1,1,1)];
 	inputDesc->lighting = &voxelLightingCache[cacheId][getVoxelCache(1,1,1)];
+
+
 
 	stbvox_set_default_mesh(&mm, 0);
 	int success = stbvox_make_mesh(&mm);
@@ -1344,6 +1387,11 @@ Vec3i getLocalVoxelCoord(Vec3i voxelCoord) {
 	result.x = mod(voxelCoord.x, VOXEL_X);
 	result.y = mod(voxelCoord.y, VOXEL_Y);
 
+	return result;
+}
+
+Vec3 getGlobalMeshCoord(Vec2i coord) {
+	Vec3 result = vec3(coord.x*VOXEL_X + VOXEL_X*0.5f, coord.y*VOXEL_Y + VOXEL_Y*0.5f, VOXEL_Z*0.5f);
 	return result;
 }
 
@@ -1786,9 +1834,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// glEnable(GL_DEPTH_TEST);
 		// glDepthRange(-1.0, 1.0);
 		glEnable(GL_CULL_FACE);
-		glEnable(GL_BLEND);
+		// glEnable(GL_BLEND);
 		// glBlendFunc(0x0302, 0x0303);
-		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		// glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		
 		uint vao = 0;
 		glCreateVertexArrays(1, &vao);
@@ -1927,6 +1975,33 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			stbi_image_free(stbData);
 		}
+
+		texId = ad->voxelTextures[1];
+		glTextureStorage3D(texId, 6, internalFormat, width, height, texCount);
+		for(int tc = 0; tc < 1; tc++) {
+			unsigned char* stbData;
+			int x,y,n;
+
+			strClear(fullPath);
+			strAppend(fullPath, p);
+			strAppend(fullPath, files[tc]);
+			stbData = stbi_load(fullPath, &x, &y, &n, 4);
+
+			bool stop = false;
+			if(x == width && y == height) {
+				for(int i = 0; i < texCount; i++) {
+					glTextureSubImage3D(texId, 0, 0, 0, i, x, y, 1, format, GL_UNSIGNED_BYTE, stbData);
+					glGenerateTextureMipmap(texId);
+				}
+				stop = true;
+			}
+
+			stbi_image_free(stbData);
+
+			if(stop) break;
+		}
+
+
 
 
 
@@ -2631,7 +2706,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glEnable(GL_TEXTURE_2D);
 
 	// glEnable(GL_ALPHA_TEST);
-	// glAlphaFunc(GL_GREATER, 0.5);
+	// glAlphaFunc(GL_GREATER, 0.9);
 
 	// glDisable(GL_LIGHTING);
 	// glDepthFunc(GL_LESS);
@@ -2639,7 +2714,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// glDepthMask(GL_TRUE);
 
 	glEnable(GL_MULTISAMPLE);
+	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glBlendEquation(GL_FUNC_ADD);
 
 	lookAt(ad->activeCamPos, -ad->activeCamLook, ad->activeCamUp, ad->activeCamRight);
 	perspective(degreeToRadian(ad->fieldOfView), ad->aspectRatio, ad->nearPlane, ad->farPlane);
@@ -2654,13 +2731,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 	globalGraphicsState->samplerUnits[1] = ad->voxelSamplers[1];
 	globalGraphicsState->samplerUnits[2] = ad->voxelSamplers[2];
 
-	setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 0, 2, view, proj, fogColor);
 
+	// setupVoxelUniforms(vec4(ad->activeCamPos, 1), 1, 0, 2, view, proj, fogColor);
+	setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor);
 
 
 
 
 #if 1
+	// @worldgen
 	if(reload) {
 		// for(int i = 0; i < ad->vMeshsSize; i++) {
 			// ad->vMeshs[i].generated = false;
@@ -2673,6 +2752,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		int radius = VIEW_DISTANCE/VOXEL_X;
 
+		// bool generated;
+		// bool upToDate;
+		// bool meshUploaded;
+
+		// // volatile uint activeGeneration;
+		// // volatile uint activeMaking;
+
+
 		for(int y = -radius; y < radius; y++) {
 			for(int x = -radius; x < radius; x++) {
 				Vec2i coord = vec2i(y, x);
@@ -2680,15 +2767,21 @@ extern "C" APPMAINFUNCTION(appMain) {
 				VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
 				m->upToDate = false;
 				m->meshUploaded = false;
+
+				m->generated = false;
 			}
 		}
 		return;
 	}
 #endif
 
+	Vec2i* coordList = (Vec2i*)getTMemory(sizeof(Vec2i)*2000);
+	int coordListSize = 0;
+
 	int meshGenerationCount = 0;
 	int radCounter = 0;
 	int triangleCount = 0;
+	int drawCounter = 0;
 
 	Vec2i pPos = getMeshCoordFromGlobalCoord(ad->activeCamPos);
 	int radius = VIEW_DISTANCE/VOXEL_X;
@@ -2793,17 +2886,69 @@ extern "C" APPMAINFUNCTION(appMain) {
 			}
 			
 			if(isIntersecting) {
-				drawVoxelMesh(m);
+				// drawVoxelMesh(m);
+				coordList[coordListSize++] = m->coord;
 
 				// triangleCount += m->quadCount*4;
 				triangleCount += m->quadCount/(float)2;
+				drawCounter++;
 			}
 		}
 	}
 
+	float* distanceList = (float*)getTMemory(sizeof(float)*2000);
+	int distanceListSize = 0;
 
+	dcCube({vec3(0,0,30), vec3(2,2,2), vec4(1,1,0,1), 0, vec3(0.0f)});
+	dcCube({vec3(VOXEL_X,VOXEL_Y,30), vec3(2,2,2), vec4(1,0,1,1), 0, vec3(0.0f)});
 
+	Vec3 mc = getGlobalMeshCoord(vec2i(0,0));
+	dcCube({mc, vec3(2,2,2), vec4(1,0,0,1), 0, vec3(0.0f)});
+	mc = getGlobalMeshCoord(vec2i(1,0));
+	dcCube({mc, vec3(2,2,2), vec4(1,0,0,1), 0, vec3(0.0f)});
+	mc = getGlobalMeshCoord(vec2i(1,1));
+	dcCube({mc, vec3(2,2,2), vec4(1,0,0,1), 0, vec3(0.0f)});
+	mc = getGlobalMeshCoord(vec2i(0,1));
+	dcCube({mc, vec3(2,2,2), vec4(1,0,0,1), 0, vec3(0.0f)});
 
+	struct SortPair {
+		float key;
+		int index;
+	};
+
+	SortPair* sortList = (SortPair*)getTMemory(sizeof(SortPair)*2000);
+	int sortListSize = 0;
+
+	for(int i = 0; i < coordListSize; i++) {
+		Vec2 c = getGlobalMeshCoord(coordList[i]).xy;
+		float distanceToCamera = lenVec2(ad->activeCamPos.xy - c);
+		sortList[sortListSize++] = {distanceToCamera, i};
+	}
+
+	for(int off = 0; off < sortListSize-2; off++) {
+		bool swap = false;
+
+		for(int i = 0; i < sortListSize-1 - off; i++) {
+			if(sortList[i+1].key < sortList[i].key) {
+				SortPair temp = sortList[i];
+				sortList[i] = sortList[i+1];
+				sortList[i+1] = temp;
+
+				swap = true;
+			}
+		}
+
+		if(!swap) break;
+	}
+
+	for(int i = 0; i < sortListSize-1; i++) {
+		assert(sortList[i].key <= sortList[i+1].key);
+	}
+
+	for(int i = sortListSize-1; i >= 0; i--) {
+		VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
+		drawVoxelMesh(m);
+	}
 
 
 
@@ -2813,6 +2958,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// for(int i = 0; i < 10; i++) dcCube({vec3(i*10,0,0) + off, s, vec4(0,1,1,1), 0, vec3(1,2,3)});
 	// for(int i = 0; i < 10; i++) dcCube({vec3(0,i*10,0) + off, s, vec4(0,1,1,1), 0, vec3(1,2,3)});
 	// for(int i = 0; i < 10; i++) dcCube({vec3(0,0,i*10) + off, s, vec4(0,1,1,1), 0, vec3(1,2,3)});
+
+
+	dcCube({vec3(0,0,40), vec3(10,1,10), vec4(1,0,0,0.2f), 0, vec3(0.0f)});
+
+	dcCube({vec3(0,-10,40), vec3(10,1,10), vec4(0,1,0,0.2f), 0, vec3(0.0f)});
+
 
 	dcLineWidth({3});
 
@@ -2854,11 +3005,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 	dcText({fillString("Rot  : (%f,%f)", PVEC2(ad->camRot)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
 	dcText({fillString("Vec  : (%f,%f,%f)", PVEC3(ad->playerVel)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
 	dcText({fillString("Acc  : (%f,%f,%f)", PVEC3(ad->playerAcc)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
+	dcText({fillString("Draws: (%i)", drawCounter), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
 	dcText({fillString("Quads: (%i)", triangleCount), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
 
-	dcText({fillString("Quads: (%i %i)", (int)input->mouseButtonDown[0], (int)input->mouseButtonDown[1]), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
-	if(input->keysDown[VK_W])
-	dcText({fillString("W", (int)input->mouseButtonDown[1]), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
+	// dcText({fillString("Quads: (%i %i)", (int)input->mouseButtonDown[0], (int)input->mouseButtonDown[1]), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
+	// if(input->keysDown[VK_W])
+	// dcText({fillString("W", (int)input->mouseButtonDown[1]), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
 
 
 
