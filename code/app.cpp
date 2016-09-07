@@ -60,6 +60,9 @@
 
 - setup proper blocktype enums and properties
 - put code in for rect3i
+- pink noise from old projects
+
+
 //-------------------------------------
 //               BUGS
 //-------------------------------------
@@ -79,12 +82,7 @@
 
 /*
 	- 32x32 gen chunks
-
- 	- blocks with different textures on each side
 	- mak rect shader take 2d arrays to draw the voxel textures
-	- trees
-
-	- in general, try to use every feature of stb_voxel at least once to see what it feels like
 */
 
 MemoryBlock* globalMemory;
@@ -1185,9 +1183,9 @@ void generateVoxelMeshThreaded(void* data) {
 		    		height -= 0.1f; 
 
 		    		// float mod = perlin2d(gx+startXMod, gy+startYMod, 0.008f, 4);
-		    		float mod = perlin2d(gx+startXMod, gy+startYMod, 0.02f, 4);
+		    		float perlinMod = perlin2d(gx+startXMod, gy+startYMod, 0.02f, 4);
 		    		float modOffset = 0.1f;
-		    		mod = mapRange(mod, 0, 1, -modOffset, modOffset);
+		    		float mod = mapRange(perlinMod, 0, 1, -modOffset, modOffset);
 
 		    		int blockType;
 		    		// 	 if(height < 0.35f) blockType = 10; // water
@@ -1214,7 +1212,8 @@ void generateVoxelMeshThreaded(void* data) {
 		    		}
 
 					if(blockType == BT_Grass && randomInt(0,200) == 0 && 
-						valueBetween(y, min.y+3, max.y-3) && valueBetween(x, min.x+3, max.x-3) ) {
+						valueBetween(y, min.y+3, max.y-3) && valueBetween(x, min.x+3, max.x-3) && 
+						valueBetween(perlinMod, 0.2f, 0.4f)) {
 						treePositions[treePositionsSize++] = vec3i(x,y,height);
 					}
 
