@@ -59,7 +59,7 @@
 - implement sun and clouds that block beams of light
 
 - setup proper blocktype enums and properties
-
+- put code in for rect3i
 //-------------------------------------
 //               BUGS
 //-------------------------------------
@@ -943,6 +943,8 @@ enum BlockTypes {
 	BT_Grass,
 	BT_Stone,
 	BT_Snow,
+	BT_TreeLog,
+	BT_Leaves,
 	// BT_Trunk,
 	// BT_Leaves,
 	// BT_Water,
@@ -959,6 +961,8 @@ enum BlockTextures {
 	BX_GrassTop, BX_GrassSide, BX_GrassBottom,
 	BX_Stone,
 	BX_Snow,
+	BX_TreeLogTop, BX_TreeLogSide,
+	BX_Leaves,
 
 	BX_Size,
 };
@@ -972,11 +976,16 @@ const char* textureFilePaths[BX_Size] = {
 	"..\\data\\minecraft textures\\grass_bottom.png",
 	"..\\data\\minecraft textures\\stone.png",
 	"..\\data\\minecraft textures\\snow.png",
+	"..\\data\\minecraft textures\\tree_log_top.png",
+	"..\\data\\minecraft textures\\tree_log_side.png",
+	"..\\data\\minecraft textures\\leaves.png",
 };
 
-#define allTexSame(t) t,t,t,t,t,t
+uchar blockColor[BT_Size] = {0,0,0,0,0,0,0,21};
 
-uchar texture2[BT_Size] = {0,1,1,1,1,1};
+uchar texture2[BT_Size] = {0,1,1,1,1,1,1,1};
+
+#define allTexSame(t) t,t,t,t,t,t
 uchar texture1Faces[BT_Size][6] = {
 	{0,0,0,0,0,0},
 	{allTexSame(BX_Water)},
@@ -984,7 +993,10 @@ uchar texture1Faces[BT_Size][6] = {
 	{BX_GrassSide, BX_GrassSide, BX_GrassSide, BX_GrassSide, BX_GrassTop, BX_GrassBottom},
 	{allTexSame(BX_Stone)},
 	{allTexSame(BX_Snow)},
+	{BX_TreeLogSide, BX_TreeLogSide, BX_TreeLogSide, BX_TreeLogSide, BX_TreeLogTop, BX_TreeLogTop},
+	{allTexSame(BX_Leaves)},
 };
+
 uchar geometry[BT_Size] = {
 	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_empty,0,0),
 	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_transp,0,0),
@@ -992,8 +1004,11 @@ uchar geometry[BT_Size] = {
 	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_solid,0,0),
 	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_solid,0,0),
 	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_solid,0,0),
+	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_solid,0,0),
+	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_force,0,0),
 };
-uchar meshSelection[BT_Size] = {0,1,0,0,0,0};
+
+uchar meshSelection[BT_Size] = {0,1,0,0,0,0,0,1};
 
 // #define VIEW_DISTANCE 4096 // 64
 // #define VIEW_DISTANCE 3072 // 32
@@ -1138,7 +1153,7 @@ int startY = 47850;
 int startXMod = 58000;
 int startYMod = 68000;
 
-void s(void* data) {
+void generateVoxelMeshThreaded(void* data) {
 	VoxelMesh* m = (VoxelMesh*)data;
 	Vec2i coord = m->coord;
 
@@ -1146,67 +1161,98 @@ void s(void* data) {
 		Vec3i min = vec3i(0,0,0);
 		Vec3i max = vec3i(VOXEL_X,VOXEL_Y,VOXEL_Z);
 
-	    for(int y = min.y; y < max.y; y++) {
-	    	for(int x = min.x; x < max.x; x++) {
-	    		int gx = (coord.x*VOXEL_X)+x;
-	    		int gy = (coord.y*VOXEL_Y)+y;
+		Vec3i treePositions[100];
+		int treePositionsSize = 0;
 
-	    		// float perlin = perlin2d(gx+4000, gy+4000, 0.015f, 4);
-	    		// float height = perlin*50;
-	    		// float height = 5;
+		for(int phase = 0; phase < 2; phase++) {
+		    for(int y = min.y; y < max.y; y++) {
+		    	for(int x = min.x; x < max.x; x++) {
+		    		int gx = (coord.x*VOXEL_X)+x;
+		    		int gy = (coord.y*VOXEL_Y)+y;
 
-	    		// static int startX = randomInt(0, 10000);
-	    		// static int startY = randomInt(0, 10000);
+		    		// float perlin = perlin2d(gx+4000, gy+4000, 0.015f, 4);
+		    		// float height = perlin*50;
+		    		// float height = 5;
 
-	    		// static int startXMod = randomInt(0,10000);
-	    		// static int startYMod = randomInt(0,10000);
+		    		// static int startX = randomInt(0, 10000);
+		    		// static int startY = randomInt(0, 10000);
 
-	    		// float height = perlin2d(gx+4000+startX, gy+4000+startY, 0.004f, 7);w
-	    		float height = perlin2d(gx+4000+startX, gy+4000+startY, 0.004f, 6);
-	    		height -= 0.1f; 
+		    		// static int startXMod = randomInt(0,10000);
+		    		// static int startYMod = randomInt(0,10000);
 
-	    		// float mod = perlin2d(gx+startXMod, gy+startYMod, 0.008f, 4);
-	    		float mod = perlin2d(gx+startXMod, gy+startYMod, 0.02f, 4);
-	    		float modOffset = 0.1f;
-	    		mod = mapRange(mod, 0, 1, -modOffset, modOffset);
+		    		// float height = perlin2d(gx+4000+startX, gy+4000+startY, 0.004f, 7);w
+		    		float height = perlin2d(gx+4000+startX, gy+4000+startY, 0.004f, 6);
+		    		height -= 0.1f; 
 
-	    		int blockType;
-	    		// 	 if(height < 0.35f) blockType = 10; // water
-	    		// else if(height < 0.4f + mod) blockType = 11; // sand
-	    		if(height < 0.4f + mod) blockType = BT_Sand; // sand
-	    		else if(height < 0.6f + mod) blockType = BT_Grass; // grass
-	    		else if(height < 0.8f + mod) blockType = BT_Stone; // stone
-	    		else if(height <= 1.0f + mod) blockType = BT_Snow; // snow
+		    		// float mod = perlin2d(gx+startXMod, gy+startYMod, 0.008f, 4);
+		    		float mod = perlin2d(gx+startXMod, gy+startYMod, 0.02f, 4);
+		    		float modOffset = 0.1f;
+		    		mod = mapRange(mod, 0, 1, -modOffset, modOffset);
 
-	    		float heightPercent = height;
-	    		height = clamp(height, 0, 1);
-	    		// height = pow(height,3.5f);
-	    		height = pow(height,4.0f);
-	    		height = mapRange(height, 0, 1, 20, 200);
+		    		int blockType;
+		    		// 	 if(height < 0.35f) blockType = 10; // water
+		    		// else if(height < 0.4f + mod) blockType = 11; // sand
+		    		if(height < 0.4f + mod) blockType = BT_Sand; // sand
+		    		else if(height < 0.6f + mod) blockType = BT_Grass; // grass
+		    		else if(height < 0.8f + mod) blockType = BT_Stone; // stone
+		    		else if(height <= 1.0f + mod) blockType = BT_Snow; // snow
 
-	    		for(int z = 0; z < height; z++) {
-	    			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = blockType;
-	    			m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 0;
-	    		}
+		    		float heightPercent = height;
+		    		height = clamp(height, 0, 1);
+		    		// height = pow(height,3.5f);
+		    		height = pow(height,4.0f);
+		    		height = mapRange(height, 0, 1, 20, 200);
 
-	    		for(int z = height; z < VOXEL_Z; z++) {
-	    			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 0;
-	    			m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 255;
-	    		}
+		    		for(int z = 0; z < height; z++) {
+		    			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = blockType;
+		    			m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 0;
+		    		}
 
-	    		int waterLevel = 22;
-	    		if(height < waterLevel) {
-	    			for(int z = height; z < waterLevel; z++) {
-	    				m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = BT_Water;
+		    		for(int z = height; z < VOXEL_Z; z++) {
+		    			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 0;
+		    			m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 255;
+		    		}
 
-	    				int lightValue;
-	    				if(z == 20)  lightValue = 50;
-	    				else if(z == 21) lightValue = 150;
-	    				m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = lightValue;
-	    			}
-	    		}
-	    	}
-	    }
+					if(blockType == BT_Grass && randomInt(0,200) == 0 && 
+						valueBetween(y, min.y+3, max.y-3) && valueBetween(x, min.x+3, max.x-3) ) {
+						treePositions[treePositionsSize++] = vec3i(x,y,height);
+					}
+
+		    		int waterLevel = 22;
+		    		if(height < waterLevel) {
+		    			for(int z = height; z < waterLevel; z++) {
+		    				m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = BT_Water;
+
+		    				int lightValue;
+		    				if(z == 20)  lightValue = 50;
+		    				else if(z == 21) lightValue = 150;
+		    				m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = lightValue;
+		    			}
+		    		}
+		    	}
+		    }
+
+		    for(int i = 0; i < treePositionsSize; i++) {
+		    	Vec3i p = treePositions[i];
+				// m->voxels[voxelArray(p.x,p.y,p.z)] = BT_TreeLog;	    			
+
+				int treeHeight = randomInt(4,6);
+
+				Rect3 leaves = rect3CenDim(vec3(p.x, p.y, p.z+treeHeight), vec3(5,5,3));
+				leaves.min += vec3(1);
+				for(int x = leaves.min.x; x < leaves.max.x; x++) {
+					for(int y = leaves.min.y; y < leaves.max.y; y++) {
+						for(int z = leaves.min.z; z < leaves.max.z; z++) {
+							m->voxels[voxelArray(x,y,z)] = BT_Leaves;	    			
+						}
+					}
+				}
+
+				for(int i = 0; i < treeHeight; i++) 
+					m->voxels[voxelArray(p.x,p.y,p.z+i)] = BT_TreeLog;	    			
+		    }
+
+		}
 	}
 
 	atomicSub(&m->activeGeneration);
@@ -1305,10 +1351,15 @@ void makeMeshThreaded(void* data) {
 
 
 
+
 	inputDesc->block_tex2 = texture2;
 	inputDesc->block_tex1_face = texture1Faces;
 	inputDesc->block_geometry = geometry;
 	inputDesc->block_selector = meshSelection;
+
+	uchar color[BT_Size];
+	for(int i = 0; i < BT_Size; i++) color[i] = STBVOX_MAKE_COLOR(blockColor[i], 1, 0);
+	inputDesc->block_color = color;
 
 	unsigned char tLerp[50] = {};
 	// for(int i = 1; i < arrayCount(tLerp)-1; i++) tLerp[i] = 6;
@@ -2886,7 +2937,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				m->upToDate = false;
 				m->meshUploaded = false;
 
-				// m->generated = fwalse;
+				m->generated = false;
 			}
 		}
 		return;
@@ -3017,18 +3068,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	float* distanceList = (float*)getTMemory(sizeof(float)*2000);
 	int distanceListSize = 0;
 
-	// dcCube({vec3(0,0,30), vec3(2,2,2), vec4(1,1,0,1), 0, vec3(0.0f)});
-	// dcCube({vec3(VOXEL_X,VOXEL_Y,30), vec3(2,2,2), vec4(1,0,1,1), 0, vec3(0.0f)});
-
-	Vec3 mc = getGlobalMeshCoord(vec2i(0,0));
-	dcCube({mc, vec3(2,2,2), vec4(1,0,0,1), 0, vec3(0.0f)});
-	mc = getGlobalMeshCoord(vec2i(1,0));
-	dcCube({mc, vec3(2,2,2), vec4(1,0,0,1), 0, vec3(0.0f)});
-	mc = getGlobalMeshCoord(vec2i(1,1));
-	dcCube({mc, vec3(2,2,2), vec4(1,0,0,1), 0, vec3(0.0f)});
-	mc = getGlobalMeshCoord(vec2i(0,1));
-	dcCube({mc, vec3(2,2,2), vec4(1,0,0,1), 0, vec3(0.0f)});
-
 	struct SortPair {
 		float key;
 		int index;
@@ -3059,9 +3098,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 		if(!swap) break;
 	}
 
-	for(int i = 0; i < sortListSize-1; i++) {
-		assert(sortList[i].key <= sortList[i+1].key);
-	}
+	// for(int i = 0; i < sortListSize-1; i++) {
+	// 	assert(sortList[i].key <= sortList[i+1].key);
+	// }
 
 	for(int i = sortListSize-1; i >= 0; i--) {
 		VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
@@ -3077,9 +3116,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// for(int i = 0; i < 10; i++) dcCube({vec3(0,i*10,0) + off, s, vec4(0,1,1,1), 0, vec3(1,2,3)});
 	// for(int i = 0; i < 10; i++) dcCube({vec3(0,0,i*10) + off, s, vec4(0,1,1,1), 0, vec3(1,2,3)});
 
-
-	dcCube({vec3(0,0,40), vec3(10,1,10), vec4(1,0,0,0.2f), 0, vec3(0.0f)});
-	dcCube({vec3(0,-10,40), vec3(10,1,10), vec4(0,1,0,0.2f), 0, vec3(0.0f)});
 
 
 	dcLineWidth({3});
