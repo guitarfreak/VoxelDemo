@@ -53,36 +53,30 @@
 
 - make voxel drop in tutorial code for stb_voxel
 
-- hotload still gets stuck sometimes, thread that won't complete
-
 - change bubblesort to mergesort\radixsort
 - implement sun and clouds that block beams of light
+- glowstone emmiting light
 
-- setup proper blocktype enums and properties
 - put code in for rect3i
 - pink noise from old projects
 
+- stb_voxel push block_selector, alpha test, clipping in voxel vertex shader
 
 //-------------------------------------
 //               BUGS
 //-------------------------------------
 - look has to be negative to work in view projection matrix
-- app stops reacting to input after a while, hotloading still works though
-- deleting a block at the edge of a mesh means remaking mesh on the other side 
-  of the edge too
 - distance jumping collision bug, possibly precision loss in distances
-
-- no alpha in voxel rendering, see glass block
-
 - gpu fucks up at some point making swapBuffers alternates between time steps 
   which makes the game stutter, restart is required
 - game input gets stuck when buttons are pressed right at the start
 - sort key assert firing randomly
+- hotload gets stuck sometimes, thread that won't complete
 */
 
 /*
 	- 32x32 gen chunks
-	- mak rect shader take 2d arrays to draw the voxel textures
+	- water reflections almost done
 */
 
 MemoryBlock* globalMemory;
@@ -240,6 +234,7 @@ struct PipelineIds {
 	uint quadVertexUV;
 	uint quadVertexColor;
 	uint quadVertexCamera;
+	uint quadVertexTexZ;
 
 	uint programCube;
 	uint cubeVertex;
@@ -250,6 +245,7 @@ struct PipelineIds {
 	uint cubeVertexColor;
 	uint cubeVertexMode;
 	uint cubeVertexVertices;
+	uint cubeVertexCPlane;
 
 	uint programVoxel;
 	uint voxelVertex;
@@ -372,6 +368,7 @@ struct Draw_Command_Rect {
 	Rect r, uv;
 	Vec4 color;
 	int texture;
+	int texZ;
 };
 
 struct Font;
@@ -504,7 +501,8 @@ const char* vertexShaderCube = GLSL (
 	    vec3(-0.5f,-0.5f, 0.5f)
 	);
 
-	out gl_PerVertex { vec4 gl_Position; };
+	// out gl_PerVertex { vec4 gl_Position; };
+	out gl_PerVertex { vec4 gl_Position; float gl_ClipDistance[]; };
 	out vec4 Color;
 
 	uniform mat4x4 model;
@@ -517,20 +515,40 @@ const char* vertexShaderCube = GLSL (
 
 	uniform vec4 setColor;
 
+	uniform vec4 cPlane;
+
 	void main() {
 		Color = setColor;
+		float v = gl_VertexID;
+		// Color = setColor * vec4(v*0.1f,v*0.1f,v*0.1f,1);
+		// Color = vec4(v*0.05f,v*0.05f,v*0.05f,1);
 	
+		vec4 posModelView;
+
 		vec4 pos;
 		if(mode == true) {
 			pos = vec4(vertices[gl_VertexID], 1);
-			gl_Position = proj*view*pos;
+			posModelView = view*pos;
+			gl_Position = proj*posModelView;
+			// gl_Position = proj*view*pos;
 		} else {
 			pos = vec4(cube[gl_VertexID], 1);
-			gl_Position = proj*view*model*pos;
+			posModelView = view*model*pos;
+			gl_Position = proj*posModelView;
+			// gl_Position = proj*view*model*pos;
 		}
 	
 		// gl_Position = proj*view*model*pos;
 		// gl_Position = projViewModel*pos;
+
+		// gl_ClipDistance[0] = dot(cPlane, posModelView);
+		gl_ClipDistance[0] = dot(cPlane, model*pos);
+		// float val = dot(vec4(1,2,3,1), vec4(0,0,0,0));
+		// gl_ClipDistance[0] = val;
+		// gl_ClipDistance[0] = 1.0f;
+		// gl_ClipDistance[0] = dot(vec4(1,2,3,1), vec4(0,0,0,0));
+
+		// gl_ClipVertex = vec4(1,1,1,1);
 	}
 );
 
@@ -585,17 +603,19 @@ const char* vertexShaderQuad = GLSL (
 	);
 
 	uniform vec4 setUV;
+	uniform float texZ;
 	uniform vec4 mod;
 	uniform vec4 setColor;
 	uniform vec4 camera; // left bottom right top
 
 	out gl_PerVertex { vec4 gl_Position; };
-	smooth out vec2 uv;
+	// smooth out vec2 uv;
+	smooth out vec3 uv;
 	out vec4 Color;
 
 	void main() {
 		ivec2 pos = quad_uv[gl_VertexID];
-		uv = vec2(setUV[pos.x], setUV[2 + pos.y]);
+		uv = vec3(setUV[pos.x], setUV[2 + pos.y], texZ);
 		Color = setColor;
 		vec2 model = quad[gl_VertexID]*mod.zw + mod.xy;
 		vec2 view = model/(camera.zw*0.5f) - camera.xy/(camera.zw*0.5f);
@@ -605,17 +625,21 @@ const char* vertexShaderQuad = GLSL (
 
 const char* fragmentShaderQuad = GLSL (
 	layout(binding = 0) uniform sampler2D s;
-	// uniform sampler2DArray s[2];
-	// uniform sampler2D s;
+	layout(binding = 1) uniform sampler2DArray sArray[2];
 
-	smooth in vec2 uv;
+	// smooth in vec2 uv;
+	smooth in vec3 uv;
 	in vec4 Color;
 
 	layout(depth_less) out float gl_FragDepth;
 	out vec4 color;
 
 	void main() {
-		color = texture(s, uv) * Color;
+		vec4 texColor;
+		if(uv.z > -1) texColor = texture(sArray[0], vec3(uv.xy, floor(uv.z)));
+		else texColor = texture(s, uv.xy);
+
+		color = texColor * Color;
 	}
 );
 
@@ -649,7 +673,7 @@ const char* fragmentShaderQuad = GLSL (
 // );
 
 
-void updateAfterWindowResizing(WindowSettings* wSettings, float* ar, uint fb0, uint fb1, uint rb0, uint rb1, uint* fbt, int msaaSamples, Vec2i* fboRes, Vec2i* curRes, bool useNativeRes) {
+void updateAfterWindowResizing(WindowSettings* wSettings, float* ar, uint fb0, uint fb1, uint fb2, uint rb0, uint rb1, uint* fbt, uint* fbt2, uint* fbt3, int msaaSamples, Vec2i* fboRes, Vec2i* curRes, bool useNativeRes) {
 	*ar = wSettings->aspectRatio;
 	
 	fboRes->x = fboRes->y*(*ar);
@@ -660,25 +684,49 @@ void updateAfterWindowResizing(WindowSettings* wSettings, float* ar, uint fb0, u
 	Vec2i s = *curRes;
 
 	glNamedRenderbufferStorageMultisample(rb0, msaaSamples, GL_RGBA8, s.w, s.h);
-	glNamedRenderbufferStorageMultisample(rb1, msaaSamples, GL_DEPTH_COMPONENT, s.w, s.h);
+	// glNamedRenderbufferStorageMultisample(rb1, msaaSamples, GL_DEPTH_COMPONENT, s.w, s.h);
+	glNamedRenderbufferStorageMultisample(rb1, msaaSamples, GL_DEPTH_STENCIL, s.w, s.h);
 
 	glDeleteTextures(1, fbt);
 	glCreateTextures(GL_TEXTURE_2D, 1, fbt);
 	glTextureStorage2D(*fbt, 1, GL_RGBA8, s.w, s.h);
 
 	glNamedFramebufferRenderbuffer(fb0, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, rb0);
-	glNamedFramebufferRenderbuffer(fb0, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rb1);
+	// glNamedFramebufferRenderbuffer(fb0, GL_DEPTH_ATTACHMENT,  GL_RENDERBUFFER, rb1);
+	glNamedFramebufferRenderbuffer(fb0, GL_DEPTH_STENCIL_ATTACHMENT,  GL_RENDERBUFFER, rb1);
+
 	glNamedFramebufferTexture(fb1, GL_COLOR_ATTACHMENT0, *fbt, 0);
+
+
+	glDeleteTextures(1, fbt2);
+	glCreateTextures(GL_TEXTURE_2D, 1, fbt2);
+	glTextureStorage2D(*fbt2, 1, GL_RGBA8, s.w, s.h);
+
+	glDeleteTextures(1, fbt3);
+	// glCreateTextures(GL_TEXTURE_2D_MULTISAMPLE, 1, fbt3);
+	glCreateTextures(GL_TEXTURE_2D, 1, fbt3);
+	// glTextureStorage2DMultisample(*fbt3, msaaSamples, GL_DEPTH_STENCIL, s.w, s.h, false);
+	// glTextureStorage2DMultisample(*fbt3, msaaSamples, GL_UNSIGNED_INT_24_8, s.w, s.h, false);
+	// glTextureStorage2DMultisample(*fbt3, msaaSamples, GL_DEPTH_COMPONENT24, s.w, s.h, false);
+	glTextureStorage2D(*fbt3, 1, GL_DEPTH24_STENCIL8, s.w, s.h);
+
+	glNamedFramebufferTexture(fb2, GL_COLOR_ATTACHMENT0, *fbt2, 0);
+	glNamedFramebufferTexture(fb2, GL_DEPTH_STENCIL_ATTACHMENT, *fbt3, 0);
 }
 
 
-void drawRect(Rect r, Rect uv, Vec4 color, int texture) {
+void drawRect(Rect r, Rect uv, Vec4 color, int texture, float texZ = -1) {
 	uint uniformLocation;
 	Rect cd = rectGetCenDim(r);
 	glProgramUniform4f(globalGraphicsState->pipelineIds.quadVertex, globalGraphicsState->pipelineIds.quadVertexMod, cd.min.x, cd.min.y, cd.max.x, cd.max.y);
 	glProgramUniform4f(globalGraphicsState->pipelineIds.quadVertex, globalGraphicsState->pipelineIds.quadVertexUV, uv.min.x, uv.max.x, uv.max.y, uv.min.y);
 	glProgramUniform4f(globalGraphicsState->pipelineIds.quadVertex, globalGraphicsState->pipelineIds.quadVertexColor, color.r, color.g, color.b, color.a);
-	glBindTexture(GL_TEXTURE_2D, texture);
+
+	glProgramUniform1f(globalGraphicsState->pipelineIds.quadVertex, globalGraphicsState->pipelineIds.quadVertexTexZ, texZ);
+
+	uint tex[2] = {texture, texture};
+	glBindTextures(0,2,tex);
+
 	glDrawArraysInstancedBaseInstance(GL_TRIANGLE_STRIP, 0, 4, 1, 0);
 }
 
@@ -943,11 +991,9 @@ enum BlockTypes {
 	BT_Snow,
 	BT_TreeLog,
 	BT_Leaves,
-	// BT_Trunk,
-	// BT_Leaves,
-	// BT_Water,
-	// BT_Water,
-	// BT_Water,
+	BT_Glass,
+	BT_GlowStone,
+	BT_Pumpkin,
 
 	BT_Size,
 };
@@ -961,6 +1007,9 @@ enum BlockTextures {
 	BX_Snow,
 	BX_TreeLogTop, BX_TreeLogSide,
 	BX_Leaves,
+	BX_Glass,
+	BX_GlowStone,
+	BX_PumpkinTop, BX_PumpkinSide, BX_PumpkinBottom,
 
 	BX_Size,
 };
@@ -977,11 +1026,15 @@ const char* textureFilePaths[BX_Size] = {
 	"..\\data\\minecraft textures\\tree_log_top.png",
 	"..\\data\\minecraft textures\\tree_log_side.png",
 	"..\\data\\minecraft textures\\leaves.png",
+	"..\\data\\minecraft textures\\glass.png",
+	"..\\data\\minecraft textures\\glowstone.png",
+	"..\\data\\minecraft textures\\pumpkin_top.png",
+	"..\\data\\minecraft textures\\pumpkin_side.png",
+	"..\\data\\minecraft textures\\pumpkin_bottom.png",
 };
 
-uchar blockColor[BT_Size] = {0,0,0,0,0,0,0,21};
-
-uchar texture2[BT_Size] = {0,1,1,1,1,1,1,1};
+uchar blockColor[BT_Size] = {0,0,0,0,0,0,0,21,0,1,0};
+uchar texture2[BT_Size] = {0,1,1,1,1,1,1,1,1,1,1};
 
 #define allTexSame(t) t,t,t,t,t,t
 uchar texture1Faces[BT_Size][6] = {
@@ -993,6 +1046,9 @@ uchar texture1Faces[BT_Size][6] = {
 	{allTexSame(BX_Snow)},
 	{BX_TreeLogSide, BX_TreeLogSide, BX_TreeLogSide, BX_TreeLogSide, BX_TreeLogTop, BX_TreeLogTop},
 	{allTexSame(BX_Leaves)},
+	{allTexSame(BX_Glass)},
+	{allTexSame(BX_GlowStone)},
+	{BX_PumpkinSide, BX_PumpkinSide, BX_PumpkinSide, BX_PumpkinSide, BX_PumpkinTop, BX_PumpkinBottom},
 };
 
 uchar geometry[BT_Size] = {
@@ -1004,9 +1060,15 @@ uchar geometry[BT_Size] = {
 	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_solid,0,0),
 	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_solid,0,0),
 	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_force,0,0),
+	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_force,0,0),
+	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_solid,0,0),
+	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_solid,0,0),
 };
 
-uchar meshSelection[BT_Size] = {0,1,0,0,0,0,0,1};
+uchar meshSelection[BT_Size] = {0,1,0,0,0,0,0,1,1,0,0};
+
+// uint blockMainTexture[BT_Size] = {
+// };
 
 // #define VIEW_DISTANCE 4096 // 64
 // #define VIEW_DISTANCE 3072 // 32
@@ -1014,8 +1076,8 @@ uchar meshSelection[BT_Size] = {0,1,0,0,0,0,0,1};
 // #define VIEW_DISTANCE 2500 // 32
 // #define VIEW_DISTANCE 2048 // 32
 // #define VIEW_DISTANCE 1024 // 16
-// #define VIEW_DISTANCE 512  // 8
-#define VIEW_DISTANCE 256 // 4
+#define VIEW_DISTANCE 512  // 8
+// #define VIEW_DISTANCE 256 // 4
 // #define VIEW_DISTANCE 128 // 2
 
 #define USE_MALLOC 1
@@ -1242,7 +1304,7 @@ void generateVoxelMeshThreaded(void* data) {
 				for(int x = leaves.min.x; x < leaves.max.x; x++) {
 					for(int y = leaves.min.y; y < leaves.max.y; y++) {
 						for(int z = leaves.min.z; z < leaves.max.z; z++) {
-							m->voxels[voxelArray(x,y,z)] = BT_Leaves;	    			
+							m->voxels[voxelArray(x,y,z)] = BT_Leaves;    			
 						}
 					}
 				}
@@ -1548,7 +1610,7 @@ Vec3 getBlockCenterFromGlobalCoord(Vec3 coord) {
 	return result;
 }
 
-void setupVoxelUniforms(Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit, Mat4 view, Mat4 proj, Vec3 fogColor) {
+void setupVoxelUniforms(Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit, Mat4 view, Mat4 proj, Vec3 fogColor, Vec3 trans = vec3(0,0,0), Vec3 scale = vec3(1,1,1), Vec3 rotation = vec3(0,0,0)) {
 	Vec3 li = normVec3(vec3(0,0.5f,0.5f));
 	Mat4 ambientLighting = {
 		li.x, li.y, li.z ,0, // reversed lighting direction
@@ -1668,13 +1730,24 @@ void setupVoxelUniforms(Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit
 		}
 	}
 
-	// Mat4 finalMat = proj*view*model;
-	Mat4 finalMat = proj*view;
+
+	uint clipLoc = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "cPlane");
+	glProgramUniform4f(globalGraphicsState->pipelineIds.voxelVertex, clipLoc, 0,0,0,0);
+
+	Mat4 sm; scaleMatrix(&sm, scale);
+	Mat4 rm; quatRotationMatrix(&rm, quat(0, rotation));
+	Mat4 tm; translationMatrix(&tm, trans);
+	Mat4 model = tm*rm*sm;
+	Mat4 finalMat = proj*view*model;
+
+	uint modelLoc = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "model");
+	glProgramUniformMatrix4fv(globalGraphicsState->pipelineIds.voxelVertex, modelLoc, 1, 1, model.e);
+
 	GLint modelViewUni = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "model_view");
 	glProgramUniformMatrix4fv(globalGraphicsState->pipelineIds.voxelVertex, modelViewUni, 1, 1, finalMat.e);
 }
 
-void drawVoxelMesh(VoxelMesh* m) {
+void drawVoxelMesh(VoxelMesh* m, int drawMode = 0) {
 	if(STBVOX_CONFIG_MODE == 0) {
 		// interleaved buffer - 2 uints in a row -> 8 bytes stride
 		glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
@@ -1688,7 +1761,7 @@ void drawVoxelMesh(VoxelMesh* m) {
 	} else {
 		glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
 		int vaLoc = glGetAttribLocation(globalGraphicsState->pipelineIds.voxelVertex, "attr_vertex");
-		glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 4, (void*)0);
+		glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 0, (void*)0);
 		glEnableVertexAttribArray(vaLoc);
 	}
 
@@ -1703,7 +1776,9 @@ void drawVoxelMesh(VoxelMesh* m) {
 	
 	glBindProgramPipeline(globalGraphicsState->pipelineIds.programVoxel);
 
-	glDrawArrays(GL_QUADS, 0, m->quadCount*4);
+	if(drawMode == 0 || drawMode == 2) {
+		glDrawArrays(GL_QUADS, 0, m->quadCount*4);
+	}
 
 
 
@@ -1721,7 +1796,7 @@ void drawVoxelMesh(VoxelMesh* m) {
 	} else {
 		glBindBuffer(GL_ARRAY_BUFFER, m->bufferTransId);
 		int vaLoc = glGetAttribLocation(globalGraphicsState->pipelineIds.voxelVertex, "attr_vertex");
-		glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 4, (void*)0);
+		glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 0, (void*)0);
 		glEnableVertexAttribArray(vaLoc);
 	}
 
@@ -1729,7 +1804,9 @@ void drawVoxelMesh(VoxelMesh* m) {
 	glBindTextures(0,16,globalGraphicsState->textureUnits);
 	glBindSamplers(0,16,globalGraphicsState->samplerUnits);
 	
-	glDrawArrays(GL_QUADS, 0, m->quadCountTrans*4);
+	if(drawMode == 0 || drawMode == 1) {
+		glDrawArrays(GL_QUADS, 0, m->quadCountTrans*4);
+	}
 }
 
 void getCamData(Vec3 look, Vec2 rot, Vec3 gUp, Vec3* cLook, Vec3* cRight, Vec3* cUp) {
@@ -1771,7 +1848,7 @@ struct AppData {
 
 	uint frameBuffers[16];
 	uint renderBuffers[16];
-	uint frameBufferTextures[2];
+	uint frameBufferTextures[3];
 
 	float aspectRatio;
 	float fieldOfView;
@@ -1993,6 +2070,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ids->programQuad = createShader(vertexShaderQuad, fragmentShaderQuad, &ids->quadVertex, &ids->quadFragment);
 		ids->quadVertexMod = glGetUniformLocation(ids->quadVertex, "mod");
 		ids->quadVertexUV = glGetUniformLocation(ids->quadVertex, "setUV");
+		ids->quadVertexTexZ = glGetUniformLocation(ids->quadVertex, "texZ");
 		ids->quadVertexColor = glGetUniformLocation(ids->quadVertex, "setColor");
 		ids->quadVertexCamera = glGetUniformLocation(ids->quadVertex, "camera");
 		ad->programs[0] = ids->programQuad;
@@ -2005,6 +2083,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		ids->cubeVertexMode = glGetUniformLocation(ids->cubeVertex, "mode");
 		ids->cubeVertexVertices = glGetUniformLocation(ids->cubeVertex, "vertices");
+
+		ids->cubeVertexCPlane = glGetUniformLocation(ids->cubeVertex, "cPlane");
+
 		ad->programs[1] = ids->programCube;
 
 
@@ -2096,63 +2177,19 @@ extern "C" APPMAINFUNCTION(appMain) {
 		strAppend(p, "..\\data\\minecraft textures\\");
 
 		char* fullPath = getTString(234);
+		glTextureStorage3D(ad->voxelTextures[0], 6, GL_RGBA8, 32, 32, BX_Size);
 
-		// texId = ad->voxelTextures[0];
-		// glTextureStorage3D(texId, 6, internalFormat, width, height, texCount);
-		// for(int tc = 0; tc < texCount; tc++) {
-		// 	unsigned char* stbData;
-		// 	int x,y,n;
-
-		// 	strClear(fullPath);
-		// 	strAppend(fullPath, p);
-		// 	strAppend(fullPath, files[tc]);
-		// 	stbData = stbi_load(fullPath, &x, &y, &n, 4);
-
-		// 	if(x == width && y == height) {
-		// 		glTextureSubImage3D(texId, 0, 0, 0, tc, x, y, 1, format, GL_UNSIGNED_BYTE, stbData);
-		// 		glGenerateTextureMipmap(texId);
-
-		// 		ad->textures[ad->texCount++] = loadTexture(stbData, x, y, 2, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
-		// 	}
-
-		// 	stbi_image_free(stbData);
-		// }
-
-
-		// glTextureStorage3D(ad->voxelTextures[0], 6, GL_RGBA8, 32, 32, BX_Size);
-
-		// for(int layerIndex = 0; layerIndex < BX_Size; layerIndex++) {
-		// 	char* filePath;
-		// 	if(layerIndex == 0) filePath = "..\\data\\minecraft textures\\none.png";
-		// 	else if(layerIndex == 1) filePath = "..\\data\\minecraft textures\\water.png";
-		// 	else if(layerIndex == 2) filePath = "..\\data\\minecraft textures\\sand.png";
-		// 	else if(layerIndex == 3) filePath = "..\\data\\minecraft textures\\grass.png";
-		// 	else if(layerIndex == 4) filePath = "..\\data\\minecraft textures\\stone.png";
-		// 	else if(layerIndex == 5) filePath = "..\\data\\minecraft textures\\snow.png";
-
-		// 	int x,y,n;
-		// 	unsigned char* stbData = stbi_load(filePath, &x, &y, &n, 4);
+		for(int layerIndex = 0; layerIndex < BX_Size; layerIndex++) {
+			int x,y,n;
+			unsigned char* stbData = stbi_load(textureFilePaths[layerIndex], &x, &y, &n, 4);
 			
-		// 	glTextureSubImage3D(ad->voxelTextures[0], 0, 0, 0, layerIndex, x, y, 1, GL_RGBA, GL_UNSIGNED_BYTE, stbData);
-		// 	glGenerateTextureMipmap(ad->voxelTextures[0]);
+			glTextureSubImage3D(ad->voxelTextures[0], 0, 0, 0, layerIndex, x, y, 1, GL_RGBA, GL_UNSIGNED_BYTE, stbData);
+			glGenerateTextureMipmap(ad->voxelTextures[0]);
 
-		// 	stbi_image_free(stbData);
-		// }
-
-			glTextureStorage3D(ad->voxelTextures[0], 6, GL_RGBA8, 32, 32, BX_Size);
-
-			for(int layerIndex = 0; layerIndex < BX_Size; layerIndex++) {
-				int x,y,n;
-				unsigned char* stbData = stbi_load(textureFilePaths[layerIndex], &x, &y, &n, 4);
-				
-				glTextureSubImage3D(ad->voxelTextures[0], 0, 0, 0, layerIndex, x, y, 1, GL_RGBA, GL_UNSIGNED_BYTE, stbData);
-				glGenerateTextureMipmap(ad->voxelTextures[0]);
-
-				stbi_image_free(stbData);
-			}
+			stbi_image_free(stbData);
+		}
 
 
-		// ad->textures[ad->texCount++] = loadTexture("..\\data\\minecraft textures\\water.png", x, y, 2, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
 
 
 		glTextureStorage3D(ad->voxelTextures[1], 6, GL_RGBA8, 32, 32, 1);
@@ -2170,10 +2207,16 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-		glCreateFramebuffers(2, ad->frameBuffers);
+		glCreateFramebuffers(3, ad->frameBuffers);
 		glCreateRenderbuffers(2, ad->renderBuffers);
-		glCreateTextures(GL_TEXTURE_2D, 2, ad->frameBufferTextures);
+		glCreateTextures(GL_TEXTURE_2D, 1, ad->frameBufferTextures);
+		// glCreateTextures(GL_TEXTURE_2D_MULTISAMPLE, 2, ad->frameBufferTextures + 1);
+		// glCreateTextures(GL_TEXTURE_2D_MULTISAMPLE, 2, ad->frameBufferTextures + 1);
+		glCreateTextures(GL_TEXTURE_2D, 2, ad->frameBufferTextures + 1);
+		// glCreateTextures(GL_TEXTURE_2D_MULTISAMPLE, 1, ad->frameBufferTextures + 2);
+
 		// GLenum result = glCheckNamedFramebufferStatus(ad->frameBuffers[0], GL_FRAMEBUFFER);
+
 
 
 
@@ -2228,8 +2271,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// setWindowProperties(windowHandle, wSettings->res.w, wSettings->res.h, 0, 0);
 		setWindowStyle(windowHandle, wSettings->style);
 		setWindowMode(windowHandle, wSettings, WINDOW_MODE_FULLBORDERLESS);
+		
 
-		updateAfterWindowResizing(wSettings, &ad->aspectRatio, ad->frameBuffers[0], ad->frameBuffers[1], ad->renderBuffers[0], ad->renderBuffers[1], &ad->frameBufferTextures[0], ad->msaaSamples, &ad->fboRes, &ad->curRes, ad->useNativeRes);
+// void updateAfterWindowResizing(WindowSettings* wSettings, float* ar, uint fb0, uint fb1, uint fb2, uint rb0, uint rb1, uint* fbt, uint* fbt2, uint* fbt3, int msaaSamples, Vec2i* fboRes, Vec2i* curRes, bool useNativeRes) {
+
+		updateAfterWindowResizing(wSettings, &ad->aspectRatio, ad->frameBuffers[0], ad->frameBuffers[1], ad->frameBuffers[2], ad->renderBuffers[0], ad->renderBuffers[1], &ad->frameBufferTextures[0], &ad->frameBufferTextures[1], &ad->frameBufferTextures[2], ad->msaaSamples, &ad->fboRes, &ad->curRes, ad->useNativeRes);
 	}
 
 	if(reload) {
@@ -2271,7 +2317,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		else mode = WINDOW_MODE_FULLBORDERLESS;
 		setWindowMode(windowHandle, wSettings, mode);
 
-		updateAfterWindowResizing(wSettings, &ad->aspectRatio, ad->frameBuffers[0], ad->frameBuffers[1], ad->renderBuffers[0], ad->renderBuffers[1], &ad->frameBufferTextures[0], ad->msaaSamples, &ad->fboRes, &ad->curRes, ad->useNativeRes);
+		updateAfterWindowResizing(wSettings, &ad->aspectRatio, ad->frameBuffers[0], ad->frameBuffers[1], ad->frameBuffers[2], ad->renderBuffers[0], ad->renderBuffers[1], &ad->frameBufferTextures[0], &ad->frameBufferTextures[1], &ad->frameBufferTextures[2], ad->msaaSamples, &ad->fboRes, &ad->curRes, ad->useNativeRes);
 
 		// static float d = 0;
 		// d += ad->dt;
@@ -2841,7 +2887,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-
 	// Vec3 skyColor = vec3(0.90f, 0.90f, 0.95f);
 	// Vec3 skyColor = vec3(0.95f);
 	Vec3 skyColor = vec3(0.90f);
@@ -2856,12 +2901,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glViewport(0,0, ad->curRes.x, ad->curRes.y);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	glBindFramebuffer (GL_DRAW_FRAMEBUFFER, ad->frameBuffers[1]);
+	glBindFramebuffer (GL_FRAMEBUFFER, ad->frameBuffers[1]);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	// glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[0]);
 	glClearColor(skyColor.x, skyColor.y, skyColor.z, 0.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	// glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 	// glDepthRange(-1.0,1.0);
 	glFrontFace(GL_CW);
 
@@ -2936,7 +2983,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				m->upToDate = false;
 				m->meshUploaded = false;
 
-				m->generated = false;
+				// m->generated = false;
 			}
 		}
 		return;
@@ -3101,10 +3148,313 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// 	assert(sortList[i].key <= sortList[i+1].key);
 	// }
 
+	// for(int i = sortListSize-1; i >= 0; i--) {
+	// 	VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
+	// 	drawVoxelMesh(m, 0);
+	// }
+
+
+
+	float waterMark = 22;
+
+	// draw world without water
 	for(int i = sortListSize-1; i >= 0; i--) {
 		VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
-		drawVoxelMesh(m);
+		drawVoxelMesh(m, 2);
 	}
+
+
+	// draw stencil
+	glEnable(GL_STENCIL_TEST);
+		glStencilMask(0xFF);
+		glClear(GL_STENCIL_BUFFER_BIT);
+		glStencilFunc(GL_ALWAYS, 1, 0xFF);
+		glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+		glDepthMask(GL_FALSE);
+
+	glEnable(GL_CLIP_DISTANCE0);
+	uint clipLoc = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "cPlane");
+	glProgramUniform4f(globalGraphicsState->pipelineIds.voxelVertex, clipLoc, 0,0,1,-waterMark);
+	// glDepthMask(GL_FALSE);
+	glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+	for(int i = 0; i < sortListSize; i++) {
+		VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
+
+		drawVoxelMesh(m, 1);
+	}
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor);
+	// glDisable(GL_CLIP_DISTANCE0);
+
+	glDepthMask(GL_TRUE);
+	glDisable(GL_STENCIL_TEST);
+
+
+				// // draw reflection
+				// glEnable(GL_STENCIL_TEST);
+				// glStencilFunc(GL_EQUAL, 1, 0xFF);
+				// glStencilMask(0x00);
+				// glDepthMask(GL_TRUE);
+				// // glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+				// 	// setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor, vec3(0,0,50), vec3(1,1,-1));
+				// 	// for(int i = sortListSize-1; i >= 0; i--) {
+				// 	// 	VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
+
+				// 	// 	drawVoxelMesh(m, 2);
+				// 	// }
+
+				// 	glBindProgramPipeline(globalGraphicsState->pipelineIds.programCube);
+
+				// 	// float waterMark = 22;
+				// 	static float delta = 0;
+				// 	delta += ad->dt;
+
+				// 	glEnable(GL_CLIP_DISTANCE0);
+
+				// 	glDisable(GL_DEPTH_TEST);
+				// 	Vec3 planePos = vec3(0,0,waterMark);
+				// 	Vec3 planeNormal = vec3(0,0,1);
+				// 	Vec4 plane = vec4(planeNormal, -dot(planeNormal, planePos));
+				// 	glFrontFace(GL_CCW);
+
+				// 	setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor, vec3(0,0,waterMark*2 + 0.01f), vec3(1,1,-1));
+				// 	// setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor, vec3(0,0,45), vec3(1,1,-1));
+				// 	clipLoc = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "cPlane");
+				// 	glProgramUniform4f(globalGraphicsState->pipelineIds.voxelVertex, clipLoc, 0,0,-1,waterMark);
+				// 	for(int i = sortListSize-1; i >= 0; i--) {
+				// 		VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
+
+				// 		drawVoxelMesh(m, 0);
+				// 	}
+				// 	setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor);
+
+
+				// 	glFrontFace(GL_CW);
+				// 	glEnable(GL_DEPTH_TEST);
+
+				// 	glDisable(GL_CLIP_DISTANCE0);
+
+				// // glDepthMask(GL_FALSE);
+				// glDisable(GL_STENCIL_TEST);
+
+
+
+		// draw reflection
+		glEnable(GL_STENCIL_TEST);
+		glStencilFunc(GL_EQUAL, 1, 0xFF);
+		glStencilMask(0x00);
+		glDepthMask(GL_TRUE);
+		// glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+
+			// float waterMark = 22;
+			static float delta = 0;
+			delta += ad->dt;
+
+			glEnable(GL_CLIP_DISTANCE0);
+
+			glEnable(GL_DEPTH_TEST);
+			Vec3 planePos = vec3(0,0,waterMark);
+			Vec3 planeNormal = vec3(0,0,1);
+			Vec4 plane = vec4(planeNormal, -dot(planeNormal, planePos));
+			glFrontFace(GL_CCW);
+
+			setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor, vec3(0,0,waterMark*2 + 0.01f), vec3(1,1,-1));
+			// setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor, vec3(0,0,45), vec3(1,1,-1));
+			clipLoc = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "cPlane");
+			glProgramUniform4f(globalGraphicsState->pipelineIds.voxelVertex, clipLoc, 0,0,-1,waterMark);
+				
+
+			glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[2]);
+			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+
+			// ortho(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0));
+			// glDisable(GL_DEPTH_TEST);
+			// glBindProgramPipeline(globalGraphicsState->pipelineIds.programQuad);
+
+			glBindFramebuffer (GL_READ_FRAMEBUFFER, ad->frameBuffers[0]);
+			glBindFramebuffer (GL_DRAW_FRAMEBUFFER, ad->frameBuffers[2]);
+		// GLenum glError = glGetError(); printf("GLErrora: %i\n", glError);
+			glBlitFramebuffer (0,0, ad->curRes.x, ad->curRes.y,
+			                   0,0, ad->curRes.x, ad->curRes.y,
+			                   // GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT,
+			                   GL_STENCIL_BUFFER_BIT,
+			                   GL_NEAREST);
+		// glError = glGetError(); printf("GLErrorb: %i\n", glError);
+
+			glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[2]);
+
+			// draw reflection
+			glEnable(GL_STENCIL_TEST);
+			glStencilFunc(GL_EQUAL, 1, 0xFF);
+			glStencilMask(0x00);
+			glDepthMask(GL_TRUE);
+
+				for(int i = sortListSize-1; i >= 0; i--) {
+					VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
+					drawVoxelMesh(m, 0);
+				}
+
+			// glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[0]);
+			glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[0]);
+
+			setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor);
+
+
+			glFrontFace(GL_CW);
+			glEnable(GL_DEPTH_TEST);
+
+			glDisable(GL_CLIP_DISTANCE0);
+
+		// glDepthMask(GL_FALSE);
+		glDisable(GL_STENCIL_TEST);
+
+
+
+
+
+
+		ortho(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0));
+		glViewport(0,0, wSettings->currentRes.x, wSettings->currentRes.y);
+		glDisable(GL_DEPTH_TEST);
+
+		glBindProgramPipeline(globalGraphicsState->pipelineIds.programQuad);
+		drawRect(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0), rect(0,1,1,0), vec4(1,1,1,0.5f), ad->frameBufferTextures[1]);
+
+		// glBindFramebuffer (GL_FRAMEBUFFER, 0);	
+		glEnable(GL_DEPTH_TEST);
+
+
+
+
+
+
+	// draw water
+	for(int i = sortListSize-1; i >= 0; i--) {
+		VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
+		drawVoxelMesh(m, 1);
+	}
+
+
+
+
+
+
+
+	glBindProgramPipeline(globalGraphicsState->pipelineIds.programCube);
+
+	// glEnable(GL_STENCIL_TEST);
+
+	// glStencilFunc(GL_ALWAYS, 1, 0xFF);
+	// glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+	// glStencilMask(0xFF);
+	// // glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+	// glDepthMask(GL_FALSE);
+	// // glClear(GL_STENCIL_BUFFER_BIT);
+
+	// static float delta = 0;
+	// delta += ad->dt;
+	// // // drawCube(ad->activeCamPos + ad->activeCamLook*10, vec3(3,3,3), vec4(0,0,0,1), delta, normVec3(vec3(1,1,0)));
+	// drawCube(ad->activeCamPos + ad->activeCamLook*10, vec3(3,3,3), vec4(1,1,0,1), delta, normVec3(vec3(1,1,0)));
+
+		// glStencilFunc(GL_EQUAL, 1, 0xFF);
+		// glStencilMask(0x00);
+		// // glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+		// glDepthMask(GL_TRUE);
+
+		// // static float delta = 0;
+		// // delta += ad->dt;
+		// glDisable(GL_DEPTH_TEST);
+		// drawCube(ad->activeCamPos + ad->activeCamLook*10, vec3(6,2,2), vec4(1,0,1,1), 0, normVec3(vec3(0,0,0)));
+		// glEnable(GL_DEPTH_TEST);
+
+
+	// glEnable(GL_STENCIL_TEST);
+	// glStencilFunc(GL_EQUAL, 1, 0xFF);
+	// glStencilMask(0x00);
+	// // glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	// glDepthMask(GL_TRUE);
+
+	// glDrawArrays(GL_QUADS, 0, m->quadCount*4);
+
+	// glDepthMask(GL_FALSE);
+	// glDisable(GL_STENCIL_TEST);
+
+
+	// glDisable(GL_DEPTH_TEST);
+	// setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor, vec3(0,0,40), vec3(1,1,-1));
+
+	// for(int i = sortListSize-1; i >= 0; i--) {
+	// 	VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
+	// 	drawVoxelMesh(m,0);
+	// }
+	// glEnable(GL_DEPTH_TEST);
+
+
+
+
+	// Vec3 cubePos = vec3(-33, 58, 25);
+	// Vec3 cubeSize = vec3(2,2,5);
+	// drawCube(cubePos, cubeSize, vec4(1,0,1,1), 0, vec3(0,0,0));
+
+		// float waterMark = 22;
+		// Vec3 cubeSize = vec3(2,2,5);
+		// // Vec3 cubePos = vec3(-33, 58, waterMark + cubeSize.z*0.5f);
+
+		// static float delta = 0;
+		// delta += ad->dt;
+
+		// Vec3 cubePos = vec3(-40, 58, waterMark + cubeSize.z*0.5f + sin(delta));
+		// float cubeRotDegrees = 1;
+		// Vec3 cubeRot = vec3(1,0,0);
+
+
+
+		// glEnable(GL_STENCIL_TEST);
+
+		// glStencilFunc(GL_EQUAL, 1, 0xFF);
+		// glStencilMask(0x00);
+		// // glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+		// glDepthMask(GL_TRUE);
+
+
+		// glEnable(GL_CLIP_DISTANCE0);
+
+		// glDisable(GL_DEPTH_TEST);
+		// Vec3 planePos = vec3(0,0,waterMark);
+		// Vec3 planeNormal = vec3(0,0,1);
+		// Vec4 plane = vec4(planeNormal, -dot(planeNormal, planePos));
+		// glProgramUniform4f(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexCPlane, 0,0,-1,waterMark);
+		// glFrontFace(GL_CCW);
+		// drawCube(cubePos - vec3(0,0,(cubePos.z-waterMark)*2), cubeSize*vec3(1,1,-1), vec4(0.5f,0,0.9f,0.5f), -cubeRotDegrees, cubeRot);
+		// glFrontFace(GL_CW);
+		// glEnable(GL_DEPTH_TEST);
+
+		// glDisable(GL_CLIP_DISTANCE0);
+
+		// glDisable(GL_STENCIL_TEST);
+
+
+		// glEnable(GL_CLIP_DISTANCE0);
+		// glProgramUniform4f(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexCPlane, 0,0,1,-waterMark);
+		// drawCube(cubePos, cubeSize, vec4(1,0,1,1), cubeRotDegrees, cubeRot);
+		// glDisable(GL_CLIP_DISTANCE0);
+
+
+
+	// glEnable(GL_CLIP_DISTANCE0);
+	// // glProgramUniform4f(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexCPlane, plane.x, plane.y, plane.z, plane.w);
+	// glProgramUniform4f(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexCPlane, 0,1,0,0);
+	// drawCube(vec3(0,0,sin(delta)*10), vec3(20,30,40), vec4(0.5f,0,0.9f,0.5f), 0, vec3(0,0,0));
+	// glDisable(GL_CLIP_DISTANCE0);
+
+
+
+
+
+
+
+
+
 
 
 
@@ -3114,8 +3464,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// for(int i = 0; i < 10; i++) dcCube({vec3(i*10,0,0) + off, s, vec4(0,1,1,1), 0, vec3(1,2,3)});
 	// for(int i = 0; i < 10; i++) dcCube({vec3(0,i*10,0) + off, s, vec4(0,1,1,1), 0, vec3(1,2,3)});
 	// for(int i = 0; i < 10; i++) dcCube({vec3(0,0,i*10) + off, s, vec4(0,1,1,1), 0, vec3(1,2,3)});
-
-
 
 	dcLineWidth({3});
 
@@ -3166,7 +3514,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-
+	// @menu
 	if(ad->playerMode) {
 		for(int i = 0; i < 10; i++) {
 			ad->blockMenu[i] = i+1;
@@ -3195,12 +3543,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			Vec2 pos = vec2(start + i*(iconSize.w + iconDist), -res.y*bottom);
 			dcRect({rectCenDim(pos, iconSize*1.2f*iconOff), rect(0,0,1,1), vec4(vec3(0.1f),trans), 1});
-			dcRect({rectCenDim(pos, iconSize*iconOff), rect(0,0,1,1), color, 6+i});
+
+			uint textureId = ad->voxelTextures[0];
+			dcRect({rectCenDim(pos, iconSize*iconOff), rect(0,0,1,1), color, textureId, texture1Faces[i+1][0]+1});
 		}
 	}
-
-
-
 
 
 
@@ -3298,7 +3645,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		switch(command) {
 			case Draw_Command_Rect_Type: {
 				dcCase(Rect, dc, drawListIndex2);
-				drawRect(dc.r, dc.uv, dc.color, dc.texture);
+				drawRect(dc.r, dc.uv, dc.color, dc.texture, dc.texZ-1);
 			} break;
 
 			case Draw_Command_Text_Type: {
@@ -3310,6 +3657,181 @@ extern "C" APPMAINFUNCTION(appMain) {
 			} break;
 		}
 	}
+
+	#if 0
+	stbvox_mesh_maker mm;
+	stbvox_init_mesh_maker(&mm);
+	stbvox_input_description* inputDesc = stbvox_get_input_description(&mm);
+	*inputDesc = {};
+
+	int meshBufferCapacity = 100;
+	char* meshBuffer = (char*)getTMemory(meshBufferCapacity);
+	int texBufferCapacity = meshBufferCapacity/4;
+	char* texBuffer = (char*)getTMemory(texBufferCapacity);
+
+	int meshBufferTransCapacity = 100;
+	char* meshBufferTrans = (char*)getTMemory(meshBufferTransCapacity);
+	int texBufferTransCapacity = meshBufferTransCapacity/4;
+	char* texBufferTrans = (char*)getTMemory(texBufferTransCapacity);
+
+	stbvox_set_buffer(&mm, 0, 0, meshBuffer, meshBufferCapacity);
+	stbvox_set_buffer(&mm, 1, 0, meshBufferTrans, meshBufferTransCapacity);
+	stbvox_set_buffer(&mm, 0, 1, texBuffer, texBufferCapacity);
+	stbvox_set_buffer(&mm, 1, 1, texBufferTrans, texBufferTransCapacity);
+
+	inputDesc->block_tex2 = texture2;
+	inputDesc->block_tex1_face = texture1Faces;
+	inputDesc->block_geometry = geometry;
+	inputDesc->block_selector = meshSelection;
+
+	uchar color[BT_Size];
+	for(int i = 0; i < BT_Size; i++) color[i] = STBVOX_MAKE_COLOR(blockColor[i], 1, 0);
+	inputDesc->block_color = color;
+
+	unsigned char tLerp[50] = {};
+	// for(int i = 1; i < arrayCount(tLerp)-1; i++) tLerp[i] = 6;
+	// tLerp[10] = 4;
+	inputDesc->block_texlerp = tLerp;
+
+
+
+	stbvox_set_input_stride(&mm, 3*3,3);
+	stbvox_set_input_range(&mm, 0,0,0, 1,1,1);
+
+	uchar voxels[3][3][3] = {};
+	voxels[1][1][1] = BT_Water;
+
+	uchar lighting[3][3][3] = {};
+	for(int i = 0; i < 27; i++) *((&lighting[0][0][0])+i) = 255;
+	lighting[1][1][1] = 0;
+
+	inputDesc->blocktype = &voxels[1][1][1];
+	inputDesc->lighting = &lighting[1][1][1];
+
+	int success = stbvox_make_mesh(&mm);
+
+
+	// Vec3 pos = ad->activeCamPos + ad->activeCamLook * 20;
+	// stbvox_set_mesh_coordinates(&mm, pos.x, pos.y, pos.z);
+	stbvox_set_mesh_coordinates(&mm, 0,0,30);
+
+	float transform[3][3];
+	stbvox_get_transform(&mm, transform);
+
+	int quadCount = stbvox_get_quad_count(&mm, 0);
+	int quadCountTrans = stbvox_get_quad_count(&mm, 1);
+
+	int bufferSizePerQuad = stbvox_get_buffer_size_per_quad(&mm, 0);
+	int textureBufferSizePerQuad = stbvox_get_buffer_size_per_quad(&mm, 1);
+
+
+	static bool setup = true;
+	static uint textureId, textureTransId, bufferId, texBufferId, bufferTransId, texBufferTransId;
+	if(setup) {
+		glCreateBuffers(1, &bufferId);
+		glCreateBuffers(1, &bufferTransId);
+		glCreateBuffers(1, &texBufferId);
+		glCreateTextures(GL_TEXTURE_BUFFER, 1, &textureId);
+		glCreateBuffers(1, &texBufferTransId);
+		glCreateTextures(GL_TEXTURE_BUFFER, 1, &textureTransId);
+		setup = false;
+	}
+
+	glNamedBufferData(bufferId, bufferSizePerQuad*quadCount, meshBuffer, GL_STATIC_DRAW);
+	glBindBuffer(GL_ARRAY_BUFFER, bufferId);
+	glNamedBufferData(texBufferId, textureBufferSizePerQuad*quadCount, texBuffer, GL_STATIC_DRAW);
+	glTextureBuffer(textureId, GL_RGBA8UI, texBufferId);
+	glNamedBufferData(bufferTransId, bufferSizePerQuad*quadCountTrans, meshBufferTrans, GL_STATIC_DRAW);
+	glBindBuffer(GL_ARRAY_BUFFER, bufferTransId);
+	glNamedBufferData(texBufferTransId, textureBufferSizePerQuad*quadCountTrans, texBufferTrans, GL_STATIC_DRAW);
+	glTextureBuffer(textureTransId, GL_RGBA8UI, texBufferTransId);
+
+
+
+
+
+
+	GLuint transformUniform1 = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "transform");
+	glProgramUniform3fv(globalGraphicsState->pipelineIds.voxelVertex, transformUniform1, 3, transform[0]);
+	GLuint transformUniform2 = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelFragment, "transform");
+	glProgramUniform3fv(globalGraphicsState->pipelineIds.voxelFragment, transformUniform2, 3, transform[0]);
+
+
+
+	glBindBuffer(GL_ARRAY_BUFFER, bufferId);
+	int vaLoc = glGetAttribLocation(globalGraphicsState->pipelineIds.voxelVertex, "attr_vertex");
+	glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 4, (void*)0);
+	glEnableVertexAttribArray(vaLoc);
+
+	globalGraphicsState->textureUnits[2] = textureId;
+	glBindTextures(0,16,globalGraphicsState->textureUnits);
+	glBindSamplers(0,16,globalGraphicsState->samplerUnits);
+	glBindProgramPipeline(globalGraphicsState->pipelineIds.programVoxel);
+
+	glDrawArrays(GL_QUADS, 0, quadCount*4);
+
+
+
+	glBindBuffer(GL_ARRAY_BUFFER, bufferTransId);
+	vaLoc = glGetAttribLocation(globalGraphicsState->pipelineIds.voxelVertex, "attr_vertex");
+	glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 4, (void*)0);
+	glEnableVertexAttribArray(vaLoc);
+
+	globalGraphicsState->textureUnits[2] = textureTransId;
+	glBindTextures(0,16,globalGraphicsState->textureUnits);
+	glBindSamplers(0,16,globalGraphicsState->samplerUnits);
+	glBindProgramPipeline(globalGraphicsState->pipelineIds.programVoxel);
+		
+		// glEnable(GL_STENCIL_TEST);
+
+		// glStencilFunc(GL_ALWAYS, 1, 0xFF);
+		// glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+		// glStencilMask(0xFF);
+		// // glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+		// glDepthMask(GL_FALSE);
+		// glClear(GL_STENCIL_BUFFER_BIT);
+
+	glDrawArrays(GL_QUADS, 0, quadCountTrans*4);
+
+
+
+
+
+	glBindProgramPipeline(globalGraphicsState->pipelineIds.programCube);
+
+	glEnable(GL_STENCIL_TEST);
+
+	glStencilFunc(GL_ALWAYS, 1, 0xFF);
+	glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+	glStencilMask(0xFF);
+	// glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+	glDepthMask(GL_FALSE);
+	glClear(GL_STENCIL_BUFFER_BIT);
+
+	static float delta = 0;
+	delta += ad->dt;
+	// // drawCube(ad->activeCamPos + ad->activeCamLook*10, vec3(3,3,3), vec4(0,0,0,1), delta, normVec3(vec3(1,1,0)));
+	drawCube(ad->activeCamPos + ad->activeCamLook*10, vec3(3,3,3), vec4(1,1,0,1), delta, normVec3(vec3(1,1,0)));
+
+	glStencilFunc(GL_EQUAL, 1, 0xFF);
+	glStencilMask(0x00);
+	// glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	glDepthMask(GL_TRUE);
+
+	// static float delta = 0;
+	// delta += ad->dt;
+	drawCube(ad->activeCamPos + ad->activeCamLook*10, vec3(6,2,2), vec4(1,0,1,1), 0, normVec3(vec3(0,0,0)));
+
+	glDisable(GL_STENCIL_TEST);
+
+
+	#endif 
+
+	// drawRect(rectCenDim(0, 0, 0.01f, 100), rect(0,0,1,1), vec4(0.4f,1,0.4f,1), ad->textures[0]);
+
+	drawRect(rectCenDim(200,-200, 200,200), rect(0,0,1,1), vec4(1,1,1,1), ad->frameBufferTextures[1]);
+	// drawRect(rectCenDim(200,-200, 200,200), rect(0,0,1,1), vec4(1,1,1,1), ad->frameBufferTextures[1]);
+
 
 	swapBuffers(&ad->systemData);
 	glFinish();
