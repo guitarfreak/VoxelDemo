@@ -1568,7 +1568,9 @@ static const char *stbvox_vertex_program =
       STBVOX_SHADER_VERSION
 
       "uniform mat4x4 model;\n"
+      "uniform bool clipPlane;\n"
       "uniform vec4 cPlane;\n"
+      "uniform vec4 cPlane2;\n"
 
    #ifdef STBVOX_ICONFIG_FACE_ATTRIBUTE  // NOT TAG_face_sampled
       "in uvec4 attr_face;\n"
@@ -1638,7 +1640,10 @@ static const char *stbvox_vertex_program =
          "   gl_Position = gl_ModelViewProjectionMatrix * vec4(position,1.0);\n"
       #endif
 
-         "gl_ClipDistance[0] = dot(cPlane, model*vec4(position,1));\n"
+         "if(clipPlane) {\n"
+         	"gl_ClipDistance[0] = dot(cPlane, model*vec4(position,1));\n"
+         	"gl_ClipDistance[1] = dot(cPlane2, model*vec4(position,1));\n"
+         "}\n"
 
       "}\n"
 };
@@ -1828,7 +1833,7 @@ static const char *stbvox_fragment_program =
       #else
       "   vec4 final_color = vec4(lit_color, fragment_alpha);\n"
       #endif
-      "   if(final_color.a <= 0.1f) discard;\n" // really?
+      "   if(final_color.a <= 0.3f) discard;\n" // really?
       
       "   outcolor = final_color;\n"
       // "   outcolor = vec4(1,1,0,1);\n"

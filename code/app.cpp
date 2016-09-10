@@ -27,11 +27,10 @@
 #include "stb_voxel_render.h"
 
 
-
+/*
 //-----------------------------------------
 //				WHAT TO DO
 //-----------------------------------------
-/*
 - Joysticks, Keyboard, Mouse, Xinput-DirectInput
 - Sound
 - Data Package - Streamingw
@@ -61,6 +60,10 @@
 - pink noise from old projects
 
 - stb_voxel push block_selector, alpha test, clipping in voxel vertex shader
+- maybe streamline coordinate transform functions to be more clear some time
+
+- activate opengl debug output!
+- small menu
 
 //-------------------------------------
 //               BUGS
@@ -72,11 +75,11 @@
 - game input gets stuck when buttons are pressed right at the start
 - sort key assert firing randomly
 - hotload gets stuck sometimes, thread that won't complete
+- trees no shadows?
 */
 
 /*
 	- 32x32 gen chunks
-	- water reflections almost done
 */
 
 MemoryBlock* globalMemory;
@@ -192,6 +195,7 @@ DrawCommandList* globalCommandList2d;
 		GLOP(void, BindFramebuffer, GLenum target, GLuint framebuffer) \
 		GLOP(void, NamedFramebufferDrawBuffer, GLuint framebuffer, GLenum buf) \
 		GLOP(void, BlitFramebuffer, GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter) \
+		GLOP(void, BlitNamedFramebuffer, GLuint readFramebuffer, GLuint drawFramebuffer, GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter) \
 		GLOP(void, NamedFramebufferTexture, GLuint framebuffer, GLenum attachment, GLuint texture, GLint level) \
 		GLOP(void, TextureStorage2DMultisample, GLuint texture, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height, GLboolean fixedsamplelocations) \
 		GLOP(void, TexImage2DMultisample, GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height, GLboolean fixedsamplelocations) \
@@ -514,7 +518,6 @@ const char* vertexShaderCube = GLSL (
 	uniform bool mode;
 
 	uniform vec4 setColor;
-
 	uniform vec4 cPlane;
 
 	void main() {
@@ -671,48 +674,6 @@ const char* fragmentShaderQuad = GLSL (
 // 		color = Color;
 // 	}
 // );
-
-
-void updateAfterWindowResizing(WindowSettings* wSettings, float* ar, uint fb0, uint fb1, uint fb2, uint rb0, uint rb1, uint* fbt, uint* fbt2, uint* fbt3, int msaaSamples, Vec2i* fboRes, Vec2i* curRes, bool useNativeRes) {
-	*ar = wSettings->aspectRatio;
-	
-	fboRes->x = fboRes->y*(*ar);
-
-	if(useNativeRes) *curRes = wSettings->currentRes;
-	else *curRes = *fboRes;
-
-	Vec2i s = *curRes;
-
-	glNamedRenderbufferStorageMultisample(rb0, msaaSamples, GL_RGBA8, s.w, s.h);
-	// glNamedRenderbufferStorageMultisample(rb1, msaaSamples, GL_DEPTH_COMPONENT, s.w, s.h);
-	glNamedRenderbufferStorageMultisample(rb1, msaaSamples, GL_DEPTH_STENCIL, s.w, s.h);
-
-	glDeleteTextures(1, fbt);
-	glCreateTextures(GL_TEXTURE_2D, 1, fbt);
-	glTextureStorage2D(*fbt, 1, GL_RGBA8, s.w, s.h);
-
-	glNamedFramebufferRenderbuffer(fb0, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, rb0);
-	// glNamedFramebufferRenderbuffer(fb0, GL_DEPTH_ATTACHMENT,  GL_RENDERBUFFER, rb1);
-	glNamedFramebufferRenderbuffer(fb0, GL_DEPTH_STENCIL_ATTACHMENT,  GL_RENDERBUFFER, rb1);
-
-	glNamedFramebufferTexture(fb1, GL_COLOR_ATTACHMENT0, *fbt, 0);
-
-
-	glDeleteTextures(1, fbt2);
-	glCreateTextures(GL_TEXTURE_2D, 1, fbt2);
-	glTextureStorage2D(*fbt2, 1, GL_RGBA8, s.w, s.h);
-
-	glDeleteTextures(1, fbt3);
-	// glCreateTextures(GL_TEXTURE_2D_MULTISAMPLE, 1, fbt3);
-	glCreateTextures(GL_TEXTURE_2D, 1, fbt3);
-	// glTextureStorage2DMultisample(*fbt3, msaaSamples, GL_DEPTH_STENCIL, s.w, s.h, false);
-	// glTextureStorage2DMultisample(*fbt3, msaaSamples, GL_UNSIGNED_INT_24_8, s.w, s.h, false);
-	// glTextureStorage2DMultisample(*fbt3, msaaSamples, GL_DEPTH_COMPONENT24, s.w, s.h, false);
-	glTextureStorage2D(*fbt3, 1, GL_DEPTH24_STENCIL8, s.w, s.h);
-
-	glNamedFramebufferTexture(fb2, GL_COLOR_ATTACHMENT0, *fbt2, 0);
-	glNamedFramebufferTexture(fb2, GL_DEPTH_STENCIL_ATTACHMENT, *fbt3, 0);
-}
 
 
 void drawRect(Rect r, Rect uv, Vec4 color, int texture, float texZ = -1) {
@@ -1033,7 +994,7 @@ const char* textureFilePaths[BX_Size] = {
 	"..\\data\\minecraft textures\\pumpkin_bottom.png",
 };
 
-uchar blockColor[BT_Size] = {0,0,0,0,0,0,0,21,0,1,0};
+uchar blockColor[BT_Size] = {0,0,0,0,0,0,0,21,0,0,0};
 uchar texture2[BT_Size] = {0,1,1,1,1,1,1,1,1,1,1};
 
 #define allTexSame(t) t,t,t,t,t,t
@@ -1240,7 +1201,7 @@ void generateVoxelMeshThreaded(void* data) {
 		    		// static int startXMod = randomInt(0,10000);
 		    		// static int startYMod = randomInt(0,10000);
 
-		    		// float height = perlin2d(gx+4000+startX, gy+4000+startY, 0.004f, 7);w
+		    		// float height = perlin2d(gx+4000+startX, gy+4000+startY, 0.004f, 7);
 		    		float height = perlin2d(gx+4000+startX, gy+4000+startY, 0.004f, 6);
 		    		height -= 0.1f; 
 
@@ -1295,8 +1256,6 @@ void generateVoxelMeshThreaded(void* data) {
 
 		    for(int i = 0; i < treePositionsSize; i++) {
 		    	Vec3i p = treePositions[i];
-				// m->voxels[voxelArray(p.x,p.y,p.z)] = BT_TreeLog;	    			
-
 				int treeHeight = randomInt(4,6);
 
 				Rect3 leaves = rect3CenDim(vec3(p.x, p.y, p.z+treeHeight), vec3(5,5,3));
@@ -1305,12 +1264,15 @@ void generateVoxelMeshThreaded(void* data) {
 					for(int y = leaves.min.y; y < leaves.max.y; y++) {
 						for(int z = leaves.min.z; z < leaves.max.z; z++) {
 							m->voxels[voxelArray(x,y,z)] = BT_Leaves;    			
+							m->lighting[voxelArray(x,y,z)] = 0;    			
 						}
 					}
 				}
 
-				for(int i = 0; i < treeHeight; i++) 
-					m->voxels[voxelArray(p.x,p.y,p.z+i)] = BT_TreeLog;	    			
+				for(int i = 0; i < treeHeight; i++) {
+					m->voxels[voxelArray(p.x,p.y,p.z+i)] = BT_TreeLog;
+					m->lighting[voxelArray(p.x,p.y,p.z+i)] = 0;
+				}
 		    }
 
 		}
@@ -1730,9 +1692,12 @@ void setupVoxelUniforms(Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit
 		}
 	}
 
-
+	uint clipPlaneLoc = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "clipPlane");
+	glProgramUniform1i(globalGraphicsState->pipelineIds.voxelVertex, clipPlaneLoc, false);
 	uint clipLoc = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "cPlane");
 	glProgramUniform4f(globalGraphicsState->pipelineIds.voxelVertex, clipLoc, 0,0,0,0);
+	uint clipLoc2 = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "cPlane2");
+	glProgramUniform4f(globalGraphicsState->pipelineIds.voxelVertex, clipLoc2, 0,0,0,0);
 
 	Mat4 sm; scaleMatrix(&sm, scale);
 	Mat4 rm; quatRotationMatrix(&rm, quat(0, rotation));
@@ -1748,63 +1713,58 @@ void setupVoxelUniforms(Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit
 }
 
 void drawVoxelMesh(VoxelMesh* m, int drawMode = 0) {
-	if(STBVOX_CONFIG_MODE == 0) {
-		// interleaved buffer - 2 uints in a row -> 8 bytes stride
-		glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
-		int vaLoc = glGetAttribLocation(globalGraphicsState->pipelineIds.voxelVertex, "attr_vertex");
-		glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 8, (void*)0);
-		glEnableVertexAttribArray(vaLoc);
-		int fLoc = glGetAttribLocation(globalGraphicsState->pipelineIds.voxelVertex, "attr_face");
-		glVertexAttribIPointer(fLoc, 4, GL_UNSIGNED_BYTE, 8, (void*)4);
-		glEnableVertexAttribArray(fLoc);
-
-	} else {
-		glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
-		int vaLoc = glGetAttribLocation(globalGraphicsState->pipelineIds.voxelVertex, "attr_vertex");
-		glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 0, (void*)0);
-		glEnableVertexAttribArray(vaLoc);
-	}
-
+	glBindSamplers(0,16,globalGraphicsState->samplerUnits);
+	glBindProgramPipeline(globalGraphicsState->pipelineIds.programVoxel);
 	GLuint transformUniform1 = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "transform");
 	glProgramUniform3fv(globalGraphicsState->pipelineIds.voxelVertex, transformUniform1, 3, m->transform[0]);
 	GLuint transformUniform2 = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelFragment, "transform");
 	glProgramUniform3fv(globalGraphicsState->pipelineIds.voxelFragment, transformUniform2, 3, m->transform[0]);
 
-	globalGraphicsState->textureUnits[2] = m->textureId;
-	glBindTextures(0,16,globalGraphicsState->textureUnits);
-	glBindSamplers(0,16,globalGraphicsState->samplerUnits);
-	
-	glBindProgramPipeline(globalGraphicsState->pipelineIds.programVoxel);
-
 	if(drawMode == 0 || drawMode == 2) {
+		if(STBVOX_CONFIG_MODE == 0) {
+			// interleaved buffer - 2 uints in a row -> 8 bytes stride
+			glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
+			int vaLoc = glGetAttribLocation(globalGraphicsState->pipelineIds.voxelVertex, "attr_vertex");
+			glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 8, (void*)0);
+			glEnableVertexAttribArray(vaLoc);
+			int fLoc = glGetAttribLocation(globalGraphicsState->pipelineIds.voxelVertex, "attr_face");
+			glVertexAttribIPointer(fLoc, 4, GL_UNSIGNED_BYTE, 8, (void*)4);
+			glEnableVertexAttribArray(fLoc);
+
+		} else {
+			glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
+			int vaLoc = glGetAttribLocation(globalGraphicsState->pipelineIds.voxelVertex, "attr_vertex");
+			glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 0, (void*)0);
+			glEnableVertexAttribArray(vaLoc);
+		}
+
+		globalGraphicsState->textureUnits[2] = m->textureId;
+		glBindTextures(0,16,globalGraphicsState->textureUnits);
+
 		glDrawArrays(GL_QUADS, 0, m->quadCount*4);
 	}
 
-
-
-
-	if(STBVOX_CONFIG_MODE == 0) {
-		// interleaved buffer - 2 uints in a row -> 8 bytes stride
-		glBindBuffer(GL_ARRAY_BUFFER, m->bufferTransId);
-		int vaLoc = glGetAttribLocation(globalGraphicsState->pipelineIds.voxelVertex, "attr_vertex");
-		glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 8, (void*)0);
-		glEnableVertexAttribArray(vaLoc);
-		int fLoc = glGetAttribLocation(globalGraphicsState->pipelineIds.voxelVertex, "attr_face");
-		glVertexAttribIPointer(fLoc, 4, GL_UNSIGNED_BYTE, 8, (void*)4);
-		glEnableVertexAttribArray(fLoc);
-
-	} else {
-		glBindBuffer(GL_ARRAY_BUFFER, m->bufferTransId);
-		int vaLoc = glGetAttribLocation(globalGraphicsState->pipelineIds.voxelVertex, "attr_vertex");
-		glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 0, (void*)0);
-		glEnableVertexAttribArray(vaLoc);
-	}
-
-	globalGraphicsState->textureUnits[2] = m->textureTransId;
-	glBindTextures(0,16,globalGraphicsState->textureUnits);
-	glBindSamplers(0,16,globalGraphicsState->samplerUnits);
-	
 	if(drawMode == 0 || drawMode == 1) {
+		if(STBVOX_CONFIG_MODE == 0) {
+			// interleaved buffer - 2 uints in a row -> 8 bytes stride
+			glBindBuffer(GL_ARRAY_BUFFER, m->bufferTransId);
+			int vaLoc = glGetAttribLocation(globalGraphicsState->pipelineIds.voxelVertex, "attr_vertex");
+			glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 8, (void*)0);
+			glEnableVertexAttribArray(vaLoc);
+			int fLoc = glGetAttribLocation(globalGraphicsState->pipelineIds.voxelVertex, "attr_face");
+			glVertexAttribIPointer(fLoc, 4, GL_UNSIGNED_BYTE, 8, (void*)4);
+			glEnableVertexAttribArray(fLoc);
+
+		} else {
+			glBindBuffer(GL_ARRAY_BUFFER, m->bufferTransId);
+			int vaLoc = glGetAttribLocation(globalGraphicsState->pipelineIds.voxelVertex, "attr_vertex");
+			glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 0, (void*)0);
+			glEnableVertexAttribArray(vaLoc);
+		}
+
+		globalGraphicsState->textureUnits[2] = m->textureTransId;
+		glBindTextures(0,16,globalGraphicsState->textureUnits);
+	
 		glDrawArrays(GL_QUADS, 0, m->quadCountTrans*4);
 	}
 }
@@ -1848,7 +1808,7 @@ struct AppData {
 
 	uint frameBuffers[16];
 	uint renderBuffers[16];
-	uint frameBufferTextures[3];
+	uint frameBufferTextures[16];
 
 	float aspectRatio;
 	float fieldOfView;
@@ -1862,6 +1822,8 @@ struct AppData {
 	int msaaSamples;
 	Vec2i fboRes;
 	bool useNativeRes;
+
+	float reflectionResMod;
 
 	Vec3 playerPos;
 	Vec3 playerLook;
@@ -2011,6 +1973,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->nearPlane = 0.1f;
 		// ad->farPlane = 2000;
 		ad->farPlane = 3000;
+
+		ad->reflectionResMod = 0.5f;
+		// ad->reflectionResMod = 1;
 
 
 		// DEVMODE devMode;
@@ -2209,19 +2174,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		glCreateFramebuffers(3, ad->frameBuffers);
 		glCreateRenderbuffers(2, ad->renderBuffers);
-		glCreateTextures(GL_TEXTURE_2D, 1, ad->frameBufferTextures);
-		// glCreateTextures(GL_TEXTURE_2D_MULTISAMPLE, 2, ad->frameBufferTextures + 1);
-		// glCreateTextures(GL_TEXTURE_2D_MULTISAMPLE, 2, ad->frameBufferTextures + 1);
-		glCreateTextures(GL_TEXTURE_2D, 2, ad->frameBufferTextures + 1);
-		// glCreateTextures(GL_TEXTURE_2D_MULTISAMPLE, 1, ad->frameBufferTextures + 2);
-
+		glCreateTextures(GL_TEXTURE_2D, 4, ad->frameBufferTextures);
+		// glCreateTextures(GL_TEXTURE_2D, 3, ad->frameBufferTextures + 1);
 		// GLenum result = glCheckNamedFramebufferStatus(ad->frameBuffers[0], GL_FRAMEBUFFER);
 
 
 
 
 
-		// setup
+		// @setup
 		ad->voxelHashSize = sizeof(arrayCount(ad->voxelHash));
 		for(int i = 0; i < ad->voxelHashSize; i++) {
 			ad->voxelHash[i] = (VoxelNode*)getPMemory(sizeof(VoxelNode));
@@ -2266,16 +2227,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 		return; // window operations only work after first frame?
 	}
 
+	bool updateFrameBuffers = false;
+
 	if(second) {
 		setWindowProperties(windowHandle, wSettings->res.w, wSettings->res.h, -1920, 0);
 		// setWindowProperties(windowHandle, wSettings->res.w, wSettings->res.h, 0, 0);
 		setWindowStyle(windowHandle, wSettings->style);
 		setWindowMode(windowHandle, wSettings, WINDOW_MODE_FULLBORDERLESS);
-		
 
-// void updateAfterWindowResizing(WindowSettings* wSettings, float* ar, uint fb0, uint fb1, uint fb2, uint rb0, uint rb1, uint* fbt, uint* fbt2, uint* fbt3, int msaaSamples, Vec2i* fboRes, Vec2i* curRes, bool useNativeRes) {
-
-		updateAfterWindowResizing(wSettings, &ad->aspectRatio, ad->frameBuffers[0], ad->frameBuffers[1], ad->frameBuffers[2], ad->renderBuffers[0], ad->renderBuffers[1], &ad->frameBufferTextures[0], &ad->frameBufferTextures[1], &ad->frameBufferTextures[2], ad->msaaSamples, &ad->fboRes, &ad->curRes, ad->useNativeRes);
+		updateFrameBuffers = true;
 	}
 
 	if(reload) {
@@ -2317,14 +2277,58 @@ extern "C" APPMAINFUNCTION(appMain) {
 		else mode = WINDOW_MODE_FULLBORDERLESS;
 		setWindowMode(windowHandle, wSettings, mode);
 
-		updateAfterWindowResizing(wSettings, &ad->aspectRatio, ad->frameBuffers[0], ad->frameBuffers[1], ad->frameBuffers[2], ad->renderBuffers[0], ad->renderBuffers[1], &ad->frameBufferTextures[0], &ad->frameBufferTextures[1], &ad->frameBufferTextures[2], ad->msaaSamples, &ad->fboRes, &ad->curRes, ad->useNativeRes);
+		// updateAfterWindowResizing(wSettings, &ad->aspectRatio, ad->frameBuffers[0], ad->frameBuffers[1], ad->frameBuffers[2], ad->renderBuffers[0], ad->renderBuffers[1], &ad->frameBufferTextures[0], &ad->frameBufferTextures[1], &ad->frameBufferTextures[2], &ad->frameBufferTextures[3], ad->msaaSamples, &ad->fboRes, &ad->curRes, ad->useNativeRes, ad->reflectionResMod);
 
-		// static float d = 0;
-		// d += ad->dt;
+		updateFrameBuffers = true;
+	}
 
-		// ad->msaaSamples = 1;
-		// ad->fboRes = vec2i(0, 100 + sin(d)*100);
-		// ad->useNativeRes = false;
+	if(updateFrameBuffers) {
+		ad->aspectRatio = wSettings->aspectRatio;
+		
+		ad->fboRes.x = ad->fboRes.y*ad->aspectRatio;
+
+		if(ad->useNativeRes) ad->curRes = wSettings->currentRes;
+		else ad->curRes = ad->fboRes;
+
+		Vec2i s = ad->curRes;
+
+
+		glNamedRenderbufferStorageMultisample(ad->renderBuffers[0], ad->msaaSamples, GL_RGBA8, s.w, s.h);
+		glNamedFramebufferRenderbuffer(ad->frameBuffers[0], GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, ad->renderBuffers[0]);
+
+		glNamedRenderbufferStorageMultisample(ad->renderBuffers[1], ad->msaaSamples, GL_DEPTH_STENCIL, s.w, s.h);
+		glNamedFramebufferRenderbuffer(ad->frameBuffers[0], GL_DEPTH_STENCIL_ATTACHMENT,  GL_RENDERBUFFER, ad->renderBuffers[1]);
+
+		glDeleteTextures(1, &ad->frameBufferTextures[0]);
+		glCreateTextures(GL_TEXTURE_2D, 1, &ad->frameBufferTextures[0]);
+		glTextureStorage2D(ad->frameBufferTextures[0], 1, GL_RGBA8, s.w, s.h);
+		glNamedFramebufferTexture(ad->frameBuffers[1], GL_COLOR_ATTACHMENT0, ad->frameBufferTextures[0], 0);
+	
+		glDeleteTextures(1, &ad->frameBufferTextures[3]);
+		glCreateTextures(GL_TEXTURE_2D, 1, &ad->frameBufferTextures[3]);
+		glTextureStorage2D(ad->frameBufferTextures[3], 1, GL_DEPTH24_STENCIL8, s.w, s.h);
+		glNamedFramebufferTexture(ad->frameBuffers[1], GL_DEPTH_STENCIL_ATTACHMENT, ad->frameBufferTextures[3], 0);
+
+
+		ad->reflectionResMod = 1;
+		Vec2 reflectionRes = vec2(s)*ad->reflectionResMod;
+
+		glDeleteTextures(1, &ad->frameBufferTextures[1]);
+		glCreateTextures(GL_TEXTURE_2D, 1, &ad->frameBufferTextures[1]);
+		glTextureStorage2D(ad->frameBufferTextures[1], 1, GL_RGBA8, reflectionRes.w, reflectionRes.h);
+		glTextureParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTextureParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glNamedFramebufferTexture(ad->frameBuffers[2], GL_COLOR_ATTACHMENT0, ad->frameBufferTextures[1], 0);
+
+		glDeleteTextures(1, &ad->frameBufferTextures[2]);
+		glCreateTextures(GL_TEXTURE_2D, 1, &ad->frameBufferTextures[2]);
+		glTextureStorage2D(ad->frameBufferTextures[2], 1, GL_DEPTH24_STENCIL8, reflectionRes.w, reflectionRes.h);
+		glNamedFramebufferTexture(ad->frameBuffers[2], GL_DEPTH_STENCIL_ATTACHMENT, ad->frameBufferTextures[2], 0);
+
+		GLenum result = glCheckNamedFramebufferStatus(ad->frameBuffers[0], GL_FRAMEBUFFER);
+		GLenum result2 = glCheckNamedFramebufferStatus(ad->frameBuffers[1], GL_FRAMEBUFFER);
+		GLenum result3 = glCheckNamedFramebufferStatus(ad->frameBuffers[2], GL_FRAMEBUFFER);
+		int stop = 3;
 	}
 
 	if(input->keysPressed[VK_F2]) {
@@ -2903,12 +2907,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	glBindFramebuffer (GL_FRAMEBUFFER, ad->frameBuffers[1]);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-	// glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[0]);
 	glClearColor(skyColor.x, skyColor.y, skyColor.z, 0.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-	// glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 	// glDepthRange(-1.0,1.0);
 	glFrontFace(GL_CW);
 
@@ -2946,8 +2948,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	globalGraphicsState->samplerUnits[1] = ad->voxelSamplers[1];
 	globalGraphicsState->samplerUnits[2] = ad->voxelSamplers[2];
 
-
-	// setupVoxelUniforms(vec4(ad->activeCamPos, 1), 1, 0, 2, view, proj, fogColor);
 	setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor);
 
 
@@ -3148,312 +3148,110 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// 	assert(sortList[i].key <= sortList[i+1].key);
 	// }
 
-	// for(int i = sortListSize-1; i >= 0; i--) {
-	// 	VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
-	// 	drawVoxelMesh(m, 0);
-	// }
-
-
+	// draw world without water
+	{
+		for(int i = 0; i < sortListSize; i++) {
+			VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
+			drawVoxelMesh(m, 2);
+		}
+	}
 
 	float waterMark = 22;
 
-	// draw world without water
-	for(int i = sortListSize-1; i >= 0; i--) {
-		VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
-		drawVoxelMesh(m, 2);
-	}
-
-
 	// draw stencil
-	glEnable(GL_STENCIL_TEST);
+	{
+		glEnable(GL_STENCIL_TEST);
 		glStencilMask(0xFF);
 		glClear(GL_STENCIL_BUFFER_BIT);
 		glStencilFunc(GL_ALWAYS, 1, 0xFF);
 		glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+		glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 		glDepthMask(GL_FALSE);
 
-	glEnable(GL_CLIP_DISTANCE0);
-	uint clipLoc = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "cPlane");
-	glProgramUniform4f(globalGraphicsState->pipelineIds.voxelVertex, clipLoc, 0,0,1,-waterMark);
-	// glDepthMask(GL_FALSE);
-	glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-	for(int i = 0; i < sortListSize; i++) {
-		VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
+		glEnable(GL_CLIP_DISTANCE0);
+		glEnable(GL_CLIP_DISTANCE1);
 
-		drawVoxelMesh(m, 1);
-	}
-	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor);
-	// glDisable(GL_CLIP_DISTANCE0);
+		uint clipPlaneLoc = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "clipPlane");
+		glProgramUniform1i(globalGraphicsState->pipelineIds.voxelVertex, clipPlaneLoc, true);
+		uint clipLoc = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "cPlane");
+		glProgramUniform4f(globalGraphicsState->pipelineIds.voxelVertex, clipLoc, 0,0,1,-waterMark);
+		uint clipLoc2 = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "cPlane2");
+		glProgramUniform4f(globalGraphicsState->pipelineIds.voxelVertex, clipLoc2, 0,0,-1,waterMark);
 
-	glDepthMask(GL_TRUE);
-	glDisable(GL_STENCIL_TEST);
+		for(int i = 0; i < sortListSize; i++) {
+			VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
+			drawVoxelMesh(m, 1);
+		}
 
-
-				// // draw reflection
-				// glEnable(GL_STENCIL_TEST);
-				// glStencilFunc(GL_EQUAL, 1, 0xFF);
-				// glStencilMask(0x00);
-				// glDepthMask(GL_TRUE);
-				// // glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-				// 	// setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor, vec3(0,0,50), vec3(1,1,-1));
-				// 	// for(int i = sortListSize-1; i >= 0; i--) {
-				// 	// 	VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
-
-				// 	// 	drawVoxelMesh(m, 2);
-				// 	// }
-
-				// 	glBindProgramPipeline(globalGraphicsState->pipelineIds.programCube);
-
-				// 	// float waterMark = 22;
-				// 	static float delta = 0;
-				// 	delta += ad->dt;
-
-				// 	glEnable(GL_CLIP_DISTANCE0);
-
-				// 	glDisable(GL_DEPTH_TEST);
-				// 	Vec3 planePos = vec3(0,0,waterMark);
-				// 	Vec3 planeNormal = vec3(0,0,1);
-				// 	Vec4 plane = vec4(planeNormal, -dot(planeNormal, planePos));
-				// 	glFrontFace(GL_CCW);
-
-				// 	setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor, vec3(0,0,waterMark*2 + 0.01f), vec3(1,1,-1));
-				// 	// setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor, vec3(0,0,45), vec3(1,1,-1));
-				// 	clipLoc = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "cPlane");
-				// 	glProgramUniform4f(globalGraphicsState->pipelineIds.voxelVertex, clipLoc, 0,0,-1,waterMark);
-				// 	for(int i = sortListSize-1; i >= 0; i--) {
-				// 		VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
-
-				// 		drawVoxelMesh(m, 0);
-				// 	}
-				// 	setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor);
-
-
-				// 	glFrontFace(GL_CW);
-				// 	glEnable(GL_DEPTH_TEST);
-
-				// 	glDisable(GL_CLIP_DISTANCE0);
-
-				// // glDepthMask(GL_FALSE);
-				// glDisable(GL_STENCIL_TEST);
-
-
-
-		// draw reflection
-		glEnable(GL_STENCIL_TEST);
-		glStencilFunc(GL_EQUAL, 1, 0xFF);
-		glStencilMask(0x00);
+		glDisable(GL_CLIP_DISTANCE0);
+		glDisable(GL_CLIP_DISTANCE1);
+		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		glDepthMask(GL_TRUE);
-		// glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	}
+	
+	// draw reflection
+	{	
+		glStencilMask(0x00);
+		glStencilFunc(GL_EQUAL, 1, 0xFF);
 
-			// float waterMark = 22;
-			static float delta = 0;
-			delta += ad->dt;
+		glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[2]);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
-			glEnable(GL_CLIP_DISTANCE0);
+		Vec2i reflectionRes = ad->curRes*ad->reflectionResMod;
+		glBlitNamedFramebuffer (ad->frameBuffers[0], ad->frameBuffers[2], 
+						   0,0, ad->curRes.x, ad->curRes.y,
+						   0,0, ad->curRes.x, ad->curRes.y,
+		                   // 0,0, reflectionRes.x-1, reflectionRes.y-1,
+		                   // 0,0, ad->curRes.x*0.5f, ad->curRes.y*0.5f,
+		                   // GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT,
+		                   GL_STENCIL_BUFFER_BIT,
+		                   GL_NEAREST);
 
-			glEnable(GL_DEPTH_TEST);
-			Vec3 planePos = vec3(0,0,waterMark);
-			Vec3 planeNormal = vec3(0,0,1);
-			Vec4 plane = vec4(planeNormal, -dot(planeNormal, planePos));
-			glFrontFace(GL_CCW);
+		glEnable(GL_CLIP_DISTANCE0);
+		glEnable(GL_CLIP_DISTANCE1);
+		glEnable(GL_DEPTH_TEST);
+		glFrontFace(GL_CCW);
 
-			setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor, vec3(0,0,waterMark*2 + 0.01f), vec3(1,1,-1));
-			// setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor, vec3(0,0,45), vec3(1,1,-1));
-			clipLoc = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "cPlane");
-			glProgramUniform4f(globalGraphicsState->pipelineIds.voxelVertex, clipLoc, 0,0,-1,waterMark);
-				
+		setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor, vec3(0,0,waterMark*2 + 0.01f), vec3(1,1,-1));
+		uint clipPlaneLoc2 = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "clipPlane");
+		glProgramUniform1i(globalGraphicsState->pipelineIds.voxelVertex, clipPlaneLoc2, true);
+		uint clipLo = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "cPlane");
+		glProgramUniform4f(globalGraphicsState->pipelineIds.voxelVertex, clipLo, 0,0,-1,waterMark);
 
-			glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[2]);
-			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+		for(int i = 0; i < sortListSize; i++) {
+			VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
+			drawVoxelMesh(m, 2);
+		}
+		for(int i = sortListSize-1; i >= 0; i--) {
+			VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
+			drawVoxelMesh(m, 1);
+		}
 
-			// ortho(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0));
-			// glDisable(GL_DEPTH_TEST);
-			// glBindProgramPipeline(globalGraphicsState->pipelineIds.programQuad);
-
-			glBindFramebuffer (GL_READ_FRAMEBUFFER, ad->frameBuffers[0]);
-			glBindFramebuffer (GL_DRAW_FRAMEBUFFER, ad->frameBuffers[2]);
-		// GLenum glError = glGetError(); printf("GLErrora: %i\n", glError);
-			glBlitFramebuffer (0,0, ad->curRes.x, ad->curRes.y,
-			                   0,0, ad->curRes.x, ad->curRes.y,
-			                   // GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT,
-			                   GL_STENCIL_BUFFER_BIT,
-			                   GL_NEAREST);
-		// glError = glGetError(); printf("GLErrorb: %i\n", glError);
-
-			glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[2]);
-
-			// draw reflection
-			glEnable(GL_STENCIL_TEST);
-			glStencilFunc(GL_EQUAL, 1, 0xFF);
-			glStencilMask(0x00);
-			glDepthMask(GL_TRUE);
-
-				for(int i = sortListSize-1; i >= 0; i--) {
-					VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
-					drawVoxelMesh(m, 0);
-				}
-
-			// glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[0]);
-			glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[0]);
-
-			setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor);
-
-
-			glFrontFace(GL_CW);
-			glEnable(GL_DEPTH_TEST);
-
-			glDisable(GL_CLIP_DISTANCE0);
-
-		// glDepthMask(GL_FALSE);
+		glFrontFace(GL_CW);
+		glDisable(GL_CLIP_DISTANCE0);
+		glDisable(GL_CLIP_DISTANCE1);
 		glDisable(GL_STENCIL_TEST);
+	}
 
-
-
-
-
-
-		ortho(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0));
-		glViewport(0,0, wSettings->currentRes.x, wSettings->currentRes.y);
+	// draw reflection texture	
+	{ 
+		glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[0]);
 		glDisable(GL_DEPTH_TEST);
 
 		glBindProgramPipeline(globalGraphicsState->pipelineIds.programQuad);
 		drawRect(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0), rect(0,1,1,0), vec4(1,1,1,0.5f), ad->frameBufferTextures[1]);
 
-		// glBindFramebuffer (GL_FRAMEBUFFER, 0);	
 		glEnable(GL_DEPTH_TEST);
-
-
-
-
-
-
-	// draw water
-	for(int i = sortListSize-1; i >= 0; i--) {
-		VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
-		drawVoxelMesh(m, 1);
 	}
-
-
-
-
-
-
-
-	glBindProgramPipeline(globalGraphicsState->pipelineIds.programCube);
-
-	// glEnable(GL_STENCIL_TEST);
-
-	// glStencilFunc(GL_ALWAYS, 1, 0xFF);
-	// glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
-	// glStencilMask(0xFF);
-	// // glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-	// glDepthMask(GL_FALSE);
-	// // glClear(GL_STENCIL_BUFFER_BIT);
-
-	// static float delta = 0;
-	// delta += ad->dt;
-	// // // drawCube(ad->activeCamPos + ad->activeCamLook*10, vec3(3,3,3), vec4(0,0,0,1), delta, normVec3(vec3(1,1,0)));
-	// drawCube(ad->activeCamPos + ad->activeCamLook*10, vec3(3,3,3), vec4(1,1,0,1), delta, normVec3(vec3(1,1,0)));
-
-		// glStencilFunc(GL_EQUAL, 1, 0xFF);
-		// glStencilMask(0x00);
-		// // glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-		// glDepthMask(GL_TRUE);
-
-		// // static float delta = 0;
-		// // delta += ad->dt;
-		// glDisable(GL_DEPTH_TEST);
-		// drawCube(ad->activeCamPos + ad->activeCamLook*10, vec3(6,2,2), vec4(1,0,1,1), 0, normVec3(vec3(0,0,0)));
-		// glEnable(GL_DEPTH_TEST);
-
-
-	// glEnable(GL_STENCIL_TEST);
-	// glStencilFunc(GL_EQUAL, 1, 0xFF);
-	// glStencilMask(0x00);
-	// // glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	// glDepthMask(GL_TRUE);
-
-	// glDrawArrays(GL_QUADS, 0, m->quadCount*4);
-
-	// glDepthMask(GL_FALSE);
-	// glDisable(GL_STENCIL_TEST);
-
-
-	// glDisable(GL_DEPTH_TEST);
-	// setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor, vec3(0,0,40), vec3(1,1,-1));
-
-	// for(int i = sortListSize-1; i >= 0; i--) {
-	// 	VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
-	// 	drawVoxelMesh(m,0);
-	// }
-	// glEnable(GL_DEPTH_TEST);
-
-
-
-
-	// Vec3 cubePos = vec3(-33, 58, 25);
-	// Vec3 cubeSize = vec3(2,2,5);
-	// drawCube(cubePos, cubeSize, vec4(1,0,1,1), 0, vec3(0,0,0));
-
-		// float waterMark = 22;
-		// Vec3 cubeSize = vec3(2,2,5);
-		// // Vec3 cubePos = vec3(-33, 58, waterMark + cubeSize.z*0.5f);
-
-		// static float delta = 0;
-		// delta += ad->dt;
-
-		// Vec3 cubePos = vec3(-40, 58, waterMark + cubeSize.z*0.5f + sin(delta));
-		// float cubeRotDegrees = 1;
-		// Vec3 cubeRot = vec3(1,0,0);
-
-
-
-		// glEnable(GL_STENCIL_TEST);
-
-		// glStencilFunc(GL_EQUAL, 1, 0xFF);
-		// glStencilMask(0x00);
-		// // glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-		// glDepthMask(GL_TRUE);
-
-
-		// glEnable(GL_CLIP_DISTANCE0);
-
-		// glDisable(GL_DEPTH_TEST);
-		// Vec3 planePos = vec3(0,0,waterMark);
-		// Vec3 planeNormal = vec3(0,0,1);
-		// Vec4 plane = vec4(planeNormal, -dot(planeNormal, planePos));
-		// glProgramUniform4f(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexCPlane, 0,0,-1,waterMark);
-		// glFrontFace(GL_CCW);
-		// drawCube(cubePos - vec3(0,0,(cubePos.z-waterMark)*2), cubeSize*vec3(1,1,-1), vec4(0.5f,0,0.9f,0.5f), -cubeRotDegrees, cubeRot);
-		// glFrontFace(GL_CW);
-		// glEnable(GL_DEPTH_TEST);
-
-		// glDisable(GL_CLIP_DISTANCE0);
-
-		// glDisable(GL_STENCIL_TEST);
-
-
-		// glEnable(GL_CLIP_DISTANCE0);
-		// glProgramUniform4f(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexCPlane, 0,0,1,-waterMark);
-		// drawCube(cubePos, cubeSize, vec4(1,0,1,1), cubeRotDegrees, cubeRot);
-		// glDisable(GL_CLIP_DISTANCE0);
-
-
-
-	// glEnable(GL_CLIP_DISTANCE0);
-	// // glProgramUniform4f(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexCPlane, plane.x, plane.y, plane.z, plane.w);
-	// glProgramUniform4f(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexCPlane, 0,1,0,0);
-	// drawCube(vec3(0,0,sin(delta)*10), vec3(20,30,40), vec4(0.5f,0,0.9f,0.5f), 0, vec3(0,0,0));
-	// glDisable(GL_CLIP_DISTANCE0);
-
-
-
-
-
-
-
-
+	
+	// draw water
+	{
+		setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor);
+		for(int i = sortListSize-1; i >= 0; i--) {
+			VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
+			drawVoxelMesh(m, 1);
+		}
+	}
 
 
 
@@ -3512,8 +3310,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// if(input->keysDown[VK_W])
 	// dcText({fillString("W", (int)input->mouseButtonDown[1]), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
 
-
-
 	// @menu
 	if(ad->playerMode) {
 		for(int i = 0; i < 10; i++) {
@@ -3548,8 +3344,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 			dcRect({rectCenDim(pos, iconSize*iconOff), rect(0,0,1,1), color, textureId, texture1Faces[i+1][0]+1});
 		}
 	}
-
-
 
 
 	glBindProgramPipeline(globalGraphicsState->pipelineIds.programCube);
@@ -3619,9 +3413,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glDisable(GL_DEPTH_TEST);
 	glBindProgramPipeline(globalGraphicsState->pipelineIds.programQuad);
 
-	glBindFramebuffer (GL_READ_FRAMEBUFFER, ad->frameBuffers[0]);
-	glBindFramebuffer (GL_DRAW_FRAMEBUFFER, ad->frameBuffers[1]);
-	glBlitFramebuffer (0,0, ad->curRes.x, ad->curRes.y,
+	glBindFramebuffer (GL_FRAMEBUFFER, ad->frameBuffers[1]);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glBindFramebuffer (GL_FRAMEBUFFER, ad->frameBuffers[0]);
+
+	glBlitNamedFramebuffer(ad->frameBuffers[0], ad->frameBuffers[1],
+					   0,0, ad->curRes.x, ad->curRes.y,
 	                   0,0, ad->curRes.x, ad->curRes.y,
 	                   // GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT,
 	                   GL_COLOR_BUFFER_BIT,
@@ -3782,56 +3579,20 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glBindSamplers(0,16,globalGraphicsState->samplerUnits);
 	glBindProgramPipeline(globalGraphicsState->pipelineIds.programVoxel);
 		
-		// glEnable(GL_STENCIL_TEST);
-
-		// glStencilFunc(GL_ALWAYS, 1, 0xFF);
-		// glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
-		// glStencilMask(0xFF);
-		// // glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-		// glDepthMask(GL_FALSE);
-		// glClear(GL_STENCIL_BUFFER_BIT);
 
 	glDrawArrays(GL_QUADS, 0, quadCountTrans*4);
 
-
-
-
-
-	glBindProgramPipeline(globalGraphicsState->pipelineIds.programCube);
-
-	glEnable(GL_STENCIL_TEST);
-
-	glStencilFunc(GL_ALWAYS, 1, 0xFF);
-	glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
-	glStencilMask(0xFF);
-	// glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-	glDepthMask(GL_FALSE);
-	glClear(GL_STENCIL_BUFFER_BIT);
-
-	static float delta = 0;
-	delta += ad->dt;
-	// // drawCube(ad->activeCamPos + ad->activeCamLook*10, vec3(3,3,3), vec4(0,0,0,1), delta, normVec3(vec3(1,1,0)));
-	drawCube(ad->activeCamPos + ad->activeCamLook*10, vec3(3,3,3), vec4(1,1,0,1), delta, normVec3(vec3(1,1,0)));
-
-	glStencilFunc(GL_EQUAL, 1, 0xFF);
-	glStencilMask(0x00);
-	// glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	glDepthMask(GL_TRUE);
-
-	// static float delta = 0;
-	// delta += ad->dt;
-	drawCube(ad->activeCamPos + ad->activeCamLook*10, vec3(6,2,2), vec4(1,0,1,1), 0, normVec3(vec3(0,0,0)));
-
-	glDisable(GL_STENCIL_TEST);
-
-
 	#endif 
 
-	// drawRect(rectCenDim(0, 0, 0.01f, 100), rect(0,0,1,1), vec4(0.4f,1,0.4f,1), ad->textures[0]);
 
-	drawRect(rectCenDim(200,-200, 200,200), rect(0,0,1,1), vec4(1,1,1,1), ad->frameBufferTextures[1]);
-	// drawRect(rectCenDim(200,-200, 200,200), rect(0,0,1,1), vec4(1,1,1,1), ad->frameBufferTextures[1]);
 
+	#if 0
+	Vec2 size = vec2(800, 800/ad->aspectRatio);
+	// Vec2 size = vec2(ad->curRes);
+	Rect tb = rectCenDim(vec2(ad->curRes.x - size.x*0.5f, -size.y*0.5f), size);
+	drawRect(tb, rect(0,0,1,1), vec4(0,0,0,1), ad->textures[0]);
+	drawRect(tb, rect(0,0,1,1), vec4(1,1,1,1), ad->frameBufferTextures[1]);
+	#endif
 
 	swapBuffers(&ad->systemData);
 	glFinish();
