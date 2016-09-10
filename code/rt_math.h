@@ -2306,6 +2306,92 @@ float polygonArea(Vec2* polygon, int count) {
 	return signedArea / 2;
 }
 
-// mergeSort() {
-	
-// }
+
+
+
+void whiteNoise(Rect region, int sampleCount, Vec2* samples) {
+	for(int i = 0; i < sampleCount; ++i) {
+		Vec2 randomPos = vec2(randomInt(region.min.x, region.max.x), 
+		                      randomInt(region.min.y, region.max.y));
+		samples[i] = randomPos;
+	}
+}
+
+int blueNoise(Rect region, float radius, Vec2** noiseSamples, int numOfSamples = 0) {
+	Vec2 regionDim = rectGetDim(region);
+	if(numOfSamples > 0) {
+		radius = (regionDim.w*regionDim.h*(float)M_SQRT2) / (2*numOfSamples);
+	}
+	float cs = (radius/(float)M_SQRT2)*2; // Square diagonal
+	int sampleMax = ((regionDim.w+1)*(regionDim.h+1)) / cs;
+
+	Vec2* samples = *noiseSamples;
+	samples = getTArray(Vec2, sampleMax);
+	*noiseSamples = samples;
+	int testCount = 64;
+	int gridW = regionDim.w/cs + 1;
+	int gridH = regionDim.h/cs + 1;
+	int gridSize = (gridH+1)*(gridW+1);
+	int* grid = getTArray(int, gridSize);
+	memset(grid, -1, gridSize*sizeof(int));
+
+	int* activeList = getTArray(int, max(gridH, gridW));
+	int sampleCount = 1;
+	samples[0] = vec2(randomInt(0, regionDim.w), randomInt(0, regionDim.h));
+	activeList[0] = 0;
+	int activeListSize = 1;
+	Vec2 pos = samples[0];
+	grid[(int)(pos.y/cs)*gridW+(int)(pos.x/cs)] = 0;
+
+	Rect regionOrigin = rectAddOffset(region, region.min*-1);
+	while(activeListSize > 0) {
+
+		int activeIndex = randomInt(0,activeListSize-1);
+		int sampleIndex = activeList[activeIndex];
+		Vec2 sample = samples[sampleIndex];
+		for(int i = 0; i < testCount; ++i) {
+			float angle = randomFloat(0, M_2PI, 0.01f);
+			float distance = randomFloat(radius*2, radius*3, 0.01f);
+			Vec2 newSample = sample+angleToDir(angle)*distance;
+
+			if(!pointInRect(newSample, regionOrigin)) continue;
+
+			// get samples around newSample with 6*r, 
+			// making room for 3 circles which should be enough?
+			Rect sampleRegion = rectCenDim(newSample,vec2(radius*6));
+			sampleRegion.min = sampleRegion.min/cs;
+			sampleRegion.max = sampleRegion.max/cs;
+			bool validPosition = true;
+			for(int y = sampleRegion.min.y; y < (int)sampleRegion.max.y+1; ++y) {
+				for(int x = sampleRegion.min.x; x < (int)sampleRegion.max.x+1; ++x) {
+					int index = grid[y*gridW+x];
+					if(index > -1) {
+						Vec2 s = samples[index];
+						float distance = lenVec2(s - newSample);
+						if(distance < radius*2) {
+							validPosition = false;
+							break;
+						}
+					}
+				}
+				if(!validPosition) break;
+			}
+
+			if(validPosition) {
+				samples[sampleCount] = newSample;
+				activeList[activeListSize] = sampleCount;
+				grid[(int)(newSample.y/cs)*gridW+(int)(newSample.x/cs)] = sampleCount;
+				sampleCount++;
+				activeListSize++;
+			}
+		}
+
+		// delete active sample after testCoutn times
+		activeList[activeIndex] = activeList[activeListSize-1];
+		activeListSize--;
+	}
+
+	for(int i = 0; i < sampleCount; ++i) samples[i] += region.min;
+
+	return sampleCount;
+}

@@ -65,6 +65,8 @@
 - activate opengl debug output!
 - small menu
 
+- solve the tree leaves alpha mipmap problem
+
 //-------------------------------------
 //               BUGS
 //-------------------------------------
@@ -75,7 +77,6 @@
 - game input gets stuck when buttons are pressed right at the start
 - sort key assert firing randomly
 - hotload gets stuck sometimes, thread that won't complete
-- trees no shadows?
 */
 
 /*
@@ -119,92 +120,92 @@ DrawCommandList* globalCommandList2d;
 
 
 #define makeGLFunction(returnType, name, ...) \
-		typedef returnType name##Function(__VA_ARGS__); \
-		name##Function* gl##name; 
+	typedef returnType name##Function(__VA_ARGS__); \
+	name##Function* gl##name; 
 #define loadGLFunction(name) \
-		gl##name = (name##Function*)wglGetProcAddress("gl" #name);
+	gl##name = (name##Function*)wglGetProcAddress("gl" #name);
 
 #define GL_FUNCTION_LIST \
-		GLOP(void, CreateVertexArrays, GLsizei n, GLuint *arrays) \
-		GLOP(void, BindVertexArray, GLuint array) \
-		GLOP(void, CreateBuffers, GLsizei n, GLuint *buffers) \
-		GLOP(void, CreateTextures, GLenum target, GLsizei n, GLuint *textures) \
-		GLOP(void, NamedBufferStorage, GLuint buffer, GLsizei size, const void *data, GLbitfield flags) \
-		GLOP(void*, MapNamedBufferRange, GLuint buffer, GLint* offset, GLsizei length, GLbitfield access) \
-		GLOP(void, TextureBuffer, GLuint texture, GLenum internalformat, GLuint buffer) \
-		GLOP(uint, CreateShaderProgramv, GLenum type, GLsizei count, const char **strings) \
-		GLOP(void, CreateProgramPipelines, GLsizei n, GLuint *pipelines) \
-		GLOP(void, UseProgramStages, GLuint pipeline, GLbitfield stages, GLuint program) \
-		GLOP(void, BindTextures, GLuint first, GLsizei count, const GLuint *textures) \
-		GLOP(void, BindProgramPipeline, GLuint pipeline) \
-		GLOP(void, DrawArraysInstancedBaseInstance, GLenum mode, GLint first, GLsizei count, GLsizei primcount, GLuint baseinstance) \
-		GLOP(GLuint, GetDebugMessageLog, GLuint counter‹, GLsizei bufSize, GLenum *source, GLenum *types, GLuint *ids, GLenum *severities, GLsizei *lengths, char *messageLog) \
-		GLOP(void, TextureStorage3D, GLuint texture, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth) \
-		GLOP(void, TextureSubImage3D, GLuint texture, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, const void *pixels) \
-		GLOP(void, GenerateTextureMipmap, GLuint texture) \
-		GLOP(void, TextureStorage2D, GLuint texture, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height) \
-		GLOP(void, TextureSubImage2D, GLuint texture, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const void *pixels) \
-		GLOP(void, CreateSamplers, GLsizei n, GLuint *samplers) \
-		GLOP(void, SamplerParameteri, GLuint sampler, GLenum pname, GLint param) \
-		GLOP(void, BindSamplers, GLuint first, GLsizei count, const GLuint *samplers) \
-		GLOP(void, TextureParameteri, GLuint texture, GLenum pname, GLint param) \
-		GLOP(void, ProgramUniform4f, GLuint program, GLint location, GLfloat v0, GLfloat v1, GLfloat v2,GLfloat v3) \
-		GLOP(GLint, GetUniformLocation, GLuint program, const GLchar *name) \
-		GLOP(void, ProgramUniform3f, GLuint program, GLint location, GLfloat v0, GLfloat v1, GLfloat v2) \
-		GLOP(void, ProgramUniform2f, GLuint program, GLint location, GLfloat v0, GLfloat v1) \
-		GLOP(void, ProgramUniform1f, GLuint program, GLint location, GLfloat v0) \
-		GLOP(void, ProgramUniform1i, GLuint program, GLint location, GLuint v0) \
-		GLOP(void, ProgramUniform1fv, GLuint program, GLint location, GLsizei count, const GLfloat *value) \
-		GLOP(void, ProgramUniform2fv, GLuint program, GLint location, GLsizei count, const GLfloat *value) \
-		GLOP(void, ProgramUniform1iv, GLuint program, GLint location, GLsizei count, const GLint *value) \
-		GLOP(void, ProgramUniformMatrix3fv, GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) \
-		GLOP(void, ProgramUniformMatrix4fv, GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) \
-		GLOP(void, UseProgram, GLuint program) \
-		GLOP(void, Uniform1i, GLint location, GLint v0) \
-		GLOP(void, Uniform1iv, GLint location, GLsizei count, const GLint *value) \
-		GLOP(void, Uniform1fv, GLint location, GLsizei count, const GLfloat *value) \
-		GLOP(void, Uniform2fv, GLint location, GLsizei count, const GLfloat *value) \
-		GLOP(void, Uniform3fv, GLint location, GLsizei count, const GLfloat *value) \
-		GLOP(void, Uniform4fv, GLint location, GLsizei count, const GLfloat *value) \
-		GLOP(void, ProgramUniform4fv, GLuint program, GLint location, GLsizei count, const GLfloat *value) \
-		GLOP(void, ActiveTexture, GLenum texture) \
-		GLOP(void, EnableVertexAttribArray, GLuint index) \
-		GLOP(void, TexImage3DEXT,  GLenum	target, GLint	level, GLenum	internalformat, GLsizei	width, GLsizei	height, GLsizei	depth, GLint	border, GLenum	format, GLenum	type, const	GLvoid *pixels) \
-		GLOP(void, ActiveTextureARB, GLenum texture) \
-		GLOP(void, VertexAttribIPointer, GLuint index, GLint size, GLenum type, GLsizei stride, const GLvoid * pointer) \
-		GLOP(void, BindBuffer, GLenum target, GLuint buffer) \
-		GLOP(void, BindBufferARB, GLenum target, GLuint buffer) \
-		GLOP(void, GenBuffersARB, GLsizei n, GLuint * buffers) \
-		GLOP(void, NamedBufferData, GLuint buffer, GLsizeiptr size, const GLvoid * data, GLenum usage) \
-		GLOP(void, BufferDataARB, GLenum target, GLsizeiptr size, const GLvoid * data, GLenum usage) \
-		GLOP(void, TexBufferARB, GLenum target, GLenum internalFormat, GLuint buffer) \
-		GLOP(void, UniformMatrix4fv, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) \
-		GLOP(void, VertexAttribPointer, GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const GLvoid * pointer) \
-		GLOP(void, ProgramUniform3fv, GLuint program, GLint location, GLsizei count, const GLfloat *value) \
-		GLOP(GLint, GetAttribLocation, GLuint program, const GLchar *name) \
-		GLOP(void, GenSamplers, GLsizei n​, GLuint *samplers​) \
-		GLOP(void, BindSampler, GLuint unit, GLuint sampler​) \
-		GLOP(void, BindTextureUnit, GLuint unit, GLuint texture) \
-		GLOP(void, NamedBufferSubData, GLuint buffer, GLintptr offset, GLsizei size, const void *data) \
-		GLOP(void, GetUniformiv, GLuint program, GLint location, GLint * params) \
-		GLOP(void, CreateFramebuffers, GLsizei n, GLuint *framebuffers) \
-		GLOP(void, NamedFramebufferParameteri, GLuint framebuffer, GLenum pname, GLint param) \
-		GLOP(void, NamedRenderbufferStorageMultisample, GLuint renderbuffer, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height) \
-		GLOP(void, CreateRenderbuffers, GLsizei n, GLuint *renderbuffers) \
-		GLOP(void, NamedFramebufferRenderbuffer, GLuint framebuffer, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer) \
-		GLOP(void, BindFramebuffer, GLenum target, GLuint framebuffer) \
-		GLOP(void, NamedFramebufferDrawBuffer, GLuint framebuffer, GLenum buf) \
-		GLOP(void, BlitFramebuffer, GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter) \
-		GLOP(void, BlitNamedFramebuffer, GLuint readFramebuffer, GLuint drawFramebuffer, GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter) \
-		GLOP(void, NamedFramebufferTexture, GLuint framebuffer, GLenum attachment, GLuint texture, GLint level) \
-		GLOP(void, TextureStorage2DMultisample, GLuint texture, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height, GLboolean fixedsamplelocations) \
-		GLOP(void, TexImage2DMultisample, GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height, GLboolean fixedsamplelocations) \
-		GLOP(void, NamedRenderbufferStorage, GLuint renderbuffer, GLenum internalformat, GLsizei width, GLsizei height) \
-		GLOP(GLenum, CheckNamedFramebufferStatus, GLuint framebuffer, GLenum target) \
-		GLOP(void, GenFramebuffers, GLsizei n, GLuint *ids) \
-		GLOP(void, FramebufferTexture, GLenum target, GLenum attachment, GLuint texture, GLint level) \
-		GLOP(void, BlendFuncSeparate, GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha) \
-		GLOP(void, BlendEquation, GLenum mode)
+	GLOP(void, CreateVertexArrays, GLsizei n, GLuint *arrays) \
+	GLOP(void, BindVertexArray, GLuint array) \
+	GLOP(void, CreateBuffers, GLsizei n, GLuint *buffers) \
+	GLOP(void, CreateTextures, GLenum target, GLsizei n, GLuint *textures) \
+	GLOP(void, NamedBufferStorage, GLuint buffer, GLsizei size, const void *data, GLbitfield flags) \
+	GLOP(void*, MapNamedBufferRange, GLuint buffer, GLint* offset, GLsizei length, GLbitfield access) \
+	GLOP(void, TextureBuffer, GLuint texture, GLenum internalformat, GLuint buffer) \
+	GLOP(uint, CreateShaderProgramv, GLenum type, GLsizei count, const char **strings) \
+	GLOP(void, CreateProgramPipelines, GLsizei n, GLuint *pipelines) \
+	GLOP(void, UseProgramStages, GLuint pipeline, GLbitfield stages, GLuint program) \
+	GLOP(void, BindTextures, GLuint first, GLsizei count, const GLuint *textures) \
+	GLOP(void, BindProgramPipeline, GLuint pipeline) \
+	GLOP(void, DrawArraysInstancedBaseInstance, GLenum mode, GLint first, GLsizei count, GLsizei primcount, GLuint baseinstance) \
+	GLOP(GLuint, GetDebugMessageLog, GLuint counter‹, GLsizei bufSize, GLenum *source, GLenum *types, GLuint *ids, GLenum *severities, GLsizei *lengths, char *messageLog) \
+	GLOP(void, TextureStorage3D, GLuint texture, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth) \
+	GLOP(void, TextureSubImage3D, GLuint texture, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, const void *pixels) \
+	GLOP(void, GenerateTextureMipmap, GLuint texture) \
+	GLOP(void, TextureStorage2D, GLuint texture, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height) \
+	GLOP(void, TextureSubImage2D, GLuint texture, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const void *pixels) \
+	GLOP(void, CreateSamplers, GLsizei n, GLuint *samplers) \
+	GLOP(void, SamplerParameteri, GLuint sampler, GLenum pname, GLint param) \
+	GLOP(void, BindSamplers, GLuint first, GLsizei count, const GLuint *samplers) \
+	GLOP(void, TextureParameteri, GLuint texture, GLenum pname, GLint param) \
+	GLOP(void, ProgramUniform4f, GLuint program, GLint location, GLfloat v0, GLfloat v1, GLfloat v2,GLfloat v3) \
+	GLOP(GLint, GetUniformLocation, GLuint program, const GLchar *name) \
+	GLOP(void, ProgramUniform3f, GLuint program, GLint location, GLfloat v0, GLfloat v1, GLfloat v2) \
+	GLOP(void, ProgramUniform2f, GLuint program, GLint location, GLfloat v0, GLfloat v1) \
+	GLOP(void, ProgramUniform1f, GLuint program, GLint location, GLfloat v0) \
+	GLOP(void, ProgramUniform1i, GLuint program, GLint location, GLuint v0) \
+	GLOP(void, ProgramUniform1fv, GLuint program, GLint location, GLsizei count, const GLfloat *value) \
+	GLOP(void, ProgramUniform2fv, GLuint program, GLint location, GLsizei count, const GLfloat *value) \
+	GLOP(void, ProgramUniform1iv, GLuint program, GLint location, GLsizei count, const GLint *value) \
+	GLOP(void, ProgramUniformMatrix3fv, GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) \
+	GLOP(void, ProgramUniformMatrix4fv, GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) \
+	GLOP(void, UseProgram, GLuint program) \
+	GLOP(void, Uniform1i, GLint location, GLint v0) \
+	GLOP(void, Uniform1iv, GLint location, GLsizei count, const GLint *value) \
+	GLOP(void, Uniform1fv, GLint location, GLsizei count, const GLfloat *value) \
+	GLOP(void, Uniform2fv, GLint location, GLsizei count, const GLfloat *value) \
+	GLOP(void, Uniform3fv, GLint location, GLsizei count, const GLfloat *value) \
+	GLOP(void, Uniform4fv, GLint location, GLsizei count, const GLfloat *value) \
+	GLOP(void, ProgramUniform4fv, GLuint program, GLint location, GLsizei count, const GLfloat *value) \
+	GLOP(void, ActiveTexture, GLenum texture) \
+	GLOP(void, EnableVertexAttribArray, GLuint index) \
+	GLOP(void, TexImage3DEXT,  GLenum	target, GLint	level, GLenum	internalformat, GLsizei	width, GLsizei	height, GLsizei	depth, GLint	border, GLenum	format, GLenum	type, const	GLvoid *pixels) \
+	GLOP(void, ActiveTextureARB, GLenum texture) \
+	GLOP(void, VertexAttribIPointer, GLuint index, GLint size, GLenum type, GLsizei stride, const GLvoid * pointer) \
+	GLOP(void, BindBuffer, GLenum target, GLuint buffer) \
+	GLOP(void, BindBufferARB, GLenum target, GLuint buffer) \
+	GLOP(void, GenBuffersARB, GLsizei n, GLuint * buffers) \
+	GLOP(void, NamedBufferData, GLuint buffer, GLsizeiptr size, const GLvoid * data, GLenum usage) \
+	GLOP(void, BufferDataARB, GLenum target, GLsizeiptr size, const GLvoid * data, GLenum usage) \
+	GLOP(void, TexBufferARB, GLenum target, GLenum internalFormat, GLuint buffer) \
+	GLOP(void, UniformMatrix4fv, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) \
+	GLOP(void, VertexAttribPointer, GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const GLvoid * pointer) \
+	GLOP(void, ProgramUniform3fv, GLuint program, GLint location, GLsizei count, const GLfloat *value) \
+	GLOP(GLint, GetAttribLocation, GLuint program, const GLchar *name) \
+	GLOP(void, GenSamplers, GLsizei n​, GLuint *samplers​) \
+	GLOP(void, BindSampler, GLuint unit, GLuint sampler​) \
+	GLOP(void, BindTextureUnit, GLuint unit, GLuint texture) \
+	GLOP(void, NamedBufferSubData, GLuint buffer, GLintptr offset, GLsizei size, const void *data) \
+	GLOP(void, GetUniformiv, GLuint program, GLint location, GLint * params) \
+	GLOP(void, CreateFramebuffers, GLsizei n, GLuint *framebuffers) \
+	GLOP(void, NamedFramebufferParameteri, GLuint framebuffer, GLenum pname, GLint param) \
+	GLOP(void, NamedRenderbufferStorageMultisample, GLuint renderbuffer, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height) \
+	GLOP(void, CreateRenderbuffers, GLsizei n, GLuint *renderbuffers) \
+	GLOP(void, NamedFramebufferRenderbuffer, GLuint framebuffer, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer) \
+	GLOP(void, BindFramebuffer, GLenum target, GLuint framebuffer) \
+	GLOP(void, NamedFramebufferDrawBuffer, GLuint framebuffer, GLenum buf) \
+	GLOP(void, BlitFramebuffer, GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter) \
+	GLOP(void, BlitNamedFramebuffer, GLuint readFramebuffer, GLuint drawFramebuffer, GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter) \
+	GLOP(void, NamedFramebufferTexture, GLuint framebuffer, GLenum attachment, GLuint texture, GLint level) \
+	GLOP(void, TextureStorage2DMultisample, GLuint texture, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height, GLboolean fixedsamplelocations) \
+	GLOP(void, TexImage2DMultisample, GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height, GLboolean fixedsamplelocations) \
+	GLOP(void, NamedRenderbufferStorage, GLuint renderbuffer, GLenum internalformat, GLsizei width, GLsizei height) \
+	GLOP(GLenum, CheckNamedFramebufferStatus, GLuint framebuffer, GLenum target) \
+	GLOP(void, GenFramebuffers, GLsizei n, GLuint *ids) \
+	GLOP(void, FramebufferTexture, GLenum target, GLenum attachment, GLuint texture, GLint level) \
+	GLOP(void, BlendFuncSeparate, GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha) \
+	GLOP(void, BlendEquation, GLenum mode)
 
 
 
@@ -220,14 +221,14 @@ wglSwapIntervalEXTFunction* wglSwapIntervalEXT;
 
 
 #define GLOP(returnType, name, ...) makeGLFunction(returnType, name, __VA_ARGS__)
-GL_FUNCTION_LIST
+	GL_FUNCTION_LIST
 #undef GLOP
 
 
 void loadFunctions() {
-	#define GLOP(returnType, name, ...) loadGLFunction(name)
+#define GLOP(returnType, name, ...) loadGLFunction(name)
 	GL_FUNCTION_LIST
-	#undef GLOP
+#undef GLOP
 }
 
 struct PipelineIds {
@@ -259,37 +260,37 @@ struct PipelineIds {
 struct GraphicsState {
 	PipelineIds pipelineIds;
 
-	// // Mesh mesh;
+// // Mesh mesh;
 
-	// uint programs[16];
-	// uint textures[16];
-	// int texCount;
-	// uint samplers[16];
+// uint programs[16];
+// uint textures[16];
+// int texCount;
+// uint samplers[16];
 
-	// uint frameBuffers[16];
-	// uint renderBuffers[16];
-	// uint frameBufferTextures[2];
+// uint frameBuffers[16];
+// uint renderBuffers[16];
+// uint frameBufferTextures[2];
 
-	// float aspectRatio;
-	// float fieldOfView;
-	// float nearPlane;
-	// float farPlane;
+// float aspectRatio;
+// float fieldOfView;
+// float nearPlane;
+// float farPlane;
 
-	// // Font fontArial;
+// // Font fontArial;
 
-	// Vec2i curRes;
-	// int msaaSamples;
-	// Vec2i fboRes;
-	// bool useNativeRes;
+// Vec2i curRes;
+// int msaaSamples;
+// Vec2i fboRes;
+// bool useNativeRes;
 
-	// // VoxelData;
+// // VoxelData;
 
-	// uint voxelShader;
-	// uint voxelVertex;
-	// uint voxelFragment;
+// uint voxelShader;
+// uint voxelVertex;
+// uint voxelFragment;
 
-	// GLuint voxelSamplers[3];
-	// GLuint voxelTextures[3];
+// GLuint voxelSamplers[3];
+// GLuint voxelTextures[3];
 
 	GLuint textureUnits[16];
 	GLuint samplerUnits[16];
@@ -304,26 +305,26 @@ enum DrawListCommand {
 	Draw_Command_BindFramebuffer_Type,
 	Draw_Command_BindBuffer_Type,
 	Draw_Command_BlendFunc,
-	// Draw_Command_DepthFunc,
-	// Draw_Command_ClearDepth,
+// Draw_Command_DepthFunc,
+// Draw_Command_ClearDepth,
 	Draw_Command_ClearColor,
-	// Draw_Command_GetUniformLocation,
+// Draw_Command_GetUniformLocation,
 	Draw_Command_ProgramUniform,
-	// Draw_Command_glEnableVertexAttribArray,
-	// Draw_Command_glVertexAttribIPointer,
-	// Draw_Command_glBindTextures,
-	// Draw_Command_glBindSamplers,
-	// Draw_Command_glBindProgramPipeline,
-	// Draw_Command_glDrawArrays,
-	// Draw_Command_glError,
-	// Draw_Command_,
-	// Draw_Command_,
-	// Draw_Command_,
-	// Draw_Command_,
-	// Draw_Command_,
-	// Draw_Command_,
-	// Draw_Command_,
-	// Draw_Command_,
+// Draw_Command_glEnableVertexAttribArray,
+// Draw_Command_glVertexAttribIPointer,
+// Draw_Command_glBindTextures,
+// Draw_Command_glBindSamplers,
+// Draw_Command_glBindProgramPipeline,
+// Draw_Command_glDrawArrays,
+// Draw_Command_glError,
+// Draw_Command_,
+// Draw_Command_,
+// Draw_Command_,
+// Draw_Command_,
+// Draw_Command_,
+// Draw_Command_,
+// Draw_Command_,
+// Draw_Command_,
 
 	Draw_Command_Cube_Type,
 	Draw_Command_Line_Type,
@@ -333,7 +334,7 @@ enum DrawListCommand {
 	Draw_Command_PolygonMode_Type,
 	Draw_Command_LineWidth_Type,
 	Draw_Command_Cull_Type,
-	// Draw_Command_Rect_Type,
+// Draw_Command_Rect_Type,
 };
 
 struct DrawCommandList {
@@ -421,14 +422,14 @@ struct Draw_Command_Cull {
 		commandList->bytes += sizeof(Draw_Command_##name) + sizeof(int); \
 	} 
 
-makeDrawCommandFunction(Cube, 0);
-makeDrawCommandFunction(Line, 0);
-makeDrawCommandFunction(Quad, 0);
-makeDrawCommandFunction(PolygonMode, 0);
-makeDrawCommandFunction(LineWidth, 0);
-makeDrawCommandFunction(Cull, 0);
-makeDrawCommandFunction(Rect, 1);
-makeDrawCommandFunction(Text, 1);
+	makeDrawCommandFunction(Cube, 0);
+	makeDrawCommandFunction(Line, 0);
+	makeDrawCommandFunction(Quad, 0);
+	makeDrawCommandFunction(PolygonMode, 0);
+	makeDrawCommandFunction(LineWidth, 0);
+	makeDrawCommandFunction(Cull, 0);
+	makeDrawCommandFunction(Rect, 1);
+	makeDrawCommandFunction(Text, 1);
 
 #define dcCase(name, var, index) \
 	Draw_Command_##name var = *((Draw_Command_##name*)index); \
@@ -479,40 +480,40 @@ makeDrawCommandFunction(Text, 1);
 
 const char* vertexShaderCube = GLSL (
 	const vec3 cube[] = vec3[] (
-	    vec3(-0.5f,-0.5f,-0.5f), 
-	    vec3( 0.5f,-0.5f,-0.5f), 
-	    vec3( 0.5f, 0.5f,-0.5f),
-	    vec3(-0.5f, 0.5f,-0.5f),
-	    vec3(-0.5f,-0.5f, 0.5f), 
-	    vec3(-0.5f, 0.5f, 0.5f), 
-	    vec3( 0.5f, 0.5f, 0.5f),
-	    vec3( 0.5f,-0.5f, 0.5f),
-	    vec3(-0.5f, 0.5f,-0.5f), 
-	    vec3( 0.5f, 0.5f,-0.5f), 
-	    vec3( 0.5f, 0.5f, 0.5f),
-	    vec3(-0.5f, 0.5f, 0.5f),
-	    vec3(-0.5f,-0.5f,-0.5f), 
-	    vec3(-0.5f,-0.5f, 0.5f), 
-	    vec3( 0.5f,-0.5f, 0.5f),
-	    vec3( 0.5f,-0.5f,-0.5f),
-	    vec3( 0.5f,-0.5f,-0.5f), 
-	    vec3( 0.5f,-0.5f, 0.5f), 
-	    vec3( 0.5f, 0.5f, 0.5f),
-	    vec3( 0.5f, 0.5f,-0.5f),
-	    vec3(-0.5f,-0.5f,-0.5f), 
-	    vec3(-0.5f, 0.5f,-0.5f), 
-	    vec3(-0.5f, 0.5f, 0.5f),
-	    vec3(-0.5f,-0.5f, 0.5f)
-	);
+		vec3(-0.5f,-0.5f,-0.5f), 
+		vec3( 0.5f,-0.5f,-0.5f), 
+		vec3( 0.5f, 0.5f,-0.5f),
+		vec3(-0.5f, 0.5f,-0.5f),
+		vec3(-0.5f,-0.5f, 0.5f), 
+		vec3(-0.5f, 0.5f, 0.5f), 
+		vec3( 0.5f, 0.5f, 0.5f),
+		vec3( 0.5f,-0.5f, 0.5f),
+		vec3(-0.5f, 0.5f,-0.5f), 
+		vec3( 0.5f, 0.5f,-0.5f), 
+		vec3( 0.5f, 0.5f, 0.5f),
+		vec3(-0.5f, 0.5f, 0.5f),
+		vec3(-0.5f,-0.5f,-0.5f), 
+		vec3(-0.5f,-0.5f, 0.5f), 
+		vec3( 0.5f,-0.5f, 0.5f),
+		vec3( 0.5f,-0.5f,-0.5f),
+		vec3( 0.5f,-0.5f,-0.5f), 
+		vec3( 0.5f,-0.5f, 0.5f), 
+		vec3( 0.5f, 0.5f, 0.5f),
+		vec3( 0.5f, 0.5f,-0.5f),
+		vec3(-0.5f,-0.5f,-0.5f), 
+		vec3(-0.5f, 0.5f,-0.5f), 
+		vec3(-0.5f, 0.5f, 0.5f),
+		vec3(-0.5f,-0.5f, 0.5f)
+		);
 
-	// out gl_PerVertex { vec4 gl_Position; };
+// out gl_PerVertex { vec4 gl_Position; };
 	out gl_PerVertex { vec4 gl_Position; float gl_ClipDistance[]; };
 	out vec4 Color;
 
 	uniform mat4x4 model;
 	uniform mat4x4 view;
 	uniform mat4x4 proj;
-	// uniform mat4x4 projViewModel;
+// uniform mat4x4 projViewModel;
 
 	uniform vec3 vertices[4];
 	uniform bool mode;
@@ -523,9 +524,9 @@ const char* vertexShaderCube = GLSL (
 	void main() {
 		Color = setColor;
 		float v = gl_VertexID;
-		// Color = setColor * vec4(v*0.1f,v*0.1f,v*0.1f,1);
-		// Color = vec4(v*0.05f,v*0.05f,v*0.05f,1);
-	
+	// Color = setColor * vec4(v*0.1f,v*0.1f,v*0.1f,1);
+	// Color = vec4(v*0.05f,v*0.05f,v*0.05f,1);
+
 		vec4 posModelView;
 
 		vec4 pos;
@@ -533,42 +534,42 @@ const char* vertexShaderCube = GLSL (
 			pos = vec4(vertices[gl_VertexID], 1);
 			posModelView = view*pos;
 			gl_Position = proj*posModelView;
-			// gl_Position = proj*view*pos;
+		// gl_Position = proj*view*pos;
 		} else {
 			pos = vec4(cube[gl_VertexID], 1);
 			posModelView = view*model*pos;
 			gl_Position = proj*posModelView;
-			// gl_Position = proj*view*model*pos;
-		}
-	
 		// gl_Position = proj*view*model*pos;
-		// gl_Position = projViewModel*pos;
+		}
 
-		// gl_ClipDistance[0] = dot(cPlane, posModelView);
+	// gl_Position = proj*view*model*pos;
+	// gl_Position = projViewModel*pos;
+
+	// gl_ClipDistance[0] = dot(cPlane, posModelView);
 		gl_ClipDistance[0] = dot(cPlane, model*pos);
-		// float val = dot(vec4(1,2,3,1), vec4(0,0,0,0));
-		// gl_ClipDistance[0] = val;
-		// gl_ClipDistance[0] = 1.0f;
-		// gl_ClipDistance[0] = dot(vec4(1,2,3,1), vec4(0,0,0,0));
+	// float val = dot(vec4(1,2,3,1), vec4(0,0,0,0));
+	// gl_ClipDistance[0] = val;
+	// gl_ClipDistance[0] = 1.0f;
+	// gl_ClipDistance[0] = dot(vec4(1,2,3,1), vec4(0,0,0,0));
 
-		// gl_ClipVertex = vec4(1,1,1,1);
+	// gl_ClipVertex = vec4(1,1,1,1);
 	}
-);
+	);
 
 const char* fragmentShaderCube = GLSL (
 	layout(binding = 0) uniform sampler2D s;
 
-	// smooth in vec2 uv;
+// smooth in vec2 uv;
 	in vec4 Color;
 
 	layout(depth_less) out float gl_FragDepth;
 	out vec4 color;
 
 	void main() {
-		// color = texture(s, uv) * Color;
+	// color = texture(s, uv) * Color;
 		color = Color;
 	}
-);
+	);
 
 
 // const char* testFragmentShader = GLSL (
@@ -592,18 +593,18 @@ const char* fragmentShaderCube = GLSL (
 
 const char* vertexShaderQuad = GLSL (
 	const vec2 quad[] = vec2[] (
-	  vec2( -0.5f, -0.5f ),
-	  vec2( -0.5f,  0.5f ),
-	  vec2(  0.5f, -0.5f ),
-	  vec2(  0.5f,  0.5f )
-	);
+		vec2( -0.5f, -0.5f ),
+		vec2( -0.5f,  0.5f ),
+		vec2(  0.5f, -0.5f ),
+		vec2(  0.5f,  0.5f )
+		);
 
 	const ivec2 quad_uv[] = ivec2[] (
-	  ivec2(  0.0,  0.0 ),
-	  ivec2(  0.0,  1.0 ),
-	  ivec2(  1.0,  0.0 ),
-	  ivec2(  1.0,  1.0 )
-	);
+		ivec2(  0.0,  0.0 ),
+		ivec2(  0.0,  1.0 ),
+		ivec2(  1.0,  0.0 ),
+		ivec2(  1.0,  1.0 )
+		);
 
 	uniform vec4 setUV;
 	uniform float texZ;
@@ -630,7 +631,7 @@ const char* fragmentShaderQuad = GLSL (
 	layout(binding = 0) uniform sampler2D s;
 	layout(binding = 1) uniform sampler2DArray sArray[2];
 
-	// smooth in vec2 uv;
+// smooth in vec2 uv;
 	smooth in vec3 uv;
 	in vec4 Color;
 
@@ -728,9 +729,9 @@ uint createShader(const char* vertexShaderString, const char* fragmentShaderStri
 	uint shaderId;
 	glCreateProgramPipelines(1, &shaderId);
 	glUseProgramStages(shaderId, GL_VERTEX_SHADER_BIT, *vId);
-	// GLenum glError = glGetError(); printf("GLError: %i\n", glError);
+// GLenum glError = glGetError(); printf("GLError: %i\n", glError);
 	glUseProgramStages(shaderId, GL_FRAGMENT_SHADER_BIT, *fId);
-	// glError = glGetError(); printf("GLError: %i\n", glError);
+// glError = glGetError(); printf("GLError: %i\n", glError);
 
 	return shaderId;
 }
@@ -803,7 +804,7 @@ void drawCube(Vec3 trans, Vec3 scale, Vec4 color, float degrees, Vec3 rot) {
 
 	glProgramUniform1i(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexMode, false);
 
-	// glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 36, 1, 0);
+// glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 36, 1, 0);
 	glDrawArrays(GL_QUADS, 0, 6*4);
 }
 
@@ -836,7 +837,7 @@ void drawQuad(Vec3 p, Vec3 normal, float size, Vec4 color) {
 	Vec3 verts[4] = {};
 	for(int i = 0; i < 4; i++) {
 		Vec3 d = base;
-			 if(i == 0) { d.e[sAxis[0]] += -s2; d.e[sAxis[1]] += -s2; }
+		if(i == 0) { d.e[sAxis[0]] += -s2; d.e[sAxis[1]] += -s2; }
 		else if(i == 1) { d.e[sAxis[0]] += -s2; d.e[sAxis[1]] +=  s2; }
 		else if(i == 2) { d.e[sAxis[0]] +=  s2; d.e[sAxis[1]] +=  s2; }
 		else if(i == 3) { d.e[sAxis[0]] +=  s2; d.e[sAxis[1]] += -s2; }
@@ -877,69 +878,69 @@ struct Texture {
 static int SEED = 0;
 
 static int hash[] = {208,34,231,213,32,248,233,56,161,78,24,140,71,48,140,254,245,255,247,247,40,
-                     185,248,251,245,28,124,204,204,76,36,1,107,28,234,163,202,224,245,128,167,204,
-                     9,92,217,54,239,174,173,102,193,189,190,121,100,108,167,44,43,77,180,204,8,81,
-                     70,223,11,38,24,254,210,210,177,32,81,195,243,125,8,169,112,32,97,53,195,13,
-                     203,9,47,104,125,117,114,124,165,203,181,235,193,206,70,180,174,0,167,181,41,
-                     164,30,116,127,198,245,146,87,224,149,206,57,4,192,210,65,210,129,240,178,105,
-                     228,108,245,148,140,40,35,195,38,58,65,207,215,253,65,85,208,76,62,3,237,55,89,
-                     232,50,217,64,244,157,199,121,252,90,17,212,203,149,152,140,187,234,177,73,174,
-                     193,100,192,143,97,53,145,135,19,103,13,90,135,151,199,91,239,247,33,39,145,
-                     101,120,99,3,186,86,99,41,237,203,111,79,220,135,158,42,30,154,120,67,87,167,
-                     135,176,183,191,253,115,184,21,233,58,129,233,142,39,128,211,118,137,139,255,
-                     114,20,218,113,154,27,127,246,250,1,8,198,250,209,92,222,173,21,88,102,219};
+	185,248,251,245,28,124,204,204,76,36,1,107,28,234,163,202,224,245,128,167,204,
+	9,92,217,54,239,174,173,102,193,189,190,121,100,108,167,44,43,77,180,204,8,81,
+	70,223,11,38,24,254,210,210,177,32,81,195,243,125,8,169,112,32,97,53,195,13,
+	203,9,47,104,125,117,114,124,165,203,181,235,193,206,70,180,174,0,167,181,41,
+	164,30,116,127,198,245,146,87,224,149,206,57,4,192,210,65,210,129,240,178,105,
+	228,108,245,148,140,40,35,195,38,58,65,207,215,253,65,85,208,76,62,3,237,55,89,
+	232,50,217,64,244,157,199,121,252,90,17,212,203,149,152,140,187,234,177,73,174,
+	193,100,192,143,97,53,145,135,19,103,13,90,135,151,199,91,239,247,33,39,145,
+	101,120,99,3,186,86,99,41,237,203,111,79,220,135,158,42,30,154,120,67,87,167,
+	135,176,183,191,253,115,184,21,233,58,129,233,142,39,128,211,118,137,139,255,
+	114,20,218,113,154,27,127,246,250,1,8,198,250,209,92,222,173,21,88,102,219};
 
-int noise2(int x, int y)
-{
-    int tmp = hash[(y + SEED) % 256];
-    return hash[(tmp + x) % 256];
-}
+	int noise2(int x, int y)
+	{
+		int tmp = hash[(y + SEED) % 256];
+		return hash[(tmp + x) % 256];
+	}
 
-float lin_inter(float x, float y, float s)
-{
-    return x + s * (y-x);
-}
+	float lin_inter(float x, float y, float s)
+	{
+		return x + s * (y-x);
+	}
 
-float smooth_inter(float x, float y, float s)
-{
-    return lin_inter(x, y, s * s * (3-2*s));
-}
+	float smooth_inter(float x, float y, float s)
+	{
+		return lin_inter(x, y, s * s * (3-2*s));
+	}
 
-float noise2d(float x, float y)
-{
-    int x_int = x;
-    int y_int = y;
-    float x_frac = x - x_int;
-    float y_frac = y - y_int;
-    int s = noise2(x_int, y_int);
-    int t = noise2(x_int+1, y_int);
-    int u = noise2(x_int, y_int+1);
-    int v = noise2(x_int+1, y_int+1);
-    float low = smooth_inter(s, t, x_frac);
-    float high = smooth_inter(u, v, x_frac);
-    return smooth_inter(low, high, y_frac);
-}
+	float noise2d(float x, float y)
+	{
+		int x_int = x;
+		int y_int = y;
+		float x_frac = x - x_int;
+		float y_frac = y - y_int;
+		int s = noise2(x_int, y_int);
+		int t = noise2(x_int+1, y_int);
+		int u = noise2(x_int, y_int+1);
+		int v = noise2(x_int+1, y_int+1);
+		float low = smooth_inter(s, t, x_frac);
+		float high = smooth_inter(u, v, x_frac);
+		return smooth_inter(low, high, y_frac);
+	}
 
-float perlin2d(float x, float y, float freq, int depth)
-{
-    float xa = x*freq;
-    float ya = y*freq;
-    float amp = 1.0;
-    float fin = 0;
-    float div = 0.0;
+	float perlin2d(float x, float y, float freq, int depth)
+	{
+		float xa = x*freq;
+		float ya = y*freq;
+		float amp = 1.0;
+		float fin = 0;
+		float div = 0.0;
 
-    int i;
-    for(i=0; i<depth; i++)
-    {
-        div += 256 * amp;
-        fin += noise2d(xa, ya) * amp;
-        amp /= 2;
-        xa *= 2;
-        ya *= 2;
-    }
+		int i;
+		for(i=0; i<depth; i++)
+		{
+			div += 256 * amp;
+			fin += noise2d(xa, ya) * amp;
+			amp /= 2;
+			xa *= 2;
+			ya *= 2;
+		}
 
-    return fin/div;
-}
+		return fin/div;
+	}
 
 
 
@@ -1108,7 +1109,7 @@ void initVoxelMesh(VoxelMesh* m, Vec2i coord) {
 		m->voxels = (uchar*)malloc(VOXEL_SIZE);
 		m->lighting = (uchar*)malloc(VOXEL_SIZE);
 	} else {
-		// m->meshBufferCapacity = kiloBytes(150);
+// m->meshBufferCapacity = kiloBytes(150);
 		m->meshBufferCapacity = kiloBytes(200);
 		m->meshBuffer = (char*)getPMemory(m->meshBufferCapacity);
 		m->texBufferCapacity = m->meshBufferCapacity/4;
@@ -1174,6 +1175,8 @@ int startY = 47850;
 int startXMod = 58000;
 int startYMod = 68000;
 
+bool* treeNoise;
+
 void generateVoxelMeshThreaded(void* data) {
 	VoxelMesh* m = (VoxelMesh*)data;
 	Vec2i coord = m->coord;
@@ -1185,96 +1188,120 @@ void generateVoxelMeshThreaded(void* data) {
 		Vec3i treePositions[100];
 		int treePositionsSize = 0;
 
-		for(int phase = 0; phase < 2; phase++) {
-		    for(int y = min.y; y < max.y; y++) {
-		    	for(int x = min.x; x < max.x; x++) {
-		    		int gx = (coord.x*VOXEL_X)+x;
-		    		int gy = (coord.y*VOXEL_Y)+y;
+		for(int y = min.y; y < max.y; y++) {
+			for(int x = min.x; x < max.x; x++) {
+				int gx = (coord.x*VOXEL_X)+x;
+				int gy = (coord.y*VOXEL_Y)+y;
 
-		    		// float perlin = perlin2d(gx+4000, gy+4000, 0.015f, 4);
-		    		// float height = perlin*50;
-		    		// float height = 5;
+	    		// float perlin = perlin2d(gx+4000, gy+4000, 0.015f, 4);
+	    		// float height = perlin*50;
+	    		// float height = 5;
 
-		    		// static int startX = randomInt(0, 10000);
-		    		// static int startY = randomInt(0, 10000);
+	    		// static int startX = randomInt(0, 10000);
+	    		// static int startY = randomInt(0, 10000);
 
-		    		// static int startXMod = randomInt(0,10000);
-		    		// static int startYMod = randomInt(0,10000);
+	    		// static int startXMod = randomInt(0,10000);
+	    		// static int startYMod = randomInt(0,10000);
 
-		    		// float height = perlin2d(gx+4000+startX, gy+4000+startY, 0.004f, 7);
-		    		float height = perlin2d(gx+4000+startX, gy+4000+startY, 0.004f, 6);
-		    		height -= 0.1f; 
+	    		// float height = perlin2d(gx+4000+startX, gy+4000+startY, 0.004f, 7);
+				float height = perlin2d(gx+4000+startX, gy+4000+startY, 0.004f, 6);
+				height -= 0.1f; 
 
-		    		// float mod = perlin2d(gx+startXMod, gy+startYMod, 0.008f, 4);
-		    		float perlinMod = perlin2d(gx+startXMod, gy+startYMod, 0.02f, 4);
-		    		float modOffset = 0.1f;
-		    		float mod = mapRange(perlinMod, 0, 1, -modOffset, modOffset);
+				// float mod = perlin2d(gx+startXMod, gy+startYMod, 0.008f, 4);
+				float perlinMod = perlin2d(gx+startXMod, gy+startYMod, 0.02f, 4);
+				float modOffset = 0.1f;
+				float mod = mapRange(perlinMod, 0, 1, -modOffset, modOffset);
 
-		    		int blockType;
-		    		// 	 if(height < 0.35f) blockType = 10; // water
-		    		// else if(height < 0.4f + mod) blockType = 11; // sand
-		    		if(height < 0.4f + mod) blockType = BT_Sand; // sand
-		    		else if(height < 0.6f + mod) blockType = BT_Grass; // grass
-		    		else if(height < 0.8f + mod) blockType = BT_Stone; // stone
-		    		else if(height <= 1.0f + mod) blockType = BT_Snow; // snow
+				int blockType;
+	    		// 	 if(height < 0.35f) blockType = 10; // water
+	    		// else if(height < 0.4f + mod) blockType = 11; // sand
+	    		if(height < 0.4f + mod) blockType = BT_Sand; // sand
+	    		else if(height < 0.6f + mod) blockType = BT_Grass; // grass
+	    		else if(height < 0.8f + mod) blockType = BT_Stone; // stone
+	    		else if(height <= 1.0f + mod) blockType = BT_Snow; // snow
 
-		    		float heightPercent = height;
-		    		height = clamp(height, 0, 1);
-		    		// height = pow(height,3.5f);
-		    		height = pow(height,4.0f);
-		    		height = mapRange(height, 0, 1, 20, 200);
+	    		float heightPercent = height;
+	    		height = clamp(height, 0, 1);
+	    		// height = pow(height,3.5f);
+	    		height = pow(height,4.0f);
+	    		height = mapRange(height, 0, 1, 20, 200);
 
-		    		for(int z = 0; z < height; z++) {
-		    			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = blockType;
-		    			m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 0;
-		    		}
+	    		for(int z = 0; z < height; z++) {
+	    			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = blockType;
+	    			m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 0;
+	    		}
 
-		    		for(int z = height; z < VOXEL_Z; z++) {
-		    			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 0;
-		    			m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 255;
-		    		}
+	    		for(int z = height; z < VOXEL_Z; z++) {
+	    			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 0;
+	    			m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 255;
+	    		}
 
-					if(blockType == BT_Grass && randomInt(0,200) == 0 && 
-						valueBetween(y, min.y+3, max.y-3) && valueBetween(x, min.x+3, max.x-3) && 
-						valueBetween(perlinMod, 0.2f, 0.4f)) {
-						treePositions[treePositionsSize++] = vec3i(x,y,height);
-					}
+	    		if(blockType == BT_Grass && treeNoise[y*VOXEL_Y + x] == 1 && 
+	    			valueBetween(y, min.y+3, max.y-3) && valueBetween(x, min.x+3, max.x-3) && 
+	    			valueBetween(perlinMod, 0.2f, 0.4f)) {
+	    			treePositions[treePositionsSize++] = vec3i(x,y,height);
+		    	}
 
-		    		int waterLevel = 22;
-		    		if(height < waterLevel) {
-		    			for(int z = height; z < waterLevel; z++) {
-		    				m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = BT_Water;
+		    	int waterLevel = 22;
+		    	if(height < waterLevel) {
+		    		for(int z = height; z < waterLevel; z++) {
+		    			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = BT_Water;
 
-		    				int lightValue;
-		    				if(z == 20)  lightValue = 50;
-		    				else if(z == 21) lightValue = 150;
-		    				m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = lightValue;
-		    			}
+		    			int lightValue;
+		    			if(z == 20)  lightValue = 50;
+		    			else if(z == 21) lightValue = 150;
+		    			m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = lightValue;
 		    		}
 		    	}
 		    }
+		}
 
-		    for(int i = 0; i < treePositionsSize; i++) {
-		    	Vec3i p = treePositions[i];
-				int treeHeight = randomInt(4,6);
+		for(int i = 0; i < treePositionsSize; i++) {
+			Vec3i p = treePositions[i];
+			int treeHeight = randomInt(3,6);
+			int crownHeight = randomInt(1,3);
 
-				Rect3 leaves = rect3CenDim(vec3(p.x, p.y, p.z+treeHeight), vec3(5,5,3));
-				leaves.min += vec3(1);
-				for(int x = leaves.min.x; x < leaves.max.x; x++) {
-					for(int y = leaves.min.y; y < leaves.max.y; y++) {
-						for(int z = leaves.min.z; z < leaves.max.z; z++) {
-							m->voxels[voxelArray(x,y,z)] = BT_Leaves;    			
-							m->lighting[voxelArray(x,y,z)] = 0;    			
-						}
+			Vec3i tp = p + vec3i(0,0,treeHeight);
+			Vec3i offset = vec3i(2,2,1);
+			Vec3i min = tp - offset;
+			Vec3i max = tp + offset;
+
+			if(crownHeight == 2) max.z += 1;
+			else if (crownHeight == 3) {
+				max.z += 1;
+				min.z -= 1;
+			}
+
+			for(int x = min.x; x <= max.x; x++) {
+				for(int y = min.y; y <= max.y; y++) {
+					for(int z = min.z; z <= max.z; z++) {
+						m->voxels[voxelArray(x,y,z)] = BT_Leaves;    			
+						m->lighting[voxelArray(x,y,z)] = 0;    			
 					}
 				}
+			}
 
-				for(int i = 0; i < treeHeight; i++) {
-					m->voxels[voxelArray(p.x,p.y,p.z+i)] = BT_TreeLog;
-					m->lighting[voxelArray(p.x,p.y,p.z+i)] = 0;
-				}
-		    }
+			m->voxels[voxelArray(min.x, min.y, max.z)] = 0;
+			m->voxels[voxelArray(min.x, min.y, min.z)] = 0;
+			m->voxels[voxelArray(min.x, max.y, max.z)] = 0;
+			m->voxels[voxelArray(min.x, max.y, min.z)] = 0;
+			m->voxels[voxelArray(max.x, min.y, max.z)] = 0;
+			m->voxels[voxelArray(max.x, min.y, min.z)] = 0;
+			m->voxels[voxelArray(max.x, max.y, max.z)] = 0;
+			m->voxels[voxelArray(max.x, max.y, min.z)] = 0;
+			m->lighting[voxelArray(min.x, min.y, max.z)] = 255;
+			m->lighting[voxelArray(min.x, min.y, min.z)] = 255;
+			m->lighting[voxelArray(min.x, max.y, max.z)] = 255;
+			m->lighting[voxelArray(min.x, max.y, min.z)] = 255;
+			m->lighting[voxelArray(max.x, min.y, max.z)] = 255;
+			m->lighting[voxelArray(max.x, min.y, min.z)] = 255;
+			m->lighting[voxelArray(max.x, max.y, max.z)] = 255;
+			m->lighting[voxelArray(max.x, max.y, min.z)] = 255;
 
+			for(int i = 0; i < treeHeight; i++) {
+				m->voxels[voxelArray(p.x,p.y,p.z+i)] = BT_TreeLog;
+				m->lighting[voxelArray(p.x,p.y,p.z+i)] = 0;
+			}
 		}
 	}
 
@@ -1382,7 +1409,7 @@ void makeMeshThreaded(void* data) {
 
 	uchar color[BT_Size];
 	for(int i = 0; i < BT_Size; i++) color[i] = STBVOX_MAKE_COLOR(blockColor[i], 1, 0);
-	inputDesc->block_color = color;
+		inputDesc->block_color = color;
 
 	unsigned char tLerp[50] = {};
 	// for(int i = 1; i < arrayCount(tLerp)-1; i++) tLerp[i] = 6;
@@ -1619,8 +1646,8 @@ void setupVoxelUniforms(Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit
 	//     amb[1] + (amb[2] - amb[1]) * dot/2 + (amb[2]-amb[1])/2
 
 	for (int j=0; j < 3; ++j) {
-	   al.e2[1][j] = (amb[2][j] - amb[1][j])/2 * bright;
-	   al.e2[2][j] = (amb[1][j] + amb[2][j])/2 * bright;
+		al.e2[1][j] = (amb[2][j] - amb[1][j])/2 * bright;
+		al.e2[2][j] = (amb[1][j] + amb[2][j])/2 * bright;
 	}
 	al.e2[1][3] = 0;
 	al.e2[2][3] = 0;
@@ -1658,8 +1685,8 @@ void setupVoxelUniforms(Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit
 
 					switch (i) {
 						case STBVOX_UNIFORM_camera_pos: { // only needed for fog
-						   		data = camera.e;
-						   } break;
+							data = camera.e;
+						} break;
 
 						case STBVOX_UNIFORM_tex_array: {
 							data = texUnit;
@@ -1677,7 +1704,7 @@ void setupVoxelUniforms(Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit
 						case STBVOX_UNIFORM_texscale:    // you may want to override this
 						case STBVOX_UNIFORM_normals:     // you never want to override this
 						case STBVOX_UNIFORM_texgen:      // you never want to override this
-							break;
+						break;
 					}
 
 					switch(sui.type) {
@@ -1764,7 +1791,7 @@ void drawVoxelMesh(VoxelMesh* m, int drawMode = 0) {
 
 		globalGraphicsState->textureUnits[2] = m->textureTransId;
 		glBindTextures(0,16,globalGraphicsState->textureUnits);
-	
+
 		glDrawArrays(GL_QUADS, 0, m->quadCountTrans*4);
 	}
 }
@@ -1788,6 +1815,8 @@ struct AppData {
 
 	LONGLONG lastTimeStamp;
 	float dt;
+
+	bool* treeNoise;
 
 	Vec3 activeCamPos;
 	Vec3 activeCamLook;
@@ -1911,7 +1940,7 @@ void getPointsFromQuadAndNormal(Vec3 p, Vec3 normal, float size, Vec3 verts[4]) 
 
 	for(int i = 0; i < 4; i++) {
 		Vec3 d = p;
-			 if(i == 0) { d.e[sAxis[0]] += -s2; d.e[sAxis[1]] += -s2; }
+		if(i == 0) { d.e[sAxis[0]] += -s2; d.e[sAxis[1]] += -s2; }
 		else if(i == 1) { d.e[sAxis[0]] += -s2; d.e[sAxis[1]] +=  s2; }
 		else if(i == 2) { d.e[sAxis[0]] +=  s2; d.e[sAxis[1]] +=  s2; }
 		else if(i == 3) { d.e[sAxis[0]] +=  s2; d.e[sAxis[1]] += -s2; }
@@ -1941,6 +1970,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// mainWindowCallBack(0,0,0,0);
 	globalMainWindowCallBack = mainWindowCallBack;
 
+	treeNoise = ad->treeNoise;
 
 	for(int i = 0; i < 8; i++) {
 		voxelCache[i] = ad->voxelCache[i];
@@ -2143,17 +2173,17 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		char* fullPath = getTString(234);
 		glTextureStorage3D(ad->voxelTextures[0], 6, GL_RGBA8, 32, 32, BX_Size);
+		// glTextureStorage3D(ad->voxelTextures[0], 2, GL_RGBA8, 32, 32, BX_Size);
 
 		for(int layerIndex = 0; layerIndex < BX_Size; layerIndex++) {
 			int x,y,n;
 			unsigned char* stbData = stbi_load(textureFilePaths[layerIndex], &x, &y, &n, 4);
 			
 			glTextureSubImage3D(ad->voxelTextures[0], 0, 0, 0, layerIndex, x, y, 1, GL_RGBA, GL_UNSIGNED_BYTE, stbData);
-			glGenerateTextureMipmap(ad->voxelTextures[0]);
-
 			stbi_image_free(stbData);
 		}
 
+		glGenerateTextureMipmap(ad->voxelTextures[0]);
 
 
 
@@ -2223,6 +2253,29 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		*ad->blockMenu = {};
 		ad->blockMenuSelected = 0;
+
+
+		int treeRadius = 4;
+		ad->treeNoise = (bool*)getPMemory(VOXEL_X*VOXEL_Y);
+		zeroMemory(ad->treeNoise, VOXEL_X*VOXEL_Y);
+
+		Rect bounds = rect(0, 0, 64, 64);
+		Vec2* noiseSamples;
+		// int noiseSamplesSize = blueNoise(bounds, 5, &noiseSamples);
+		int noiseSamplesSize = blueNoise(bounds, treeRadius, &noiseSamples);
+		for(int i = 0; i < noiseSamplesSize; i++) {
+			Vec2 s = noiseSamples[i];
+			// Vec2i p = vec2i((int)(s.x/gridCell) * gridCell, (int)(s.y/gridCell) * gridCell);
+			// drawRect(rectCenDim(vec2(p), vec2(5,5)), rect(0,0,1,1), vec4(1,0,1,1), ad->textures[0]);
+			Vec2i index = vec2i(s);
+			ad->treeNoise[index.y*VOXEL_X + index.x] = 1;
+		}
+
+		// for(int y = 0; y < VOXEL_Y; y += 8) {
+		// 	for(int x = 0; x < VOXEL_X; x += 8) {
+		// 		ad->treeNoise[y*VOXEL_X + x] = 1;
+		// 	}
+		// }
 
 		return; // window operations only work after first frame?
 	}
@@ -2303,7 +2356,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glCreateTextures(GL_TEXTURE_2D, 1, &ad->frameBufferTextures[0]);
 		glTextureStorage2D(ad->frameBufferTextures[0], 1, GL_RGBA8, s.w, s.h);
 		glNamedFramebufferTexture(ad->frameBuffers[1], GL_COLOR_ATTACHMENT0, ad->frameBufferTextures[0], 0);
-	
+
 		glDeleteTextures(1, &ad->frameBufferTextures[3]);
 		glCreateTextures(GL_TEXTURE_2D, 1, &ad->frameBufferTextures[3]);
 		glTextureStorage2D(ad->frameBufferTextures[3], 1, GL_DEPTH24_STENCIL8, s.w, s.h);
@@ -2338,7 +2391,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	bool focus = GetFocus() == windowHandle;
 	bool fpsMode = input->captureMouse && focus;
 
-    if(fpsMode) {
+	if(fpsMode) {
 		int w,h;
 		Vec2i wPos;
 		getWindowProperties(systemData->windowHandle, &w, &h, 0, 0, &wPos.x, &wPos.y);
@@ -2490,7 +2543,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	ad->playerAcc.z = 0;
 
 	if(ad->playerMode) {
-		// if(input->keysPressed[VK_SPACE]) {
+			// if(input->keysPressed[VK_SPACE]) {
 		if(input->keysDown[VK_SPACE]) {
 			if(ad->playerOnGround) {
 				ad->playerVel += gUp*7.0f;
@@ -2499,7 +2552,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 	}
 
-	// make sure the meshs around the player are loaded at startup
+		// make sure the meshs around the player are loaded at startup
 	if(second) {
 		Vec2i pPos = getMeshCoordFromGlobalCoord(ad->activeCamPos);
 		for(int i = 0; i < 2; i++) {
@@ -2538,10 +2591,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 		float friction = 0.01f;
 		ad->playerVel.x *= pow(friction,dt);
 		ad->playerVel.y *= pow(friction,dt);
-		// ad->playerVel *= 0.9f;
+			// ad->playerVel *= 0.9f;
 
 		if(ad->playerOnGround) ad->playerVel.z = 0;
-		// if(ad->playerOnGround) ad->playerAcc.z = 0;
+			// if(ad->playerOnGround) ad->playerAcc.z = 0;
 
 		if(ad->playerVel != vec3(0,0,0)) {
 			Vec3 pPos = ad->playerPos;
@@ -2553,7 +2606,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			bool collision = true;
 			while(collision) {
 
-				// get mesh coords that touch the player box
+					// get mesh coords that touch the player box
 				Rect3 box = rect3CenDim(nPos, pSize);
 				Vec3i voxelMin = getVoxelCoordFromGlobalCoord(box.min);
 				Vec3i voxelMax = getVoxelCoordFromGlobalCoord(box.max+1);
@@ -2562,7 +2615,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				collision = false;
 				float minDistance = 100000;
 
-				// check collision with the voxel thats closest
+					// check collision with the voxel thats closest
 				for(int x = voxelMin.x; x < voxelMax.x; x++) {
 					for(int y = voxelMin.y; y < voxelMax.y; y++) {
 						for(int z = voxelMin.z; z < voxelMax.z; z++) {
@@ -2589,7 +2642,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 					Vec3 dir = vec3(0,0,0);
 					int face;
 
-					// check all the 6 planes and take the one with the shortest distance
+						// check all the 6 planes and take the one with the shortest distance
 					for(int i = 0; i < 6; i++) {
 						Vec3 n;
 						if(i == 0) 		n = vec3(1,0,0);
@@ -2599,14 +2652,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 						else if(i == 4) n = vec3(0,0,1);
 						else if(i == 5) n = vec3(0,0,-1);
 
-						// assuming voxel size is 1
-						// this could be simpler because the voxels are axis aligned
+							// assuming voxel size is 1
+							// this could be simpler because the voxels are axis aligned
 						Vec3 p = collisionBox + (n * ((pSize/2) + 0.5));
 						float d = -dot(p, n);
 						float d2 = dot(nPos, n);
 
-						// distances are lower then zero in this case where the point is 
-						// not on the same side as the normal
+							// distances are lower then zero in this case where the point is 
+							// not on the same side as the normal
 						float distance = d + d2;
 
 						if(i == 0 || distance > minDistance) {
@@ -2617,7 +2670,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 					}
 
 					float error = 0.0001f;
-					// float error = 0;
+						// float error = 0;
 					nPos += dir*(-minDistance + error);
 
 					if(face == 5) playerCeilingCollision = true;
@@ -2625,13 +2678,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 					else playerSideCollision = true;
 				}
 
-				// something went wrong and we reject the move, for now
+					// something went wrong and we reject the move, for now
 				if(collisionCount > 5) {
-					// nPos = ad->playerPos;
+						// nPos = ad->playerPos;
 
 					nPos.z += 5;
-					// ad->playerVel = vec3(0,0,0);
-					// break;
+						// ad->playerVel = vec3(0,0,0);
+						// break;
 				}
 			}
 
@@ -2658,7 +2711,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 	}
 
-	// raycast for touching ground
+		// raycast for touching ground
 	if(ad->playerMode) {
 		if(playerGroundCollision && ad->playerVel.z <= 0) {
 			ad->playerOnGround = true;
@@ -2679,7 +2732,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				else if(i == 2) gp = box.min + size*vec3(0,1,0);
 				else if(i == 3) gp = box.min + size*vec3(1,1,0);
 
-				// drawCube(&ad->pipelineIds, block, vec3(1,1,1)*1.01f, vec4(1,0,1,1), 0, vec3(0,0,0));
+					// drawCube(&ad->pipelineIds, block, vec3(1,1,1)*1.01f, vec4(1,0,1,1), 0, vec3(0,0,0));
 
 				float raycastThreshold = 0.01f;
 				gp -= gUp*raycastThreshold;
@@ -2713,12 +2766,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->activeCamRight = cRight;
 	}
 
-	// selecting blocks and modifying them
-	// if(input->mouseButtonPressed[0] && ad->playerMode) {
+		// selecting blocks and modifying them
+		// if(input->mouseButtonPressed[0] && ad->playerMode) {
 	if(ad->playerMode) {
 		ad->blockSelected = false;
 
-		// get block in line
+			// get block in line
 		Vec3 startDir = pLook;
 		Vec3 startPos = ad->playerPos + vec3(0,0,ad->playerCamZOffset);
 
@@ -2739,13 +2792,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			Vec3 blockCoords = getGlobalCoordFromVoxelCoord(getVoxelCoordFromGlobalCoord(newPos));
 
-			// we populate 8 blocks around the biggest axis
+				// we populate 8 blocks around the biggest axis
 			for(int y = -1; y < 2; y++) {
 				for(int x = -1; x < 2; x++) {
 					Vec3 dir = vec3(0,0,0);
 					dir.e[smallerAxis[0]] = y;
 					dir.e[smallerAxis[1]] = x;
-	
+
 					coords[coordsSize++] = blockCoords + dir;
 				}
 			}
@@ -2759,13 +2812,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 				uchar* blockType = getBlockFromGlobalCoord(ad->voxelHash, ad->voxelHashSize, block);
 				Vec3 temp = getGlobalCoordFromVoxelCoord(getVoxelCoordFromGlobalCoord(block));
 
-				// Vec4 c;
-				// if(i == 0) c = vec4(1,0,1,1);
-				// else c = vec4(0,0,1,1);
-				// glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-				// drawCube(&ad->pipelineIds, temp, vec3(1.0f,1.0f,1.0f), c, 0, vec3(0,0,0));
+					// Vec4 c;
+					// if(i == 0) c = vec4(1,0,1,1);
+					// else c = vec4(0,0,1,1);
+					// glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+					// drawCube(&ad->pipelineIds, temp, vec3(1.0f,1.0f,1.0f), c, 0, vec3(0,0,0));
 
-				// if(blockType > 0) {
+					// if(blockType > 0) {
 				if(*blockType > 0) {
 					Vec3 iBox = getGlobalCoordFromVoxelCoord(getVoxelCoordFromGlobalCoord(block));
 					float distance;
@@ -2797,7 +2850,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			ad->blockSelected = true;
 
 			Vec3 faceDir = vec3(0,0,0);
-				 if(intersectionFace == 0) faceDir = vec3(-1,0,0);
+			if(intersectionFace == 0) faceDir = vec3(-1,0,0);
 			else if(intersectionFace == 1) faceDir = vec3(1,0,0);
 			else if(intersectionFace == 2) faceDir = vec3(0,-1,0);
 			else if(intersectionFace == 3) faceDir = vec3(0,1,0);
@@ -2805,7 +2858,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			else if(intersectionFace == 5) faceDir = vec3(0,0,1);
 			ad->selectedBlockFaceDir = faceDir;
 
-			// if(input->mouseButtonPressed[0] && ad->playerMode) {
+				// if(input->mouseButtonPressed[0] && ad->playerMode) {
 			if(ad->playerMode) {
 				VoxelMesh* vm = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, getMeshCoordFromGlobalCoord(intersectionBox));
 
@@ -2822,7 +2875,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 					vm->meshUploaded = false;
 					vm->modifiedByUser = true;
 
-					// if block at edge of mesh, we have to update the mesh on the other side too
+						// if block at edge of mesh, we have to update the mesh on the other side too
 					Vec2i currentCoord = getMeshCoordFromGlobalCoord(intersectionBox);
 					for(int i = 0; i < 4; i++) {
 						Vec3 offset;
@@ -2841,14 +2894,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 					}
 				}
 
-				// if(ad->pickMode) {
+					// if(ad->pickMode) {
 				if(placeBlock) {
 					Vec3 boxToCamDir = startPos - intersectionBox;
 					Vec3 sideBlock = getBlockCenterFromGlobalCoord(intersectionBox + faceDir);
 					Vec3i voxelSideBlock = getVoxelCoordFromGlobalCoord(sideBlock);
 
-					// CodeDuplication:
-					// get mesh coords that touch the player box
+						// CodeDuplication:
+						// get mesh coords that touch the player box
 					Rect3 box = rect3CenDim(ad->playerPos, ad->playerSize);
 					Vec3i voxelMin = getVoxelCoordFromGlobalCoord(box.min);
 					Vec3i voxelMax = getVoxelCoordFromGlobalCoord(box.max+1);
@@ -2871,14 +2924,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 						uchar* sideBlockType = getBlockFromVoxelCoord(ad->voxelHash, ad->voxelHashSize, voxelSideBlock);
 						uchar* sideBlockLighting = getLightingFromVoxelCoord(ad->voxelHash, ad->voxelHashSize, voxelSideBlock);
 
-						// *sideBlockType = 11;
+							// *sideBlockType = 11;
 						*sideBlockType = ad->blockMenu[ad->blockMenuSelected];
 						*sideBlockLighting = 0;
-						// if(*sideBlockType == 6) {
-							// *sideBlockLighting = 255;
-						// }
+							// if(*sideBlockType == 6) {
+								// *sideBlockLighting = 255;
+							// }
 					}
-				// } else {
+					// } else {
 				} else if(removeBlock) {
 					if(*block > 0) {
 						*block = 0;			
@@ -2897,10 +2950,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 	Vec3 fogColor = vec3(0.75f, 0.85f, 0.95f);
 
 	// for tech showcase
-	#ifdef STBVOX_CONFIG_LIGHTING_SIMPLE
-		skyColor = skyColor * vec3(0.3f);
-		fogColor = fogColor * vec3(0.3f);
-	#endif 
+		#ifdef STBVOX_CONFIG_LIGHTING_SIMPLE
+	skyColor = skyColor * vec3(0.3f);
+	fogColor = fogColor * vec3(0.3f);
+		#endif 
 
 	glViewport(0,0, ad->curRes.x, ad->curRes.y);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -2911,14 +2964,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[0]);
 	glClearColor(skyColor.x, skyColor.y, skyColor.z, 0.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-	// glDepthRange(-1.0,1.0);
+		// glDepthRange(-1.0,1.0);
 	glFrontFace(GL_CW);
 
 	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_CULL_FACE);
 	glDisable(GL_SCISSOR_TEST);
 	glEnable(GL_LINE_SMOOTH);
-	
+
 
 	glEnable(GL_TEXTURE_2D);
 
@@ -2953,7 +3006,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-#if 1
+	#if 1
 	// @worldgen
 	if(reload) {
 		// for(int i = 0; i < ad->vMeshsSize; i++) {
@@ -2988,7 +3041,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 		return;
 	}
-#endif
+	#endif
 
 	Vec2i* coordList = (Vec2i*)getTMemory(sizeof(Vec2i)*2000);
 	int coordListSize = 0;
@@ -3099,7 +3152,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 					break;
 				}
 			}
-			
+
 			if(isIntersecting) {
 				// drawVoxelMesh(m);
 				coordList[coordListSize++] = m->coord;
@@ -3188,7 +3241,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		glDepthMask(GL_TRUE);
 	}
-	
+
 	// draw reflection
 	{	
 		glStencilMask(0x00);
@@ -3199,13 +3252,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		Vec2i reflectionRes = ad->curRes*ad->reflectionResMod;
 		glBlitNamedFramebuffer (ad->frameBuffers[0], ad->frameBuffers[2], 
-						   0,0, ad->curRes.x, ad->curRes.y,
-						   0,0, ad->curRes.x, ad->curRes.y,
-		                   // 0,0, reflectionRes.x-1, reflectionRes.y-1,
-		                   // 0,0, ad->curRes.x*0.5f, ad->curRes.y*0.5f,
-		                   // GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT,
-		                   GL_STENCIL_BUFFER_BIT,
-		                   GL_NEAREST);
+			0,0, ad->curRes.x, ad->curRes.y,
+			0,0, ad->curRes.x, ad->curRes.y,
+			                   // 0,0, reflectionRes.x-1, reflectionRes.y-1,
+			                   // 0,0, ad->curRes.x*0.5f, ad->curRes.y*0.5f,
+			                   // GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT,
+			GL_STENCIL_BUFFER_BIT,
+			GL_NEAREST);
 
 		glEnable(GL_CLIP_DISTANCE0);
 		glEnable(GL_CLIP_DISTANCE1);
@@ -3243,7 +3296,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		glEnable(GL_DEPTH_TEST);
 	}
-	
+
 	// draw water
 	{
 		setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor);
@@ -3322,7 +3375,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		float dist = 0.5f;
 		Vec2 iconSize = vec2(size * res.h);
 		float iconDist = iconSize.w * dist;
-		// int count = arrayCount(ad->blockMenu);
+			// int count = arrayCount(ad->blockMenu);
 		int count = 10;
 
 		float selectColor = 1.5f;
@@ -3418,12 +3471,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glBindFramebuffer (GL_FRAMEBUFFER, ad->frameBuffers[0]);
 
 	glBlitNamedFramebuffer(ad->frameBuffers[0], ad->frameBuffers[1],
-					   0,0, ad->curRes.x, ad->curRes.y,
-	                   0,0, ad->curRes.x, ad->curRes.y,
-	                   // GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT,
-	                   GL_COLOR_BUFFER_BIT,
-	                   // GL_NEAREST);
-	                   GL_LINEAR);
+		0,0, ad->curRes.x, ad->curRes.y,
+		0,0, ad->curRes.x, ad->curRes.y,
+		                   // GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT,
+		GL_COLOR_BUFFER_BIT,
+		                   // GL_NEAREST);
+		GL_LINEAR);
 
 	glBindFramebuffer (GL_FRAMEBUFFER, 0);
 	glDisable(GL_DEPTH_TEST);
@@ -3583,6 +3636,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glDrawArrays(GL_QUADS, 0, quadCountTrans*4);
 
 	#endif 
+
+
+
+
+
 
 
 
