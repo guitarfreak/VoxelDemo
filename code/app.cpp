@@ -66,6 +66,15 @@
 - small menu
 
 - solve the tree leaves alpha mipmap problem
+- make trees orange
+
+- rocket launcher
+- add stb perlin
+
+- for rendering trees: set alpha test high, enable alpha-to-coverage, 
+  create seperate buffer for trees, water, rest
+
+- disable blending for leaves since they don't really blend? 
 
 //-------------------------------------
 //               BUGS
@@ -205,7 +214,8 @@ DrawCommandList* globalCommandList2d;
 	GLOP(void, GenFramebuffers, GLsizei n, GLuint *ids) \
 	GLOP(void, FramebufferTexture, GLenum target, GLenum attachment, GLuint texture, GLint level) \
 	GLOP(void, BlendFuncSeparate, GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha) \
-	GLOP(void, BlendEquation, GLenum mode)
+	GLOP(void, BlendEquation, GLenum mode) \
+	GLOP(void, GetTextureSubImage, uint texture, int level, int xoffset, int yoffset, int zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, GLsizei bufSize, void *pixels)
 
 
 
@@ -847,11 +857,11 @@ void drawQuad(Vec3 p, Vec3 normal, float size, Vec4 color) {
 	drawQuad(verts[0], verts[1], verts[2], verts[3], color);
 }
 
-uint createSampler(int wrapS, int wrapT, int magF, int minF) {
+uint createSampler(float ani, int wrapS, int wrapT, int magF, int minF) {
 	uint result;
 	glCreateSamplers(1, &result);
 
-	glSamplerParameteri(result, GL_TEXTURE_MAX_ANISOTROPY_EXT, 4.0f);
+	glSamplerParameteri(result, GL_TEXTURE_MAX_ANISOTROPY_EXT, ani);
 	glSamplerParameteri(result, GL_TEXTURE_WRAP_S, wrapS);
 	glSamplerParameteri(result, GL_TEXTURE_WRAP_T, wrapT);
 	glSamplerParameteri(result, GL_TEXTURE_MAG_FILTER, magF);
@@ -995,8 +1005,24 @@ const char* textureFilePaths[BX_Size] = {
 	"..\\data\\minecraft textures\\pumpkin_bottom.png",
 };
 
-uchar blockColor[BT_Size] = {0,0,0,0,0,0,0,21,0,0,0};
-uchar texture2[BT_Size] = {0,1,1,1,1,1,1,1,1,1,1};
+enum BlockTextures2 {
+	BX2_None = 0,
+	BX2_Leaves,
+
+	BX2_Size,
+};
+
+const char* textureFilePaths2[BX2_Size] = {
+	"..\\data\\minecraft textures\\none.png",
+	"..\\data\\minecraft textures\\leaves.png",
+};
+
+
+// uchar blockColor[BT_Size] = {0,0,0,0,0,0,0,47,0,0,0};
+uchar blockColor[BT_Size] = {0,0,0,0,0,0,0,16,0,0,0};
+uchar texture2[BT_Size] = {0,1,1,1,1,1,1,BX_Leaves,1,1,1};
+uchar textureLerp[BT_Size] = {0,0,0,0,0,0,0,0,0,0,0};
+
 
 #define allTexSame(t) t,t,t,t,t,t
 uchar texture1Faces[BT_Size][6] = {
@@ -1031,6 +1057,41 @@ uchar meshSelection[BT_Size] = {0,1,0,0,0,0,0,1,1,0,0};
 
 // uint blockMainTexture[BT_Size] = {
 // };
+
+static unsigned char colorPaletteCompact[64][3] =
+{
+   { 255,255,255 }, { 238,238,238 }, { 221,221,221 }, { 204,204,204 },
+   { 187,187,187 }, { 170,170,170 }, { 153,153,153 }, { 136,136,136 },
+   { 119,119,119 }, { 102,102,102 }, {  85, 85, 85 }, {  68, 68, 68 },
+   {  51, 51, 51 }, {  34, 34, 34 }, {  17, 17, 17 }, {   0,  0,  0 },
+
+   { 220,100,30 }, { 255,220,220 }, { 255,160,160 }, { 255, 32, 32 },
+   { 200,120,160 }, { 200, 60,150 }, { 220,100,130 }, { 255,  0,128 },
+   { 240,240,255 }, { 220,220,255 }, { 160,160,255 }, {  32, 32,255 },
+   { 120,160,200 }, {  60,150,200 }, { 100,130,220 }, {   0,128,255 },
+   { 240,255,240 }, { 220,255,220 }, { 160,255,160 }, {  32,255, 32 },
+   { 160,200,120 }, { 150,200, 60 }, { 130,220,100 }, { 128,255,  0 },
+   { 255,255,240 }, { 255,255,220 }, { 220,220,180 }, { 255,255, 32 },
+   { 200,160,120 }, { 200,150, 60 }, { 220,130,100 }, { 255,128,  0 },
+   { 255,240,255 }, { 255,220,255 }, { 220,180,220 }, { 255, 32,255 },
+   { 160,120,200 }, { 150, 60,200 }, { 130,100,220 }, { 128,  0,255 },
+   { 240,255,255 }, { 220,255,255 }, { 180,220,220 }, {  32,255,255 },
+   { 120,200,160 }, {  60,200,150 }, { 100,220,130 }, {   0,255,128 },
+};
+
+static float colorPalette[64][4];
+
+void buildColorPalette() {
+   int i;
+   for (i=0; i < 64; ++i) {
+      colorPalette[i][0] = colorPaletteCompact[i][0] / 255.0f;
+      colorPalette[i][1] = colorPaletteCompact[i][1] / 255.0f;
+      colorPalette[i][2] = colorPaletteCompact[i][2] / 255.0f;
+      colorPalette[i][3] = 1.0f;
+   }
+}
+
+
 
 // #define VIEW_DISTANCE 4096 // 64
 // #define VIEW_DISTANCE 3072 // 32
@@ -1406,15 +1467,12 @@ void makeMeshThreaded(void* data) {
 	inputDesc->block_tex1_face = texture1Faces;
 	inputDesc->block_geometry = geometry;
 	inputDesc->block_selector = meshSelection;
+	inputDesc->block_texlerp = textureLerp;
 
 	uchar color[BT_Size];
 	for(int i = 0; i < BT_Size; i++) color[i] = STBVOX_MAKE_COLOR(blockColor[i], 1, 0);
 		inputDesc->block_color = color;
 
-	unsigned char tLerp[50] = {};
-	// for(int i = 1; i < arrayCount(tLerp)-1; i++) tLerp[i] = 6;
-	// tLerp[10] = 4;
-	inputDesc->block_texlerp = tLerp;
 
 
 
@@ -1600,6 +1658,8 @@ Vec3 getBlockCenterFromGlobalCoord(Vec3 coord) {
 }
 
 void setupVoxelUniforms(Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit, Mat4 view, Mat4 proj, Vec3 fogColor, Vec3 trans = vec3(0,0,0), Vec3 scale = vec3(1,1,1), Vec3 rotation = vec3(0,0,0)) {
+	buildColorPalette();
+
 	Vec3 li = normVec3(vec3(0,0.5f,0.5f));
 	Mat4 ambientLighting = {
 		li.x, li.y, li.z ,0, // reversed lighting direction
@@ -1700,7 +1760,10 @@ void setupVoxelUniforms(Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit
 							data = ambientLighting.e;
 						} break;
 
-						case STBVOX_UNIFORM_color_table: // you might want to override this
+						case STBVOX_UNIFORM_color_table: {
+							data = colorPalette;
+						} break;
+
 						case STBVOX_UNIFORM_texscale:    // you may want to override this
 						case STBVOX_UNIFORM_normals:     // you never want to override this
 						case STBVOX_UNIFORM_texgen:      // you never want to override this
@@ -1718,6 +1781,9 @@ void setupVoxelUniforms(Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit
 			}
 		}
 	}
+
+	uint loc = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelFragment, "alphaTest");
+	glProgramUniform1f(globalGraphicsState->pipelineIds.voxelFragment, loc, 0.0f);
 
 	uint clipPlaneLoc = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "clipPlane");
 	glProgramUniform1i(globalGraphicsState->pipelineIds.voxelVertex, clipPlaneLoc, false);
@@ -2129,9 +2195,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		ids->programVoxel = createShader(stbvox_get_vertex_shader(), stbvox_get_fragment_shader(), &ids->voxelVertex, &ids->voxelFragment);
 
-		ad->voxelSamplers[0] = createSampler(GL_REPEAT, GL_REPEAT, GL_NEAREST, GL_NEAREST_MIPMAP_NEAREST);
-		ad->voxelSamplers[1] = createSampler(GL_REPEAT, GL_REPEAT, GL_NEAREST, GL_NEAREST_MIPMAP_NEAREST);
-		ad->voxelSamplers[2] = createSampler(GL_REPEAT, GL_REPEAT, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
+		ad->voxelSamplers[0] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_NEAREST, GL_NEAREST_MIPMAP_LINEAR);
+		ad->voxelSamplers[1] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_NEAREST, GL_NEAREST_MIPMAP_LINEAR);
+		ad->voxelSamplers[2] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
+
+		// ad->voxelSamplers[0] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
+		// ad->voxelSamplers[1] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
+		// ad->voxelSamplers[2] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
 
 
 
@@ -2174,31 +2244,46 @@ extern "C" APPMAINFUNCTION(appMain) {
 		char* fullPath = getTString(234);
 		glTextureStorage3D(ad->voxelTextures[0], 6, GL_RGBA8, 32, 32, BX_Size);
 		// glTextureStorage3D(ad->voxelTextures[0], 2, GL_RGBA8, 32, 32, BX_Size);
-
 		for(int layerIndex = 0; layerIndex < BX_Size; layerIndex++) {
 			int x,y,n;
 			unsigned char* stbData = stbi_load(textureFilePaths[layerIndex], &x, &y, &n, 4);
 			
 			glTextureSubImage3D(ad->voxelTextures[0], 0, 0, 0, layerIndex, x, y, 1, GL_RGBA, GL_UNSIGNED_BYTE, stbData);
+
 			stbi_image_free(stbData);
 		}
-
 		glGenerateTextureMipmap(ad->voxelTextures[0]);
 
+		int size = 16;
+		Vec4* pixels = (Vec4*)getTMemory(sizeof(Vec4)*size*size);
+		for(int i = 1; i < 4; i++) {
+			glGetTextureSubImage(ad->voxelTextures[0], i, 0,0,BX_Leaves, size, size, 1, GL_RGBA, GL_FLOAT, size*size*sizeof(Vec4), &pixels[0]);
+
+			// float scale;
+			// if(i == 1) scale = 1.3f;
+			// else if(i == 2) scale = 1.3f;
+
+			for(int y = 0; y < size; y++) {
+				for(int x = 1; x < size; x++) {
+					// pixels[y*size + x].a *= i*scale; 
+					// pixels[y*size + x].a *= scale; 
+					pixels[y*size + x].a *= 1.25f; 
+				}
+			}
+			glTextureSubImage3D(ad->voxelTextures[0], i, 0, 0, BX_Leaves, size, size, 1, GL_RGBA, GL_FLOAT, pixels);
+			size /= 2;
+		}
 
 
-		glTextureStorage3D(ad->voxelTextures[1], 6, GL_RGBA8, 32, 32, 1);
 
-		int x,y,n;
-		unsigned char* stbData = stbi_load("..\\data\\minecraft textures\\test.png", &x, &y, &n, 4);
-		
-		glTextureSubImage3D(ad->voxelTextures[1], 0, 0, 0, 0, x, y, 1, GL_RGBA, GL_UNSIGNED_BYTE, stbData);
-		glGenerateTextureMipmap(ad->voxelTextures[1]);
-
-		stbi_image_free(stbData);
-
-
-
+		glTextureStorage3D(ad->voxelTextures[1], 1, GL_RGBA8, 32, 32, BX2_Size);
+		for(int layerIndex = 0; layerIndex < BX2_Size; layerIndex++) {
+			int x,y,n;
+			unsigned char* stbData = stbi_load(textureFilePaths2[layerIndex], &x, &y, &n, 4);
+			
+			glTextureSubImage3D(ad->voxelTextures[1], 0, 0, 0, layerIndex, x, y, 1, GL_RGBA, GL_UNSIGNED_BYTE, stbData);
+			stbi_image_free(stbData);
+		}
 
 
 
@@ -2207,9 +2292,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glCreateTextures(GL_TEXTURE_2D, 4, ad->frameBufferTextures);
 		// glCreateTextures(GL_TEXTURE_2D, 3, ad->frameBufferTextures + 1);
 		// GLenum result = glCheckNamedFramebufferStatus(ad->frameBuffers[0], GL_FRAMEBUFFER);
-
-
-
 
 
 		// @setup
@@ -2369,8 +2451,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glDeleteTextures(1, &ad->frameBufferTextures[1]);
 		glCreateTextures(GL_TEXTURE_2D, 1, &ad->frameBufferTextures[1]);
 		glTextureStorage2D(ad->frameBufferTextures[1], 1, GL_RGBA8, reflectionRes.w, reflectionRes.h);
-		glTextureParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		glTextureParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 		glNamedFramebufferTexture(ad->frameBuffers[2], GL_COLOR_ATTACHMENT0, ad->frameBufferTextures[1], 0);
 
 		glDeleteTextures(1, &ad->frameBufferTextures[2]);
@@ -2984,6 +3064,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// glDepthMask(GL_TRUE);
 
 	glEnable(GL_MULTISAMPLE);
+	// glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glBlendEquation(GL_FUNC_ADD);
@@ -3036,7 +3117,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				m->upToDate = false;
 				m->meshUploaded = false;
 
-				// m->generated = false;
+				m->generated = false;
 			}
 		}
 		return;
@@ -3300,6 +3381,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// draw water
 	{
 		setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor);
+		uint loc = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelFragment, "alphaTest");
+		// glProgramUniform1f(globalGraphicsState->pipelineIds.voxelFragment, loc, 0.5f);
 		for(int i = sortListSize-1; i >= 0; i--) {
 			VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
 			drawVoxelMesh(m, 1);

@@ -1652,6 +1652,8 @@ static const char *stbvox_fragment_program =
 {
       STBVOX_SHADER_VERSION
 
+      "uniform float alphaTest;\n"
+
       // rlerp is lerp but with t on the left, like god intended
       #if defined(STBVOX_ICONFIG_GLSL)
          "#define rlerp(t,x,y) mix(x,y,t)\n"
@@ -1833,7 +1835,7 @@ static const char *stbvox_fragment_program =
       #else
       "   vec4 final_color = vec4(lit_color, fragment_alpha);\n"
       #endif
-      "   if(final_color.a <= 0.3f) discard;\n" // really?
+      "   if(final_color.a <= alphaTest) discard;\n"
       
       "   outcolor = final_color;\n"
       // "   outcolor = vec4(1,1,0,1);\n"
