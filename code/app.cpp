@@ -69,6 +69,9 @@
 - make waterlevel a variable in generation and such
 - antialiased pixel graphics with neighbour sampling 
 
+- macros for array stuff so i dont have to inline updateMeshList[updateMeshListSize++] every time 
+								
+
 //-------------------------------------
 //               BUGS
 //-------------------------------------
@@ -1891,6 +1894,17 @@ void getCamData(Vec3 look, Vec2 rot, Vec3 gUp, Vec3* cLook, Vec3* cRight, Vec3* 
 	*cLook = -look;
 }
 
+struct Bomb {
+	Vec3 pos;
+	Vec3 size;
+	Vec3 vel;
+	Vec3 acc;
+
+	Vec3 dir;
+	bool active;
+	Vec3 exploded;
+};
+
 struct AppData {
 	SystemData systemData;
 	Input input;
@@ -1953,15 +1967,13 @@ struct AppData {
 	int blockMenu[10];
 	int blockMenuSelected;
 
-	Vec3 bombPos;
-	Vec3 bombSize;
-	Vec3 bombVel;
-	Vec3 bombAcc;
+	Bomb* bombList;
+	int bombListSize;
+	int bombListCapacity;
 
-	Vec3 bombDir;
-	bool bombActive;
-	Vec3 bombExploded;
-
+	float bombFireInterval;
+	bool bombButtonDown;
+	float bombSpawnTimer;
 
 	int selectionRadius;
 	bool blockSelected;
@@ -2041,6 +2053,30 @@ void getPointsFromQuadAndNormal(Vec3 p, Vec3 normal, float size, Vec3 verts[4]) 
 		verts[i] = d;
 	}
 }
+
+struct Camera {
+	Vec3 pos;
+	Vec3 rot;
+};
+
+enum Entity_Type {
+	ET_Player = 0,
+	ET_Rocket,
+
+	ET_Size,
+};
+
+struct Entity {
+	Vec3 pos;
+	Vec3 dir;
+	Vec3 rot;
+	Vec3 dim;
+
+	Vec3 vel;
+	Vec3 acc;
+
+	// float playerCamZOffset;
+};
 
 extern "C" APPMAINFUNCTION(appMain) {
 	globalMemory = memoryBlock;
@@ -2428,6 +2464,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// 	}
 		// }
 
+		ad->bombListCapacity = 200;
+		ad->bombList = (Bomb*)getPMemory(sizeof(Bomb)*ad->bombListCapacity);
+		ad->bombListSize = 0;
+		ad->bombFireInterval = 1;
+		ad->bombButtonDown = false;
+
+
 		return; // window operations only work after first frame?
 	}
 
@@ -2701,134 +2744,192 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 	}
 
-	if(input->mouseButtonPressed[2]) {
-		ad->bombPos = ad->playerPos + vec3(0,0,ad->playerCamZOffset) + pLook*4;
-		ad->bombSize = vec3(0.5f);
-		// ad->bombVel = vec3(0,0,0);
-		ad->bombVel = pLook*300;
-		ad->bombAcc = vec3(0,0,0);
-		// ad->bombAcc = pLook*200;
-		ad->bombDir = vec3(0,0,0);
+	// spawn bomb
+	ad->bombFireInterval = 0.1f;
 
-		ad->bombActive = true;
+	bool spawnBomb = false;
+	if(input->mouseButtonPressed[2]) {
+		spawnBomb = true;
+		ad->bombSpawnTimer = 0;
 	}
 
-	if(ad->bombActive) {
-		float dt = ad->dt;
-		// float gravity = 20.0f;
-		float gravity = 1.0f;
+	if(input->mouseButtonDown[2]) {
+		ad->bombSpawnTimer += ad->dt;
+	}
 
-		ad->bombAcc += -gUp*gravity;
-		ad->bombVel = ad->bombVel + ad->bombAcc*dt;
+	if(ad->bombSpawnTimer >= ad->bombFireInterval) {
+		spawnBomb = true;
+		ad->bombSpawnTimer = 0;
+	}
 
-		float friction = 0.01f;
-		ad->bombVel.x *= pow(friction,dt);
-		ad->bombVel.y *= pow(friction,dt);
-		ad->bombVel.z *= pow(friction,dt);
+	if(spawnBomb) {
+		if(ad->bombListSize < ad->bombListCapacity) {
+			Bomb b = {};
+			// b.pos = ad->playerPos + vec3(0,0,ad->playerCamZOffset) + pLook*4;
+			b.pos = ad->activeCamPos + vec3(0,0,ad->playerCamZOffset) + ad->activeCamLook*4;
+			b.size = vec3(0.5f);
+			b.vel = ad->activeCamLook*300;
+			b.acc = ad->activeCamLook*200;
+			b.active = true;
 
-		if(ad->bombVel != vec3(0,0,0)) {
-			Vec3 pPos = ad->bombPos;
-			Vec3 pSize = ad->bombSize;
+			ad->bombList[ad->bombListSize++] = b;
+		}
+	}
 
-			Vec3 nPos = pPos + -0.5f*ad->bombAcc*dt*dt + ad->bombVel*dt;
 
-			bool collision = false;
+	for(int i = 0; i < ad->bombListSize; i++) {
+		Bomb* bomb = &ad->bombList[i];
+		if(bomb->active) {
+			float dt = ad->dt;
+			// float gravity = 20.0f;
+			float gravity = 1.0f;
 
-			Rect3 box = rect3CenDim(nPos, pSize);
-			Vec3i voxelMin = coordToVoxel(box.min);
-			Vec3i voxelMax = coordToVoxel(box.max+1);
+			bomb->acc += -gUp*gravity;
+			bomb->vel = bomb->vel + bomb->acc*dt;
 
-			collision = false;
-			Vec3 collisionBox;
+			float friction = 0.01f;
+			bomb->vel.x *= pow(friction,dt);
+			bomb->vel.y *= pow(friction,dt);
+			bomb->vel.z *= pow(friction,dt);
 
-			for(int x = voxelMin.x; x < voxelMax.x; x++) {
-				for(int y = voxelMin.y; y < voxelMax.y; y++) {
-					for(int z = voxelMin.z; z < voxelMax.z; z++) {
-						Vec3i coord = vec3i(x,y,z);
-						uchar* block = getBlockFromVoxel(ad->voxelHash, ad->voxelHashSize, coord);
+			if(bomb->vel != vec3(0,0,0)) {
+				Vec3 pPos = bomb->pos;
+				Vec3 pSize = bomb->size;
 
-						if(*block > 0) {
-							collisionBox = voxelToVoxelCoord(coord);
-							collision = true;
-							goto forGoto;
-						}
-					}
-				}
-			} forGoto:
+				Vec3 nPos = pPos + -0.5f*bomb->acc*dt*dt + bomb->vel*dt;
 
-			if(collision) {
-				ad->bombActive = false;
-				ad->bombExploded = collisionBox;
-			}
+				bool collision = false;
 
-			if(collision) {
-				Vec3 startPos = collisionBox;
-				float sRad = 10;
+				Rect3 box = rect3CenDim(nPos, pSize);
+				Vec3i voxelMin = coordToVoxel(box.min);
+				Vec3i voxelMax = coordToVoxel(box.max+1);
 
-				// float resolution = M_2PI;
-				// float vStep = 0.5f;
-				float resolution = M_PI;
-				float vStep = 0.75f;
+				collision = false;
+				Vec3 collisionBox;
 
-				int itCount = sRad*resolution;
-				for(int it = 0; it < itCount+1; it++) {
-					float off = degreeToRadian(it * (360/(float)itCount));
-					Vec3 dir = rotateVec3(normVec3(vec3(0,1,0)), off, vec3(1,0,0));
-					float off2 = sin(off/(float)2)*sRad;
+				for(int x = voxelMin.x; x < voxelMax.x; x++) {
+					for(int y = voxelMin.y; y < voxelMax.y; y++) {
+						for(int z = voxelMin.z; z < voxelMax.z; z++) {
+							Vec3i coord = vec3i(x,y,z);
+							uchar* block = getBlockFromVoxel(ad->voxelHash, ad->voxelHashSize, coord);
 
-					float rad = (dir*sRad).y;
-					for(int i = 0; i < 2; i++) {
-						Vec3 pos;
-						if(i == 0) pos = startPos + vec3(0,off2,0);
-						else pos = startPos + vec3(0,-off2,0);
-
-						int itCount = rad*resolution;
-						for(int it = 0; it < itCount+1; it++) {
-							float off = degreeToRadian(it * (360/(float)itCount));
-							Vec3 dir = rotateVec3(normVec3(vec3(1,0,0)), off, vec3(0,-1,0));
-							Vec3 p = pos + dir*rad;
-
-							float cubeSize = 1.0f;
-
-							// dcCube({coordToVoxelCoord(pos + dir*rad), vec3(cubeSize), vec4(1,0.5f,0,1), 0, vec3(0,0,0)});
-							// dcCube({coordToVoxelCoord(pos - dir*rad), vec3(cubeSize), vec4(1,0.5f,0,1), 0, vec3(0,0,0)});
-
-							*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, pos+dir*rad) = 0; 
-							*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos+dir*rad) = 255; 
-							*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, pos-dir*rad) = 0; 
-							*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos-dir*rad) = 255; 
-
-							float off2 = sin(off/(float)2)*rad;
-							for(float z = 0; z < (dir*rad).x; z += vStep) {
-								// dcCube({coordToVoxelCoord(pos + vec3(off2,0, z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
-								// dcCube({coordToVoxelCoord(pos + vec3(off2,0,-z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
-								// dcCube({coordToVoxelCoord(pos - vec3(off2,0,z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
-								// dcCube({coordToVoxelCoord(pos - vec3(off2,0,-z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
-
-								*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos + vec3(off2,0, z)) = 0; 
-								*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos + vec3(off2,0, z)) = 255; 
-								*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos + vec3(off2,0,-z)) = 0; 
-								*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos + vec3(off2,0,-z)) = 255; 
-								*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos - vec3(off2,0, z)) = 0; 
-								*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos - vec3(off2,0, z)) = 255; 
-								*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos - vec3(off2,0,-z)) = 0; 
-								*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos - vec3(off2,0,-z)) = 255; 
+							if(*block > 0) {
+								collisionBox = voxelToVoxelCoord(coord);
+								collision = true;
+								goto forGoto;
 							}
 						}
 					}
-					
-					// drawCube(startPos + dir*rad, vec3(0.1f), vec4(1,0.5f,0,1), 0, vec3(0,0,0));
-					// drawCube(startPos - dir*rad, vec3(0.1f), vec4(1,0.5f,0,1), 0, vec3(0,0,0));
-					
-					VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordToMesh(collisionBox));
-					m->upToDate = false;
-					m->meshUploaded = false;
-					m->modifiedByUser = true;
+				} forGoto:
+
+				if(collision) {
+					bomb->active = false;
+					bomb->exploded = collisionBox;
 				}
 
-			}
+				Vec2i updateMeshList[8];
+				int updateMeshListSize = 0;
 
-			ad->bombPos = nPos;
+				if(collision) {
+					Vec3 startPos = collisionBox;
+					float sRad = 10;
+
+					// float resolution = M_2PI;
+					// float vStep = 0.5f;
+					float resolution = M_PI;
+					float vStep = 0.75f;
+
+					int itCount = sRad*resolution;
+					for(int it = 0; it < itCount+1; it++) {
+						float off = degreeToRadian(it * (360/(float)itCount));
+						Vec3 dir = rotateVec3(normVec3(vec3(0,1,0)), off, vec3(1,0,0));
+						float off2 = sin(off/(float)2)*sRad;
+
+						float rad = (dir*sRad).y;
+						for(int i = 0; i < 2; i++) {
+							Vec3 pos;
+							if(i == 0) pos = startPos + vec3(0,off2,0);
+							else pos = startPos + vec3(0,-off2,0);
+
+							int itCount = rad*resolution;
+							for(int it = 0; it < itCount+1; it++) {
+								float off = degreeToRadian(it * (360/(float)itCount));
+								Vec3 dir = rotateVec3(normVec3(vec3(1,0,0)), off, vec3(0,-1,0));
+								Vec3 p = pos + dir*rad;
+
+								float cubeSize = 1.0f;
+
+								// dcCube({coordToVoxelCoord(pos + dir*rad), vec3(cubeSize), vec4(1,0.5f,0,1), 0, vec3(0,0,0)});
+								// dcCube({coordToVoxelCoord(pos - dir*rad), vec3(cubeSize), vec4(1,0.5f,0,1), 0, vec3(0,0,0)});
+
+								*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, pos+dir*rad) = 0; 
+								*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos+dir*rad) = 255; 
+								*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, pos-dir*rad) = 0; 
+								*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos-dir*rad) = 255; 
+
+								for(int it = 0; it < 2; it++) {
+									bool found = false;
+									Vec2i mc;
+									if(it == 0) mc = coordToMesh(pos+dir*rad);
+									else mc = coordToMesh(pos-dir*rad);
+									for(int i = 0; i < updateMeshListSize; i++) {
+										if(updateMeshList[i] == mc) {
+											found = true;
+											break;
+										}
+									}
+									if(!found) {
+										updateMeshList[updateMeshListSize++] = mc;
+									}
+
+								}
+
+								float off2 = sin(off/(float)2)*rad;
+								for(float z = 0; z < (dir*rad).x; z += vStep) {
+									// dcCube({coordToVoxelCoord(pos + vec3(off2,0, z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
+									// dcCube({coordToVoxelCoord(pos + vec3(off2,0,-z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
+									// dcCube({coordToVoxelCoord(pos - vec3(off2,0,z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
+									// dcCube({coordToVoxelCoord(pos - vec3(off2,0,-z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
+
+									*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos + vec3(off2,0, z)) = 0; 
+									*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos + vec3(off2,0, z)) = 255; 
+									*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos + vec3(off2,0,-z)) = 0; 
+									*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos + vec3(off2,0,-z)) = 255; 
+									*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos - vec3(off2,0, z)) = 0; 
+									*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos - vec3(off2,0, z)) = 255; 
+									*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos - vec3(off2,0,-z)) = 0; 
+									*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos - vec3(off2,0,-z)) = 255; 
+								}
+							}
+						}
+						
+						// drawCube(startPos + dir*rad, vec3(0.1f), vec4(1,0.5f,0,1), 0, vec3(0,0,0));
+						// drawCube(startPos - dir*rad, vec3(0.1f), vec4(1,0.5f,0,1), 0, vec3(0,0,0));
+					}
+
+					for(int i = 0; i < updateMeshListSize; i++) {
+						VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, updateMeshList[i]);
+						m->upToDate = false;
+						m->meshUploaded = false;
+						m->modifiedByUser = true;
+					}
+				}
+
+				bomb->pos = nPos;
+			}
+		}
+
+		if(bomb->pos.z < 0) {
+			bomb->active = false;
+		}
+
+		if(!bomb->active) {
+			ad->bombList[i] = ad->bombList[ad->bombListSize-1];
+			ad->bombListSize--;
+		}
+
+		if(bomb->active) {
+			dcCube({bomb->pos, bomb->size, vec4(1,0,1,1), 0, vec3(0,0,0)});
 		}
 	}
 
@@ -3678,10 +3779,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 			dcCube({ad->selectedBlock, vec3(1.01f), vec4(0.9f), 0, vec3(0,0,0)});
 			dcPolygonMode({POLYGON_MODE_FILL});
 		}
-	}
-
-	if(ad->bombActive) {
-		dcCube({ad->bombPos, ad->bombSize, vec4(1,0,1,1), 0, vec3(0,0,0)});
 	}
 
 	int fontSize = 22;
