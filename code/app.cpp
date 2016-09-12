@@ -60,21 +60,14 @@
 - pink noise from old projects
 
 - stb_voxel push block_selector, alpha test, clipping in voxel vertex shader
-- maybe streamline coordinate transform functions to be more clear some time
 
 - activate opengl debug output!
 - small menu
 
-- solve the tree leaves alpha mipmap problem
-- make trees orange
-
 - rocket launcher
-- add stb perlin
 
-- for rendering trees: set alpha test high, enable alpha-to-coverage, 
-  create seperate buffer for trees, water, rest
-
-- disable blending for leaves since they don't really blend? 
+- make waterlevel a variable in generation and such
+- antialiased pixel graphics with neighbour sampling 
 
 //-------------------------------------
 //               BUGS
@@ -1019,7 +1012,7 @@ const char* textureFilePaths2[BX2_Size] = {
 
 
 // uchar blockColor[BT_Size] = {0,0,0,0,0,0,0,47,0,0,0};
-uchar blockColor[BT_Size] = {0,0,0,0,0,0,0,16,0,0,0};
+uchar blockColor[BT_Size] = {0,17,0,0,0,0,0,16,0,0,0};
 uchar texture2[BT_Size] = {0,1,1,1,1,1,1,BX_Leaves,1,1,1};
 uchar textureLerp[BT_Size] = {0,0,0,0,0,0,0,0,0,0,0};
 
@@ -1065,7 +1058,7 @@ static unsigned char colorPaletteCompact[64][3] =
    { 119,119,119 }, { 102,102,102 }, {  85, 85, 85 }, {  68, 68, 68 },
    {  51, 51, 51 }, {  34, 34, 34 }, {  17, 17, 17 }, {   0,  0,  0 },
 
-   { 220,100,30 }, { 255,220,220 }, { 255,160,160 }, { 255, 32, 32 },
+   { 220,100,30 }, { 0,100,220 }, { 255,160,160 }, { 255, 32, 32 },
    { 200,120,160 }, { 200, 60,150 }, { 220,100,130 }, { 255,  0,128 },
    { 240,240,255 }, { 220,220,255 }, { 160,160,255 }, {  32, 32,255 },
    { 120,160,200 }, {  60,150,200 }, { 100,130,220 }, {   0,128,255 },
@@ -1578,84 +1571,112 @@ void makeMesh(VoxelMesh* m, VoxelNode** voxelHash, int voxelHashSize) {
 	m->meshUploaded = true;
 }
 
-Vec3i getVoxelCoordFromGlobalCoord(Vec3 globalCoord) {
-	Vec3i result;
-	if(globalCoord.x < 0) globalCoord.x -= 1;
-	if(globalCoord.y < 0) globalCoord.y -= 1;
-	result = vec3i(globalCoord);
+// coord 		Vec3
+// voxel 		Vec3i -> based on voxel size
+// mesh			Vec2i -> based on mesh size
+// localVoxel 	Vec3i -> mod(voxel)
+
+// voxelCoord 	Vec3 -> voxel + voxelSize/2
+// meshCoord 	Vec3 -> mesh + meshSize/2
+
+// meshPointer 	-> mesh
+// voxelPointer -> meshPointer,
+
+// coord -> voxel
+Vec3i coordToVoxel(Vec3 coord) {
+	if(coord.x < 0) coord.x -= 1;
+	if(coord.y < 0) coord.y -= 1;
+	Vec3i result = vec3i(coord);
 
 	return result;
 }
 
-Vec3 getGlobalCoordFromVoxelCoord(Vec3i voxelCoord) {
+// voxel -> mesh
+Vec2i voxelToMesh(Vec3i voxel) {
+	Vec2i result = vec2i(floor(voxel.x/(float)VOXEL_X), floor(voxel.y/(float)VOXEL_Y));
+
+	return result;
+}
+
+// coord -> mesh
+Vec2i coordToMesh(Vec3 coord) {
+	Vec3i mc = coordToVoxel(coord);
+	Vec2i result = voxelToMesh(mc);
+
+	return result;
+}
+
+// voxel -> localVoxel
+Vec3i voxelToLocalVoxel(Vec3i voxel) {
+	Vec3i result = voxel;
+	result.x = mod(voxel.x, VOXEL_X);
+	result.y = mod(voxel.y, VOXEL_Y);
+
+	return result;
+}
+
+
+// voxel -> voxelCoord
+Vec3 voxelToVoxelCoord(Vec3i voxel) {
 	Vec3 result;
-	// assumes voxel has length of 1
-	result = vec3(voxelCoord) + vec3(0.5f, 0.5f, 0.5f);
+	result = vec3(voxel) + vec3(0.5f, 0.5f, 0.5f);
 	return result;
 }
 
-Vec2i getMeshCoordFromVoxelCoord(Vec3i voxelCoord) {
-	Vec2i result;
-	result = vec2i(floor(voxelCoord.x/(float)VOXEL_X), floor(voxelCoord.y/(float)VOXEL_Y));
+// coord -> voxelCoord
+Vec3 coordToVoxelCoord(Vec3 coord) {
+	Vec3 result = voxelToVoxelCoord(coordToVoxel(coord));
 	return result;
 }
 
-Vec2i getMeshCoordFromGlobalCoord(Vec3 globalCoord) {
-	Vec2i result;
-	Vec3i mc = getVoxelCoordFromGlobalCoord(globalCoord);
-	result = getMeshCoordFromVoxelCoord(mc);
+// mesh -> meshCoord
+Vec3 meshToMeshCoord(Vec2i mesh) {
+	Vec3 result = vec3(mesh.x*VOXEL_X + VOXEL_X*0.5f, mesh.y*VOXEL_Y + VOXEL_Y*0.5f, VOXEL_Z*0.5f);
 	return result;
 }
 
-Vec3i getLocalVoxelCoord(Vec3i voxelCoord) {
-	Vec3i result = voxelCoord;
-	result.x = mod(voxelCoord.x, VOXEL_X);
-	result.y = mod(voxelCoord.y, VOXEL_Y);
-
+// coord -> meshCoord
+Vec3 coordToMeshCoord(Vec3 coord) {
+	Vec3 result = meshToMeshCoord(coordToMesh(coord));
 	return result;
 }
 
-Vec3 getGlobalMeshCoord(Vec2i coord) {
-	Vec3 result = vec3(coord.x*VOXEL_X + VOXEL_X*0.5f, coord.y*VOXEL_Y + VOXEL_Y*0.5f, VOXEL_Z*0.5f);
-	return result;
-}
 
-uchar* getBlockFromVoxelCoord(VoxelNode** voxelHash, int voxelHashSize, Vec3i voxelCoord) {
-	VoxelMesh* vm = getVoxelMesh(voxelHash, voxelHashSize, getMeshCoordFromVoxelCoord(voxelCoord));
-	Vec3i localCoord = getLocalVoxelCoord(voxelCoord);
+// voxel -> block
+uchar* getBlockFromVoxel(VoxelNode** voxelHash, int voxelHashSize, Vec3i voxel) {
+	VoxelMesh* vm = getVoxelMesh(voxelHash, voxelHashSize, voxelToMesh(voxel));
+	Vec3i localCoord = voxelToLocalVoxel(voxel);
 	uchar* block = &vm->voxels[voxelArray(localCoord.x, localCoord.y, localCoord.z)];
 
 	return block;
 }
 
-uchar* getBlockFromGlobalCoord(VoxelNode** voxelHash, int voxelHashSize, Vec3 coord) {
-	return getBlockFromVoxelCoord(voxelHash, voxelHashSize, getVoxelCoordFromGlobalCoord(coord));
+// coord -> block
+uchar* getBlockFromCoord(VoxelNode** voxelHash, int voxelHashSize, Vec3 coord) {
+	return getBlockFromVoxel(voxelHash, voxelHashSize, coordToVoxel(coord));
 }
 
-uchar* getLightingFromVoxelCoord(VoxelNode** voxelHash, int voxelHashSize, Vec3i voxelCoord) {
-	VoxelMesh* vm = getVoxelMesh(voxelHash, voxelHashSize, getMeshCoordFromVoxelCoord(voxelCoord));
-	Vec3i localCoord = getLocalVoxelCoord(voxelCoord);
+// voxel -> lighting
+uchar* getLightingFromVoxel(VoxelNode** voxelHash, int voxelHashSize, Vec3i voxel) {
+	VoxelMesh* vm = getVoxelMesh(voxelHash, voxelHashSize, voxelToMesh(voxel));
+	Vec3i localCoord = voxelToLocalVoxel(voxel);
 	uchar* block = &vm->lighting[voxelArray(localCoord.x, localCoord.y, localCoord.z)];
 
 	return block;
 }
 
-uchar* getLightingFromGlobalCoord(VoxelNode** voxelHash, int voxelHashSize, Vec3 coord) {
-	return getLightingFromVoxelCoord(voxelHash, voxelHashSize, getVoxelCoordFromGlobalCoord(coord));
+// coord -> lighting
+uchar* getLightingFromCoord(VoxelNode** voxelHash, int voxelHashSize, Vec3 coord) {
+	return getLightingFromVoxel(voxelHash, voxelHashSize, coordToVoxel(coord));
 }
 
-// uchar* getLightingFromGlobalCoord(VoxelNode** voxelHash, int voxelHashSize, Vec3 coord) {
-// 	VoxelMesh* vm = getVoxelMesh(voxelHash, voxelHashSize, getMeshCoordFromGlobalCoord(coord));
-// 	Vec3i localCoord = getLocalVoxelCoord(getVoxelCoordFromGlobalCoord(coord));
-// 	uchar* block = &vm->lighting[voxelArray(localCoord.x, localCoord.y, localCoord.z)];
 
-// 	return block;
-// }
 
-Vec3 getBlockCenterFromGlobalCoord(Vec3 coord) {
-	Vec3 result = getGlobalCoordFromVoxelCoord(getVoxelCoordFromGlobalCoord(coord));
-	return result;
-}
+
+
+
+
+
 
 void setupVoxelUniforms(Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit, Mat4 view, Mat4 proj, Vec3 fogColor, Vec3 trans = vec3(0,0,0), Vec3 scale = vec3(1,1,1), Vec3 rotation = vec3(0,0,0)) {
 	buildColorPalette();
@@ -1918,8 +1939,6 @@ struct AppData {
 	Vec2i fboRes;
 	bool useNativeRes;
 
-	float reflectionResMod;
-
 	Vec3 playerPos;
 	Vec3 playerLook;
 	Vec2 playerRot;
@@ -1933,6 +1952,15 @@ struct AppData {
 	bool playerOnGround;
 	int blockMenu[10];
 	int blockMenuSelected;
+
+	Vec3 bombPos;
+	Vec3 bombSize;
+	Vec3 bombVel;
+	Vec3 bombAcc;
+
+	Vec3 bombDir;
+	bool bombActive;
+	Vec3 bombExploded;
 
 
 	int selectionRadius;
@@ -2062,17 +2090,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 		wSettings->style = (WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU  | WS_MINIMIZEBOX  | WS_VISIBLE);
 		initSystem(systemData, windowsData, 0, 0,0,0,0);
 
-		ad->fieldOfView = 55;
+		// ad->fieldOfView = 55;
+		ad->fieldOfView = 60;
 		ad->msaaSamples = 4;
 		ad->fboRes = vec2i(0, 120);
 		ad->useNativeRes = true;
 		ad->nearPlane = 0.1f;
 		// ad->farPlane = 2000;
 		ad->farPlane = 3000;
-
-		ad->reflectionResMod = 0.5f;
-		// ad->reflectionResMod = 1;
-
 
 		// DEVMODE devMode;
 		// int index = 0;
@@ -2230,6 +2255,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		FindClose(handle);
 
 
+		const int mipMapCount = 5;
 		uint format = GL_RGBA;
 		uint internalFormat = GL_RGBA8;
 		int texCount = index;
@@ -2242,7 +2268,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		strAppend(p, "..\\data\\minecraft textures\\");
 
 		char* fullPath = getTString(234);
-		glTextureStorage3D(ad->voxelTextures[0], 6, GL_RGBA8, 32, 32, BX_Size);
+		glTextureStorage3D(ad->voxelTextures[0], mipMapCount, GL_RGBA8, 32, 32, BX_Size);
 		// glTextureStorage3D(ad->voxelTextures[0], 2, GL_RGBA8, 32, 32, BX_Size);
 		for(int layerIndex = 0; layerIndex < BX_Size; layerIndex++) {
 			int x,y,n;
@@ -2254,25 +2280,68 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 		glGenerateTextureMipmap(ad->voxelTextures[0]);
 
-		int size = 16;
-		Vec4* pixels = (Vec4*)getTMemory(sizeof(Vec4)*size*size);
-		for(int i = 1; i < 4; i++) {
-			glGetTextureSubImage(ad->voxelTextures[0], i, 0,0,BX_Leaves, size, size, 1, GL_RGBA, GL_FLOAT, size*size*sizeof(Vec4), &pixels[0]);
 
-			// float scale;
-			// if(i == 1) scale = 1.3f;
-			// else if(i == 2) scale = 1.3f;
+
+		float alphaCoverage[mipMapCount] = {};
+		int size = 32;
+		Vec4* pixels = (Vec4*)getTMemory(sizeof(Vec4)*size*size);
+		for(int i = 0; i < mipMapCount; i++) {
+			glGetTextureSubImage(ad->voxelTextures[0], i, 0,0,BX_Leaves, size, size, 1, GL_RGBA, GL_FLOAT, size*size*sizeof(Vec4), &pixels[0]);
 
 			for(int y = 0; y < size; y++) {
 				for(int x = 1; x < size; x++) {
-					// pixels[y*size + x].a *= i*scale; 
-					// pixels[y*size + x].a *= scale; 
-					pixels[y*size + x].a *= 1.25f; 
+					alphaCoverage[i] += pixels[y*size + x].a;
 				}
 			}
-			glTextureSubImage3D(ad->voxelTextures[0], i, 0, 0, BX_Leaves, size, size, 1, GL_RGBA, GL_FLOAT, pixels);
+	
+			alphaCoverage[i] = alphaCoverage[i] / (size*size);
 			size /= 2;
 		}
+
+		float alphaCoverage2[mipMapCount] = {};
+		size = 16;
+		for(int i = 1; i < mipMapCount; i++) {
+			glGetTextureSubImage(ad->voxelTextures[0], i, 0,0,BX_Leaves, size, size, 1, GL_RGBA, GL_FLOAT, size*size*sizeof(Vec4), &pixels[0]);
+
+			// float alphaScale = (size*size*alphaCoverage[0]) / (alphaCoverage[i]*size*size);
+			float alphaScale = (alphaCoverage[0]) / (alphaCoverage[i]);
+
+			for(int y = 0; y < size; y++) {
+				for(int x = 1; x < size; x++) {
+					pixels[y*size + x].a *= alphaScale;
+					alphaCoverage2[i] += pixels[y*size + x].a;
+				}
+			}
+		
+			glTextureSubImage3D(ad->voxelTextures[0], i, 0, 0, BX_Leaves, size, size, 1, GL_RGBA, GL_FLOAT, pixels);
+
+			alphaCoverage2[i] = alphaCoverage2[i] / (size*size);
+			size /= 2;
+		}
+
+
+
+		// int size = 16;
+		// Vec4* pixels = (Vec4*)getTMemory(sizeof(Vec4)*size*size);
+		// for(int i = 1; i < 4; i++) {
+		// 	glGetTextureSubImage(ad->voxelTextures[0], i, 0,0,BX_Leaves, size, size, 1, GL_RGBA, GL_FLOAT, size*size*sizeof(Vec4), &pixels[0]);
+
+		// 	// float scale;
+		// 	// if(i == 1) scale = 1.3f;
+		// 	// else if(i == 2) scale = 1.3f;
+
+		// 	for(int y = 0; y < size; y++) {
+		// 		for(int x = 1; x < size; x++) {
+		// 			// pixels[y*size + x].a *= i*scale; 
+		// 			// pixels[y*size + x].a *= scale; 
+		// 			// pixels[y*size + x].a *= 1.25f; 
+		// 			pixels[y*size + x].a *= 1.5f; 
+		// 		}
+		// 	}
+
+		// 	glTextureSubImage3D(ad->voxelTextures[0], i, 0, 0, BX_Leaves, size, size, 1, GL_RGBA, GL_FLOAT, pixels);
+		// 	size /= 2;
+		// }
 
 
 
@@ -2324,13 +2393,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		// ad->playerPos = vec3(35.5f,35.3f,30);
 		ad->playerPos = vec3(0,0,0);
-		ad->playerLook = vec3(0,1,0);
+		ad->playerLook = vec3(0,-1,0);
 		ad->playerSize = vec3(0.8f, 0.8f, 1.8f);
 		ad->playerCamZOffset = ad->playerSize.z*0.5f - ad->playerSize.x*0.25f;
 
 		ad->playerMode = true;
 		ad->pickMode = true;
-		ad->selectionRadius = 7;
+		ad->selectionRadius = 20;
 		input->captureMouse = true;
 
 		*ad->blockMenu = {};
@@ -2378,7 +2447,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 	// alloc drawcommandlist	
-	int clSize = kiloBytes(100);
+	int clSize = kiloBytes(1000);
 	drawCommandListInit(globalCommandList3d, (char*)getTMemory(clSize), clSize);
 	drawCommandListInit(globalCommandList2d, (char*)getTMemory(clSize), clSize);
 
@@ -2445,8 +2514,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glNamedFramebufferTexture(ad->frameBuffers[1], GL_DEPTH_STENCIL_ATTACHMENT, ad->frameBufferTextures[3], 0);
 
 
-		ad->reflectionResMod = 1;
-		Vec2 reflectionRes = vec2(s)*ad->reflectionResMod;
+		Vec2 reflectionRes = vec2(s);
 
 		glDeleteTextures(1, &ad->frameBufferTextures[1]);
 		glCreateTextures(GL_TEXTURE_2D, 1, &ad->frameBufferTextures[1]);
@@ -2508,6 +2576,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 	#define KEYCODE_0 0x30
 	#define KEYCODE_1 0x31
 	#define KEYCODE_2 0x32
+	#define KEYCODE_3 0x33
+	#define KEYCODE_4 0x34
 
 	// if(input->keysPressed[KEYCODE_1]) {
 	// 	ad->pickMode = true;
@@ -2542,14 +2612,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		input->keysPressed[VK_SPACE] = false;
 		input->keysDown[VK_SPACE] = false;
 	}
-
-
-	#define VK_W 0x57
-	#define VK_A 0x41
-	#define VK_S 0x53
-	#define VK_D 0x44
-	#define VK_E 0x45
-	#define VK_Q 0x51
 
 	Vec3 gUp = vec3(0,0,1);
 
@@ -2604,6 +2666,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 		clamp(&rot->y, -M_PI+margin, M_PI-margin);
 	}
 
+	#define VK_W 0x57
+	#define VK_A 0x41
+	#define VK_S 0x53
+	#define VK_D 0x44
+	#define VK_E 0x45
+	#define VK_Q 0x51
+
 	if( input->keysDown[VK_W] || input->keysDown[VK_A] || input->keysDown[VK_S] || 
 		input->keysDown[VK_D] || input->keysDown[VK_E] || input->keysDown[VK_Q]) {
 
@@ -2623,7 +2692,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	ad->playerAcc.z = 0;
 
 	if(ad->playerMode) {
-			// if(input->keysPressed[VK_SPACE]) {
+		// if(input->keysPressed[VK_SPACE]) {
 		if(input->keysDown[VK_SPACE]) {
 			if(ad->playerOnGround) {
 				ad->playerVel += gUp*7.0f;
@@ -2632,9 +2701,140 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 	}
 
-		// make sure the meshs around the player are loaded at startup
+	if(input->mouseButtonPressed[2]) {
+		ad->bombPos = ad->playerPos + vec3(0,0,ad->playerCamZOffset) + pLook*4;
+		ad->bombSize = vec3(0.5f);
+		// ad->bombVel = vec3(0,0,0);
+		ad->bombVel = pLook*300;
+		ad->bombAcc = vec3(0,0,0);
+		// ad->bombAcc = pLook*200;
+		ad->bombDir = vec3(0,0,0);
+
+		ad->bombActive = true;
+	}
+
+	if(ad->bombActive) {
+		float dt = ad->dt;
+		// float gravity = 20.0f;
+		float gravity = 1.0f;
+
+		ad->bombAcc += -gUp*gravity;
+		ad->bombVel = ad->bombVel + ad->bombAcc*dt;
+
+		float friction = 0.01f;
+		ad->bombVel.x *= pow(friction,dt);
+		ad->bombVel.y *= pow(friction,dt);
+		ad->bombVel.z *= pow(friction,dt);
+
+		if(ad->bombVel != vec3(0,0,0)) {
+			Vec3 pPos = ad->bombPos;
+			Vec3 pSize = ad->bombSize;
+
+			Vec3 nPos = pPos + -0.5f*ad->bombAcc*dt*dt + ad->bombVel*dt;
+
+			bool collision = false;
+
+			Rect3 box = rect3CenDim(nPos, pSize);
+			Vec3i voxelMin = coordToVoxel(box.min);
+			Vec3i voxelMax = coordToVoxel(box.max+1);
+
+			collision = false;
+			Vec3 collisionBox;
+
+			for(int x = voxelMin.x; x < voxelMax.x; x++) {
+				for(int y = voxelMin.y; y < voxelMax.y; y++) {
+					for(int z = voxelMin.z; z < voxelMax.z; z++) {
+						Vec3i coord = vec3i(x,y,z);
+						uchar* block = getBlockFromVoxel(ad->voxelHash, ad->voxelHashSize, coord);
+
+						if(*block > 0) {
+							collisionBox = voxelToVoxelCoord(coord);
+							collision = true;
+							goto forGoto;
+						}
+					}
+				}
+			} forGoto:
+
+			if(collision) {
+				ad->bombActive = false;
+				ad->bombExploded = collisionBox;
+			}
+
+			if(collision) {
+				Vec3 startPos = collisionBox;
+				float sRad = 10;
+
+				// float resolution = M_2PI;
+				// float vStep = 0.5f;
+				float resolution = M_PI;
+				float vStep = 0.75f;
+
+				int itCount = sRad*resolution;
+				for(int it = 0; it < itCount+1; it++) {
+					float off = degreeToRadian(it * (360/(float)itCount));
+					Vec3 dir = rotateVec3(normVec3(vec3(0,1,0)), off, vec3(1,0,0));
+					float off2 = sin(off/(float)2)*sRad;
+
+					float rad = (dir*sRad).y;
+					for(int i = 0; i < 2; i++) {
+						Vec3 pos;
+						if(i == 0) pos = startPos + vec3(0,off2,0);
+						else pos = startPos + vec3(0,-off2,0);
+
+						int itCount = rad*resolution;
+						for(int it = 0; it < itCount+1; it++) {
+							float off = degreeToRadian(it * (360/(float)itCount));
+							Vec3 dir = rotateVec3(normVec3(vec3(1,0,0)), off, vec3(0,-1,0));
+							Vec3 p = pos + dir*rad;
+
+							float cubeSize = 1.0f;
+
+							// dcCube({coordToVoxelCoord(pos + dir*rad), vec3(cubeSize), vec4(1,0.5f,0,1), 0, vec3(0,0,0)});
+							// dcCube({coordToVoxelCoord(pos - dir*rad), vec3(cubeSize), vec4(1,0.5f,0,1), 0, vec3(0,0,0)});
+
+							*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, pos+dir*rad) = 0; 
+							*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos+dir*rad) = 255; 
+							*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, pos-dir*rad) = 0; 
+							*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos-dir*rad) = 255; 
+
+							float off2 = sin(off/(float)2)*rad;
+							for(float z = 0; z < (dir*rad).x; z += vStep) {
+								// dcCube({coordToVoxelCoord(pos + vec3(off2,0, z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
+								// dcCube({coordToVoxelCoord(pos + vec3(off2,0,-z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
+								// dcCube({coordToVoxelCoord(pos - vec3(off2,0,z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
+								// dcCube({coordToVoxelCoord(pos - vec3(off2,0,-z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
+
+								*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos + vec3(off2,0, z)) = 0; 
+								*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos + vec3(off2,0, z)) = 255; 
+								*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos + vec3(off2,0,-z)) = 0; 
+								*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos + vec3(off2,0,-z)) = 255; 
+								*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos - vec3(off2,0, z)) = 0; 
+								*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos - vec3(off2,0, z)) = 255; 
+								*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos - vec3(off2,0,-z)) = 0; 
+								*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos - vec3(off2,0,-z)) = 255; 
+							}
+						}
+					}
+					
+					// drawCube(startPos + dir*rad, vec3(0.1f), vec4(1,0.5f,0,1), 0, vec3(0,0,0));
+					// drawCube(startPos - dir*rad, vec3(0.1f), vec4(1,0.5f,0,1), 0, vec3(0,0,0));
+					
+					VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordToMesh(collisionBox));
+					m->upToDate = false;
+					m->meshUploaded = false;
+					m->modifiedByUser = true;
+				}
+
+			}
+
+			ad->bombPos = nPos;
+		}
+	}
+
+	// make sure the meshs around the player are loaded at startup
 	if(second) {
-		Vec2i pPos = getMeshCoordFromGlobalCoord(ad->activeCamPos);
+		Vec2i pPos = coordToMesh(ad->activeCamPos);
 		for(int i = 0; i < 2; i++) {
 			for(int y = -1; y < 2; y++) {
 				for(int x = -1; x < 2; x++) {
@@ -2686,10 +2886,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 			bool collision = true;
 			while(collision) {
 
-					// get mesh coords that touch the player box
+				// get mesh coords that touch the player box
 				Rect3 box = rect3CenDim(nPos, pSize);
-				Vec3i voxelMin = getVoxelCoordFromGlobalCoord(box.min);
-				Vec3i voxelMax = getVoxelCoordFromGlobalCoord(box.max+1);
+				Vec3i voxelMin = coordToVoxel(box.min);
+				Vec3i voxelMax = coordToVoxel(box.max+1);
 
 				Vec3 collisionBox;
 				collision = false;
@@ -2700,10 +2900,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 					for(int y = voxelMin.y; y < voxelMax.y; y++) {
 						for(int z = voxelMin.z; z < voxelMax.z; z++) {
 							Vec3i coord = vec3i(x,y,z);
-							uchar* block = getBlockFromVoxelCoord(ad->voxelHash, ad->voxelHashSize, coord);
+							uchar* block = getBlockFromVoxel(ad->voxelHash, ad->voxelHashSize, coord);
 
 							if(*block > 0) {
-								Vec3 cBox = getGlobalCoordFromVoxelCoord(coord);
+								Vec3 cBox = voxelToVoxelCoord(coord);
 								float distance = lenVec3(nPos - cBox);
 								if(minDistance == 100000 || distance > minDistance) {
 									minDistance = distance;
@@ -2817,8 +3017,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 				float raycastThreshold = 0.01f;
 				gp -= gUp*raycastThreshold;
 
-				Vec3 block = getBlockCenterFromGlobalCoord(gp);
-				uchar* blockType = getBlockFromGlobalCoord(ad->voxelHash, ad->voxelHashSize, gp);
+				Vec3 block = coordToVoxelCoord(gp);
+				uchar* blockType = getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, gp);
 
 				if(*blockType > 0) {
 					groundCollision = true;
@@ -2846,8 +3046,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->activeCamRight = cRight;
 	}
 
-		// selecting blocks and modifying them
-		// if(input->mouseButtonPressed[0] && ad->playerMode) {
+	// selecting blocks and modifying them
+	// if(input->mouseButtonPressed[0] && ad->playerMode) {
 	if(ad->playerMode) {
 		ad->blockSelected = false;
 
@@ -2870,9 +3070,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 			Vec3 coords[9];
 			int coordsSize = 0;
 
-			Vec3 blockCoords = getGlobalCoordFromVoxelCoord(getVoxelCoordFromGlobalCoord(newPos));
+			Vec3 blockCoords = voxelToVoxelCoord(coordToVoxel(newPos));
 
-				// we populate 8 blocks around the biggest axis
+			// we populate 8 blocks around the biggest axis
 			for(int y = -1; y < 2; y++) {
 				for(int x = -1; x < 2; x++) {
 					Vec3 dir = vec3(0,0,0);
@@ -2889,18 +3089,18 @@ extern "C" APPMAINFUNCTION(appMain) {
 			for(int i = 0; i < coordsSize; i++) {
 				Vec3 block = coords[i];
 
-				uchar* blockType = getBlockFromGlobalCoord(ad->voxelHash, ad->voxelHashSize, block);
-				Vec3 temp = getGlobalCoordFromVoxelCoord(getVoxelCoordFromGlobalCoord(block));
+				uchar* blockType = getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, block);
+				Vec3 temp = voxelToVoxelCoord(coordToVoxel(block));
 
-					// Vec4 c;
-					// if(i == 0) c = vec4(1,0,1,1);
-					// else c = vec4(0,0,1,1);
-					// glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-					// drawCube(&ad->pipelineIds, temp, vec3(1.0f,1.0f,1.0f), c, 0, vec3(0,0,0));
+				// Vec4 c;
+				// if(i == 0) c = vec4(1,0,1,1);
+				// else c = vec4(0,0,1,1);
+				// glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+				// drawCube(&ad->pipelineIds, temp, vec3(1.0f,1.0f,1.0f), c, 0, vec3(0,0,0));
 
-					// if(blockType > 0) {
+				// if(blockType > 0) {
 				if(*blockType > 0) {
-					Vec3 iBox = getGlobalCoordFromVoxelCoord(getVoxelCoordFromGlobalCoord(block));
+					Vec3 iBox = voxelToVoxelCoord(coordToVoxel(block));
 					float distance;
 					int face;
 					bool inter = boxRaycast(startPos, startDir, rect3CenDim(iBox, vec3(1,1,1)), &distance, &face);
@@ -2938,12 +3138,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 			else if(intersectionFace == 5) faceDir = vec3(0,0,1);
 			ad->selectedBlockFaceDir = faceDir;
 
-				// if(input->mouseButtonPressed[0] && ad->playerMode) {
 			if(ad->playerMode) {
-				VoxelMesh* vm = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, getMeshCoordFromGlobalCoord(intersectionBox));
+				VoxelMesh* vm = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordToMesh(intersectionBox));
 
-				uchar* block = getBlockFromGlobalCoord(ad->voxelHash, ad->voxelHashSize, intersectionBox);
-				uchar* lighting = getLightingFromGlobalCoord(ad->voxelHash, ad->voxelHashSize, intersectionBox);
+				uchar* block = getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, intersectionBox);
+				uchar* lighting = getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, intersectionBox);
 
 				bool mouse1 = input->mouseButtonPressed[0];
 				bool mouse2 = input->mouseButtonPressed[1];
@@ -2955,8 +3154,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 					vm->meshUploaded = false;
 					vm->modifiedByUser = true;
 
-						// if block at edge of mesh, we have to update the mesh on the other side too
-					Vec2i currentCoord = getMeshCoordFromGlobalCoord(intersectionBox);
+					// if block at edge of mesh, we have to update the mesh on the other side too
+					Vec2i currentCoord = coordToMesh(intersectionBox);
 					for(int i = 0; i < 4; i++) {
 						Vec3 offset;
 						if(i == 0) offset = vec3(1,0,0);
@@ -2964,7 +3163,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 						else if(i == 2) offset = vec3(0,1,0);
 						else if(i == 3) offset = vec3(0,-1,0);
 
-						Vec2i mc = getMeshCoordFromGlobalCoord(intersectionBox + offset);
+						Vec2i mc = coordToMesh(intersectionBox + offset);
 						if(mc != currentCoord) {
 							VoxelMesh* edgeMesh = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, mc);
 							edgeMesh->upToDate = false;
@@ -2974,17 +3173,16 @@ extern "C" APPMAINFUNCTION(appMain) {
 					}
 				}
 
-					// if(ad->pickMode) {
 				if(placeBlock) {
 					Vec3 boxToCamDir = startPos - intersectionBox;
-					Vec3 sideBlock = getBlockCenterFromGlobalCoord(intersectionBox + faceDir);
-					Vec3i voxelSideBlock = getVoxelCoordFromGlobalCoord(sideBlock);
+					Vec3 sideBlock = coordToVoxelCoord(intersectionBox + faceDir);
+					Vec3i voxelSideBlock = coordToVoxel(sideBlock);
 
-						// CodeDuplication:
-						// get mesh coords that touch the player box
+					// CodeDuplication:
+					// get mesh coords that touch the player box
 					Rect3 box = rect3CenDim(ad->playerPos, ad->playerSize);
-					Vec3i voxelMin = getVoxelCoordFromGlobalCoord(box.min);
-					Vec3i voxelMax = getVoxelCoordFromGlobalCoord(box.max+1);
+					Vec3i voxelMin = coordToVoxel(box.min);
+					Vec3i voxelMax = coordToVoxel(box.max+1);
 					bool collision = false;
 
 					for(int x = voxelMin.x; x < voxelMax.x; x++) {
@@ -3001,21 +3199,79 @@ extern "C" APPMAINFUNCTION(appMain) {
 					} forBreak:
 
 					if(!collision) {
-						uchar* sideBlockType = getBlockFromVoxelCoord(ad->voxelHash, ad->voxelHashSize, voxelSideBlock);
-						uchar* sideBlockLighting = getLightingFromVoxelCoord(ad->voxelHash, ad->voxelHashSize, voxelSideBlock);
+						uchar* sideBlockType = getBlockFromVoxel(ad->voxelHash, ad->voxelHashSize, voxelSideBlock);
+						uchar* sideBlockLighting = getLightingFromVoxel(ad->voxelHash, ad->voxelHashSize, voxelSideBlock);
 
-							// *sideBlockType = 11;
 						*sideBlockType = ad->blockMenu[ad->blockMenuSelected];
 						*sideBlockLighting = 0;
-							// if(*sideBlockType == 6) {
-								// *sideBlockLighting = 255;
-							// }
 					}
-					// } else {
 				} else if(removeBlock) {
 					if(*block > 0) {
-						*block = 0;			
+						*block = 0;
 						*lighting = 255;
+
+
+
+						// Vec3 startPos = vec3(0,0,30);
+						// startPos = ad->selectedBlock;
+						// float sRad = 5;
+
+						// // float resolution = M_2PI;
+						// // float vStep = 0.5f;
+						// float resolution = M_PI;
+						// float vStep = 0.75f;
+
+						// int itCount = sRad*resolution;
+						// for(int it = 0; it < itCount+1; it++) {
+						// 	float off = degreeToRadian(it * (360/(float)itCount));
+						// 	Vec3 dir = rotateVec3(normVec3(vec3(0,1,0)), off, vec3(1,0,0));
+						// 	float off2 = sin(off/(float)2)*sRad;
+
+						// 	float rad = (dir*sRad).y;
+						// 	for(int i = 0; i < 2; i++) {
+						// 		Vec3 pos;
+						// 		if(i == 0) pos = startPos + vec3(0,off2,0);
+						// 		else pos = startPos + vec3(0,-off2,0);
+
+						// 		int itCount = rad*resolution;
+						// 		for(int it = 0; it < itCount+1; it++) {
+						// 			float off = degreeToRadian(it * (360/(float)itCount));
+						// 			Vec3 dir = rotateVec3(normVec3(vec3(1,0,0)), off, vec3(0,-1,0));
+						// 			Vec3 p = pos + dir*rad;
+
+						// 			float cubeSize = 1.0f;
+
+						// 			// dcCube({coordToVoxelCoord(pos + dir*rad), vec3(cubeSize), vec4(1,0.5f,0,1), 0, vec3(0,0,0)});
+						// 			// dcCube({coordToVoxelCoord(pos - dir*rad), vec3(cubeSize), vec4(1,0.5f,0,1), 0, vec3(0,0,0)});
+
+						// 			*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, pos+dir*rad) = 0; 
+						// 			*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos+dir*rad) = 255; 
+						// 			*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, pos-dir*rad) = 0; 
+						// 			*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos-dir*rad) = 255; 
+
+						// 			float off2 = sin(off/(float)2)*rad;
+						// 			for(float z = 0; z < (dir*rad).x; z += vStep) {
+						// 				// dcCube({coordToVoxelCoord(pos + vec3(off2,0, z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
+						// 				// dcCube({coordToVoxelCoord(pos + vec3(off2,0,-z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
+						// 				// dcCube({coordToVoxelCoord(pos - vec3(off2,0,z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
+						// 				// dcCube({coordToVoxelCoord(pos - vec3(off2,0,-z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
+
+						// 				*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos + vec3(off2,0, z)) = 0; 
+						// 				*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos + vec3(off2,0, z)) = 255; 
+						// 				*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos + vec3(off2,0,-z)) = 0; 
+						// 				*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos + vec3(off2,0,-z)) = 255; 
+						// 				*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos - vec3(off2,0, z)) = 0; 
+						// 				*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos - vec3(off2,0, z)) = 255; 
+						// 				*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos - vec3(off2,0,-z)) = 0; 
+						// 				*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos - vec3(off2,0,-z)) = 255; 
+						// 			}
+						// 		}
+						// 	}
+							
+						// 	// drawCube(startPos + dir*rad, vec3(0.1f), vec4(1,0.5f,0,1), 0, vec3(0,0,0));
+						// 	// drawCube(startPos - dir*rad, vec3(0.1f), vec4(1,0.5f,0,1), 0, vec3(0,0,0));
+
+						// }
 					}
 				}
 			}
@@ -3114,10 +3370,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 				Vec2i coord = vec2i(y, x);
 				// Vec2i coord = vec2i(0,0);	
 				VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
-				m->upToDate = false;
-				m->meshUploaded = false;
+				// m->upToDate = false;
+				// m->meshUploaded = false;
 
-				m->generated = false;
+				// m->generated = false;
 			}
 		}
 		return;
@@ -3132,7 +3388,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	int triangleCount = 0;
 	int drawCounter = 0;
 
-	Vec2i pPos = getMeshCoordFromGlobalCoord(ad->activeCamPos);
+	Vec2i pPos = coordToMesh(ad->activeCamPos);
 	int radius = VIEW_DISTANCE/VOXEL_X;
 	// VoxelMesh* vms = ad->vMeshs;
 	// int* vmsSize = &ad->vMeshsSize;
@@ -3257,7 +3513,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	int sortListSize = 0;
 
 	for(int i = 0; i < coordListSize; i++) {
-		Vec2 c = getGlobalMeshCoord(coordList[i]).xy;
+		Vec2 c = meshToMeshCoord(coordList[i]).xy;
 		float distanceToCamera = lenVec2(ad->activeCamPos.xy - c);
 		sortList[sortListSize++] = {distanceToCamera, i};
 	}
@@ -3331,7 +3587,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[2]);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
-		Vec2i reflectionRes = ad->curRes*ad->reflectionResMod;
+		Vec2i reflectionRes = ad->curRes;
 		glBlitNamedFramebuffer (ad->frameBuffers[0], ad->frameBuffers[2], 
 			0,0, ad->curRes.x, ad->curRes.y,
 			0,0, ad->curRes.x, ad->curRes.y,
@@ -3382,13 +3638,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 	{
 		setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor);
 		uint loc = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelFragment, "alphaTest");
-		// glProgramUniform1f(globalGraphicsState->pipelineIds.voxelFragment, loc, 0.5f);
+		glProgramUniform1f(globalGraphicsState->pipelineIds.voxelFragment, loc, 0.5f);
 		for(int i = sortListSize-1; i >= 0; i--) {
 			VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
 			drawVoxelMesh(m, 1);
 		}
 	}
-
 
 
 
@@ -3423,6 +3678,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 			dcCube({ad->selectedBlock, vec3(1.01f), vec4(0.9f), 0, vec3(0,0,0)});
 			dcPolygonMode({POLYGON_MODE_FILL});
 		}
+	}
+
+	if(ad->bombActive) {
+		dcCube({ad->bombPos, ad->bombSize, vec4(1,0,1,1), 0, vec3(0,0,0)});
 	}
 
 	int fontSize = 22;
@@ -3719,10 +3978,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glDrawArrays(GL_QUADS, 0, quadCountTrans*4);
 
 	#endif 
-
-
-
-
 
 
 

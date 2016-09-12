@@ -888,7 +888,7 @@ union Mat4 {
 	float e2[4][4];
 };
 
-union Rect{
+union Rect {
 	struct {
 		Vec2 min;
 		Vec2 max;
@@ -902,7 +902,7 @@ union Rect{
 	};
 };
 
-union Rect3{
+union Rect3 {
 	struct {
 		Vec3 min;
 		Vec3 max;
@@ -910,6 +910,20 @@ union Rect3{
 	struct {
 		Vec3 cen;
 		Vec3 dim;
+	};
+	struct {
+		float e[6];
+	};
+};
+
+union Rect3i {
+	struct {
+		Vec3i min;
+		Vec3i max;
+	};
+	struct {
+		Vec3i cen;
+		Vec3i dim;
 	};
 	struct {
 		float e[6];
@@ -1762,6 +1776,13 @@ inline Vec3i operator-(Vec3i a, Vec3i b) {
 	return a;
 }
 
+inline Vec3i operator/(Vec3i a, int b) {
+	a.x /= b;
+	a.y /= b;
+	a.z /= b;
+	return a;
+}
+
 inline Vec3i & operator-=(Vec3i & a, Vec3i b) {
 	a = a - b;
 	return a;
@@ -2202,6 +2223,33 @@ inline Rect3 rect3CenDim(Vec3 cen, Vec3 dim) {
 // }
 
 Rect3 rect3Expand(Rect3 r, Vec3 dim) {
+	r.min -= (dim/2);
+	r.max += (dim/2);
+
+	return r;
+}
+
+//
+//
+//
+
+inline Rect3i rect3i(Vec3i min, Vec3i max) {
+	Rect3i r;
+	r.min = min;
+	r.max = max;
+
+	return r;
+}
+
+inline Rect3i rect3iCenRad(Vec3i cen, Vec3i radius) {
+	Rect3i r;
+	r.min = cen-radius;
+	r.max = cen+radius;
+
+	return r;
+}
+
+Rect3i rect3iExpand(Rect3i r, Vec3i dim) {
 	r.min -= (dim/2);
 	r.max += (dim/2);
 
