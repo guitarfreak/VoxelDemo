@@ -75,6 +75,7 @@
 //-------------------------------------
 //               BUGS
 //-------------------------------------
+- window operations only work after first frame
 - look has to be negative to work in view projection matrix
 - distance jumping collision bug, possibly precision loss in distances
 - gpu fucks up at some point making swapBuffers alternates between time steps 
@@ -82,6 +83,7 @@
 - game input gets stuck when buttons are pressed right at the start
 - sort key assert firing randomly
 - hotload gets stuck sometimes, thread that won't complete
+- sloppy camera
 */
 
 /*
@@ -1905,6 +1907,13 @@ struct Bomb {
 	Vec3 exploded;
 };
 
+struct Entity;
+struct EntityList {
+	Entity* e;
+	int size;
+	int capacity;
+};
+
 struct AppData {
 	SystemData systemData;
 	Input input;
@@ -1918,6 +1927,8 @@ struct AppData {
 	float dt;
 
 	bool* treeNoise;
+
+	EntityList entityList;
 
 	Vec3 activeCamPos;
 	Vec3 activeCamLook;
@@ -1966,10 +1977,6 @@ struct AppData {
 	bool playerOnGround;
 	int blockMenu[10];
 	int blockMenuSelected;
-
-	Bomb* bombList;
-	int bombListSize;
-	int bombListCapacity;
 
 	float bombFireInterval;
 	bool bombButtonDown;
@@ -2056,27 +2063,121 @@ void getPointsFromQuadAndNormal(Vec3 p, Vec3 normal, float size, Vec3 verts[4]) 
 
 struct Camera {
 	Vec3 pos;
-	Vec3 rot;
+	Vec3 look;
+	Vec3 up;
+	Vec3 right;
 };
 
 enum Entity_Type {
 	ET_Player = 0,
+	ET_Camera,
 	ET_Rocket,
 
 	ET_Size,
 };
 
 struct Entity {
+	int type;
+	int id;
+	char name[16];
+
 	Vec3 pos;
 	Vec3 dir;
 	Vec3 rot;
+	float rotAngle;
 	Vec3 dim;
+
+	Vec3 camOff;
 
 	Vec3 vel;
 	Vec3 acc;
 
-	// float playerCamZOffset;
+	int movementType;
+	int spatial;
+
+	bool deleted;
+	bool isMoving;
+	bool isColliding;
+
+	bool exploded;
+
+	void* data;
 };
+
+Camera getCamData(Vec3 pos, Vec3 rot, Vec3 gUp = vec3(0,0,1), Vec3 startDir = vec3(0,1,0)) {
+	Camera c;
+	c.pos = pos;
+	c.look = startDir;
+	rotateVec3(&c.look, rot.x, gUp);
+	rotateVec3(&c.look, rot.y, normVec3(cross(gUp, c.look)));
+	c.up = normVec3(cross(c.look, normVec3(cross(gUp, c.look))));
+	c.right = normVec3(cross(gUp, c.look));
+	c.look = -c.look;
+
+	return c;
+}
+
+Vec3 getRotationToVector(Vec3 start, Vec3 dest, float* angle) {
+	Vec3 side = normVec3(cross(start, normVec3(dest)));
+	*angle = dot(start, normVec3(dest));
+	*angle = acos(*angle)*2;
+
+	return side;
+}	
+
+/*
+	Entity player;
+	initEntity(&player, );
+
+	
+*/
+
+void initEntity(Entity* e, int type, Vec3 pos, Vec3 dir, Vec3 dim, Vec3 camOff) {
+	*e = {};
+	e->type = type;
+	e->pos = pos;
+	e->dir = dir;
+	e->dim = dim;
+	e->camOff = camOff;
+	
+	e->rot = getRotationToVector(vec3(0,1,0), dir, &e->rotAngle);
+}
+
+void addEntity(EntityList* list, Entity* e) {
+	assert(list->size < list->capacity);
+
+	e->id = list->size;
+	list->e[list->size] = *e;
+	list->size++;
+}
+
+void removeEntity(EntityList* list, int id) {
+	if(list->size == 1 || id == list->size-1) {
+		list->size--;
+		return;
+	}
+
+	list->e[id] = list->e[list->size-1];
+	list->e[id].id = id;
+	list->size--;
+}
+
+
+// struct RocketEntity {
+// };
+
+// struct Player {
+// }
+
+#define VK_W 0x57
+#define VK_A 0x41
+#define VK_S 0x53
+#define VK_D 0x44
+#define VK_E 0x45
+#define VK_Q 0x51
+
+#define VK_T 0x54
+
 
 extern "C" APPMAINFUNCTION(appMain) {
 	globalMemory = memoryBlock;
@@ -2111,9 +2212,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		getPMemory(sizeof(AppData));
 		*ad = {};
 
-		// threadInit(globalThreadQueue, 3);
-		// threadInit(globalThreadQueue, 7);
-
 		ad->dt = 1/(float)60;
 
 		initInput(&ad->input);
@@ -2125,15 +2223,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		wSettings->fullRes.y = GetSystemMetrics(SM_CYSCREEN);
 		wSettings->style = (WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU  | WS_MINIMIZEBOX  | WS_VISIBLE);
 		initSystem(systemData, windowsData, 0, 0,0,0,0);
-
-		// ad->fieldOfView = 55;
-		ad->fieldOfView = 60;
-		ad->msaaSamples = 4;
-		ad->fboRes = vec2i(0, 120);
-		ad->useNativeRes = true;
-		ad->nearPlane = 0.1f;
-		// ad->farPlane = 2000;
-		ad->farPlane = 3000;
 
 		// DEVMODE devMode;
 		// int index = 0;
@@ -2150,24 +2239,105 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		loadFunctions();
 
-
 		// typedef int wglGetSwapIntervalEXTFunction(void);
 		// wglGetSwapIntervalEXTFunction* wglGetSwapIntervalEXT;
 		// typedef int wglSwapIntervalEXTFunction(void);
 		// wglSwapIntervalEXTFunction* wglSwapIntervalEXT;
 
-
 		// gl##name = (name##Function*)wglGetProcAddress("gl" #name);
 		wglGetSwapIntervalEXT = (wglGetSwapIntervalEXTFunction*)wglGetProcAddress("wglGetSwapIntervalEXT");
 		wglSwapIntervalEXT = (wglSwapIntervalEXTFunction*)wglGetProcAddress("wglSwapIntervalEXT");
-
 		wglSwapIntervalEXT(1);
 
-
-		// BOOL wglSwapIntervalEXT(int interval)
-		// int wglGetSwapIntervalEXT(void)
-
 		int interval = wglGetSwapIntervalEXT();
+
+		// @setup
+
+		// ad->fieldOfView = 55;
+		ad->fieldOfView = 60;
+		ad->msaaSamples = 4;
+		ad->fboRes = vec2i(0, 120);
+		ad->useNativeRes = true;
+		ad->nearPlane = 0.1f;
+		// ad->farPlane = 2000;
+		ad->farPlane = 3000;
+
+
+		ad->camera = vec3(0,0,10);
+		ad->camPos = vec3(35,35,32);
+		ad->camLook = normVec3(vec3(0,1,0));
+		ad->camRot = vec2(0,0);
+
+		ad->voxelHashSize = sizeof(arrayCount(ad->voxelHash));
+		for(int i = 0; i < ad->voxelHashSize; i++) {
+			ad->voxelHash[i] = (VoxelNode*)getPMemory(sizeof(VoxelNode));
+			*ad->voxelHash[i] = {};
+		}
+
+		for(int i = 0; i < arrayCount(ad->threadData); i++) {
+			ad->threadData[i] = {};
+		} 
+
+		for(int i = 0; i < arrayCount(ad->voxelCache); i++) {
+			ad->voxelCache[i] = (uchar*)getPMemory(sizeof(uchar)*VOXEL_CACHE_SIZE);
+			ad->voxelLightingCache[i] = (uchar*)getPMemory(sizeof(uchar)*VOXEL_CACHE_SIZE);
+		}
+
+
+		// ad->playerPos = vec3(35.5f,35.3f,30);
+		ad->playerPos = vec3(0,0,0);
+		ad->playerLook = vec3(0,-1,0);
+		ad->playerSize = vec3(0.8f, 0.8f, 1.8f);
+		ad->playerCamZOffset = ad->playerSize.z*0.5f - ad->playerSize.x*0.25f;
+
+		ad->playerMode = true;
+		ad->pickMode = true;
+		ad->selectionRadius = 20;
+		input->captureMouse = true;
+
+		*ad->blockMenu = {};
+		ad->blockMenuSelected = 0;
+
+
+		int treeRadius = 4;
+		ad->treeNoise = (bool*)getPMemory(VOXEL_X*VOXEL_Y);
+		zeroMemory(ad->treeNoise, VOXEL_X*VOXEL_Y);
+
+		Rect bounds = rect(0, 0, 64, 64);
+		Vec2* noiseSamples;
+		// int noiseSamplesSize = blueNoise(bounds, 5, &noiseSamples);
+		int noiseSamplesSize = blueNoise(bounds, treeRadius, &noiseSamples);
+		for(int i = 0; i < noiseSamplesSize; i++) {
+			Vec2 s = noiseSamples[i];
+			// Vec2i p = vec2i((int)(s.x/gridCell) * gridCell, (int)(s.y/gridCell) * gridCell);
+			// drawRect(rectCenDim(vec2(p), vec2(5,5)), rect(0,0,1,1), vec4(1,0,1,1), ad->textures[0]);
+			Vec2i index = vec2i(s);
+			ad->treeNoise[index.y*VOXEL_X + index.x] = 1;
+		}
+
+		ad->bombFireInterval = 0.1f;
+		ad->bombButtonDown = false;
+
+		ad->entityList.capacity = 1000;
+		ad->entityList.e = (Entity*)getPMemory(sizeof(Entity)*ad->entityList.capacity);
+		ad->entityList.size = 0;
+
+		Entity freeCam;
+		initEntity(&freeCam, ET_Camera, vec3(35,35,32), vec3(0,1,0), vec3(0,0,0), vec3(0,0,0));
+		addEntity(&ad->entityList, &freeCam);
+
+		Entity player;
+		float camOff = ad->playerSize.z*0.5f - ad->playerSize.x*0.25f;
+		initEntity(&player, ET_Player, vec3(0,0,0), vec3(0,-1,0), vec3(0.8f, 0.8f, 1.8f), vec3(0,0,camOff));
+		addEntity(&ad->entityList, &player);
+
+
+
+
+
+
+
+
 
 		glEnable(GL_DEBUG_OUTPUT);
 		glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
@@ -2185,8 +2355,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		ad->textures[ad->texCount++] = loadTextureFile("..\\data\\white.png", 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
 		ad->textures[ad->texCount++] = loadTextureFile("..\\data\\rect.png", 2, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
-
-
 
 		PipelineIds* ids = &globalGraphicsState->pipelineIds;
 		ids->programQuad = createShader(vertexShaderQuad, fragmentShaderQuad, &ids->quadVertex, &ids->quadFragment);
@@ -2209,17 +2377,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ids->cubeVertexCPlane = glGetUniformLocation(ids->cubeVertex, "cPlane");
 
 		ad->programs[1] = ids->programCube;
-
-
-		ad->camera = vec3(0,0,10);
-
-		// ad->camPos = vec3(-10,-10,5);
-		// ad->camPos = vec3(30,30,50);
-		ad->camPos = vec3(35,35,32);
-		// ad->camLook = normVec3(vec3(-1,-1,0));
-		ad->camLook = normVec3(vec3(0,1,0));
-		// ad->camLook = vec3(0,0,1);
-		ad->camRot = vec2(0,0);
 
 
 
@@ -2249,9 +2406,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->font = font;
 
 
-
-
-
 		GLenum glError = glGetError(); printf("GLError: %i\n", glError);
 
 		ids->programVoxel = createShader(stbvox_get_vertex_shader(), stbvox_get_fragment_shader(), &ids->voxelVertex, &ids->voxelFragment);
@@ -2263,8 +2417,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// ad->voxelSamplers[0] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
 		// ad->voxelSamplers[1] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
 		// ad->voxelSamplers[2] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
-
-
 
 		glCreateTextures(GL_TEXTURE_2D_ARRAY, 2, ad->voxelTextures);
 
@@ -2356,31 +2508,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 
 
-
-		// int size = 16;
-		// Vec4* pixels = (Vec4*)getTMemory(sizeof(Vec4)*size*size);
-		// for(int i = 1; i < 4; i++) {
-		// 	glGetTextureSubImage(ad->voxelTextures[0], i, 0,0,BX_Leaves, size, size, 1, GL_RGBA, GL_FLOAT, size*size*sizeof(Vec4), &pixels[0]);
-
-		// 	// float scale;
-		// 	// if(i == 1) scale = 1.3f;
-		// 	// else if(i == 2) scale = 1.3f;
-
-		// 	for(int y = 0; y < size; y++) {
-		// 		for(int x = 1; x < size; x++) {
-		// 			// pixels[y*size + x].a *= i*scale; 
-		// 			// pixels[y*size + x].a *= scale; 
-		// 			// pixels[y*size + x].a *= 1.25f; 
-		// 			pixels[y*size + x].a *= 1.5f; 
-		// 		}
-		// 	}
-
-		// 	glTextureSubImage3D(ad->voxelTextures[0], i, 0, 0, BX_Leaves, size, size, 1, GL_RGBA, GL_FLOAT, pixels);
-		// 	size /= 2;
-		// }
-
-
-
 		glTextureStorage3D(ad->voxelTextures[1], 1, GL_RGBA8, 32, 32, BX2_Size);
 		for(int layerIndex = 0; layerIndex < BX2_Size; layerIndex++) {
 			int x,y,n;
@@ -2391,85 +2518,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 
 
-
 		glCreateFramebuffers(3, ad->frameBuffers);
 		glCreateRenderbuffers(2, ad->renderBuffers);
 		glCreateTextures(GL_TEXTURE_2D, 4, ad->frameBufferTextures);
 		// glCreateTextures(GL_TEXTURE_2D, 3, ad->frameBufferTextures + 1);
 		// GLenum result = glCheckNamedFramebufferStatus(ad->frameBuffers[0], GL_FRAMEBUFFER);
-
-
-		// @setup
-		ad->voxelHashSize = sizeof(arrayCount(ad->voxelHash));
-		for(int i = 0; i < ad->voxelHashSize; i++) {
-			ad->voxelHash[i] = (VoxelNode*)getPMemory(sizeof(VoxelNode));
-			*ad->voxelHash[i] = {};
-		}
-
-		for(int i = 0; i < arrayCount(ad->threadData); i++) {
-			ad->threadData[i] = {};
-		} 
-
-		for(int i = 0; i < arrayCount(ad->voxelCache); i++) {
-			ad->voxelCache[i] = (uchar*)getPMemory(sizeof(uchar)*VOXEL_CACHE_SIZE);
-			ad->voxelLightingCache[i] = (uchar*)getPMemory(sizeof(uchar)*VOXEL_CACHE_SIZE);
-		}
-
-
-		#if 0
-		int radius = 10;
-		for(int y = -radius; y < radius; y++) {
-			for(int x = -radius; x < radius; x++) {
-				Vec2i coord = vec2i(x,y);
-				getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
-			}
-		}
-		#endif
-
-
-		// ad->playerPos = vec3(35.5f,35.3f,30);
-		ad->playerPos = vec3(0,0,0);
-		ad->playerLook = vec3(0,-1,0);
-		ad->playerSize = vec3(0.8f, 0.8f, 1.8f);
-		ad->playerCamZOffset = ad->playerSize.z*0.5f - ad->playerSize.x*0.25f;
-
-		ad->playerMode = true;
-		ad->pickMode = true;
-		ad->selectionRadius = 20;
-		input->captureMouse = true;
-
-		*ad->blockMenu = {};
-		ad->blockMenuSelected = 0;
-
-
-		int treeRadius = 4;
-		ad->treeNoise = (bool*)getPMemory(VOXEL_X*VOXEL_Y);
-		zeroMemory(ad->treeNoise, VOXEL_X*VOXEL_Y);
-
-		Rect bounds = rect(0, 0, 64, 64);
-		Vec2* noiseSamples;
-		// int noiseSamplesSize = blueNoise(bounds, 5, &noiseSamples);
-		int noiseSamplesSize = blueNoise(bounds, treeRadius, &noiseSamples);
-		for(int i = 0; i < noiseSamplesSize; i++) {
-			Vec2 s = noiseSamples[i];
-			// Vec2i p = vec2i((int)(s.x/gridCell) * gridCell, (int)(s.y/gridCell) * gridCell);
-			// drawRect(rectCenDim(vec2(p), vec2(5,5)), rect(0,0,1,1), vec4(1,0,1,1), ad->textures[0]);
-			Vec2i index = vec2i(s);
-			ad->treeNoise[index.y*VOXEL_X + index.x] = 1;
-		}
-
-		// for(int y = 0; y < VOXEL_Y; y += 8) {
-		// 	for(int x = 0; x < VOXEL_X; x += 8) {
-		// 		ad->treeNoise[y*VOXEL_X + x] = 1;
-		// 	}
-		// }
-
-		ad->bombListCapacity = 200;
-		ad->bombList = (Bomb*)getPMemory(sizeof(Bomb)*ad->bombListCapacity);
-		ad->bombListSize = 0;
-		ad->bombFireInterval = 1;
-		ad->bombButtonDown = false;
-
 
 		return; // window operations only work after first frame?
 	}
@@ -2524,7 +2577,19 @@ extern "C" APPMAINFUNCTION(appMain) {
 		else mode = WINDOW_MODE_FULLBORDERLESS;
 		setWindowMode(windowHandle, wSettings, mode);
 
-		// updateAfterWindowResizing(wSettings, &ad->aspectRatio, ad->frameBuffers[0], ad->frameBuffers[1], ad->frameBuffers[2], ad->renderBuffers[0], ad->renderBuffers[1], &ad->frameBufferTextures[0], &ad->frameBufferTextures[1], &ad->frameBufferTextures[2], &ad->frameBufferTextures[3], ad->msaaSamples, &ad->fboRes, &ad->curRes, ad->useNativeRes, ad->reflectionResMod);
+		updateFrameBuffers = true;
+	}
+
+	if(input->keysPressed[VK_F5]) {
+		static bool switchMonitor = false;
+
+		setWindowMode(windowHandle, wSettings, WINDOW_MODE_WINDOWED);
+
+		if(!switchMonitor) setWindowProperties(windowHandle, 1, 1, 1920, 0);
+		else setWindowProperties(windowHandle, 1920, 1080, -1920, 0);
+		switchMonitor = !switchMonitor;
+
+		setWindowMode(windowHandle, wSettings, WINDOW_MODE_FULLBORDERLESS);
 
 		updateFrameBuffers = true;
 	}
@@ -2572,7 +2637,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		GLenum result = glCheckNamedFramebufferStatus(ad->frameBuffers[0], GL_FRAMEBUFFER);
 		GLenum result2 = glCheckNamedFramebufferStatus(ad->frameBuffers[1], GL_FRAMEBUFFER);
 		GLenum result3 = glCheckNamedFramebufferStatus(ad->frameBuffers[2], GL_FRAMEBUFFER);
-		int stop = 3;
 	}
 
 	if(input->keysPressed[VK_F2]) {
@@ -2594,18 +2658,17 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 	// 2d camera controls
-	Vec3* cam = &ad->camera;	
-	if(input->mouseButtonDown[0]) {
-		cam->x += input->mouseDeltaX*(cam->z/wSettings->currentRes.w);
-		cam->y -= input->mouseDeltaY*((cam->z/wSettings->currentRes.h)/ad->aspectRatio);
-	}
+	// Vec3* cam = &ad->camera;	
+	// if(input->mouseButtonDown[0]) {
+	// 	cam->x += input->mouseDeltaX*(cam->z/wSettings->currentRes.w);
+	// 	cam->y -= input->mouseDeltaY*((cam->z/wSettings->currentRes.h)/ad->aspectRatio);
+	// }
 
-	if(input->mouseWheel) {
-		float zoom = cam->z;
-		zoom -= input->mouseWheel/(float)1;
-		cam->z = zoom;
-	}
-
+	// if(input->mouseWheel) {
+	// 	float zoom = cam->z;
+	// 	zoom -= input->mouseWheel/(float)1;
+	// 	cam->z = zoom;
+	// }
 
 	if(input->keysPressed[VK_F4]) {
 		if(ad->playerMode) {
@@ -2709,13 +2772,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		clamp(&rot->y, -M_PI+margin, M_PI-margin);
 	}
 
-	#define VK_W 0x57
-	#define VK_A 0x41
-	#define VK_S 0x53
-	#define VK_D 0x44
-	#define VK_E 0x45
-	#define VK_Q 0x51
-
 	if( input->keysDown[VK_W] || input->keysDown[VK_A] || input->keysDown[VK_S] || 
 		input->keysDown[VK_D] || input->keysDown[VK_E] || input->keysDown[VK_Q]) {
 
@@ -2745,8 +2801,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 	// spawn bomb
-	ad->bombFireInterval = 0.1f;
-
 	bool spawnBomb = false;
 	if(input->mouseButtonPressed[2]) {
 		spawnBomb = true;
@@ -2763,173 +2817,388 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 	if(spawnBomb) {
-		if(ad->bombListSize < ad->bombListCapacity) {
-			Bomb b = {};
-			// b.pos = ad->playerPos + vec3(0,0,ad->playerCamZOffset) + pLook*4;
-			b.pos = ad->activeCamPos + vec3(0,0,ad->playerCamZOffset) + ad->activeCamLook*4;
-			b.size = vec3(0.5f);
-			b.vel = ad->activeCamLook*300;
-			b.acc = ad->activeCamLook*200;
-			b.active = true;
+		Entity b;
+		Vec3 bombPos = ad->activeCamPos + vec3(0,0,ad->playerCamZOffset) + ad->activeCamLook*4;
+		initEntity(&b, ET_Rocket, bombPos, ad->activeCamLook, vec3(0.5f), vec3(0,0,0));
+		b.vel = ad->activeCamLook*300;
+		b.acc = ad->activeCamLook*200;
+		b.isMoving = true;
 
-			ad->bombList[ad->bombListSize++] = b;
+		addEntity(&ad->entityList, &b);
+	}
+
+	// int camEntityId = 0;
+
+	// @update entities
+	for(int i = 0; i < ad->entityList.size; i++) {
+		Entity* e = &ad->entityList.e[i];
+		float dt = ad->dt;
+		Vec3 up = gUp;
+
+		switch(e->type) {
+			case ET_Player: {
+				Camera cam = getCamData(e->pos, e->rot);
+				e->acc = vec3(0,0,0);
+
+				bool rightLock = true;
+				float runBoost = 1.5f;
+				float speed = 30;
+				if(input->keysDown[VK_T]) speed = 1000;
+
+				if((!fpsMode && input->mouseButtonDown[1]) || fpsMode) {
+					float turnRate = ad->dt*0.3f;
+					e->rot.y += turnRate * input->mouseDeltaY;
+					e->rot.x += turnRate * input->mouseDeltaX;
+
+					float margin = 0.00001f;
+					clamp(&e->rot.y, -M_PI+margin, M_PI-margin);
+				}
+
+				if( input->keysDown[VK_W] || input->keysDown[VK_A] || input->keysDown[VK_S] || 
+					input->keysDown[VK_D] || input->keysDown[VK_E] || input->keysDown[VK_Q]) {
+
+					if(rightLock || input->keysDown[VK_CONTROL]) cam.look = cross(up, cam.right);
+
+					Vec3 acceleration = vec3(0,0,0);
+					if(input->keysDown[VK_SHIFT]) speed *= runBoost;
+					if(input->keysDown[VK_W]) acceleration +=  normVec3(cam.look);
+					if(input->keysDown[VK_S]) acceleration += -normVec3(cam.look);
+					if(input->keysDown[VK_D]) acceleration +=  normVec3(cam.right);
+					if(input->keysDown[VK_A]) acceleration += -normVec3(cam.right);
+					if(input->keysDown[VK_E]) acceleration +=  normVec3(up);
+					if(input->keysDown[VK_Q]) acceleration += -normVec3(up);
+					e->acc += normVec3(acceleration)*speed;
+				}
+
+				ad->playerAcc.z = 0;
+
+				float gravity = 20.0f;
+				if(!ad->playerOnGround) e->acc += -up*gravity;
+				e->vel = e->vel + e->acc*dt;
+				float friction = 0.01f;
+				e->vel.x *= pow(friction,dt);
+				e->vel.y *= pow(friction,dt);
+				// e->vel *= 0.9f;
+
+				if(ad->playerOnGround) e->vel.z = 0;
+
+				bool playerGroundCollision = false;
+				bool playerCeilingCollision = false;
+				bool playerSideCollision = false;
+
+				if(e->vel != vec3(0,0,0)) {
+					Vec3 pPos = ad->playerPos;
+					Vec3 pSize = ad->playerSize;
+
+					Vec3 nPos = pPos + -0.5f*e->acc*dt*dt + e->vel*dt;
+
+					int collisionCount = 0;
+					bool collision = true;
+					while(collision) {
+
+						// get mesh coords that touch the player box
+						Rect3 box = rect3CenDim(nPos, pSize);
+						Vec3i voxelMin = coordToVoxel(box.min);
+						Vec3i voxelMax = coordToVoxel(box.max+1);
+
+						Vec3 collisionBox;
+						collision = false;
+						float minDistance = 100000;
+
+							// check collision with the voxel thats closest
+						for(int x = voxelMin.x; x < voxelMax.x; x++) {
+							for(int y = voxelMin.y; y < voxelMax.y; y++) {
+								for(int z = voxelMin.z; z < voxelMax.z; z++) {
+									Vec3i coord = vec3i(x,y,z);
+									uchar* block = getBlockFromVoxel(ad->voxelHash, ad->voxelHashSize, coord);
+
+									if(*block > 0) {
+										Vec3 cBox = voxelToVoxelCoord(coord);
+										float distance = lenVec3(nPos - cBox);
+										if(minDistance == 100000 || distance > minDistance) {
+											minDistance = distance;
+											collisionBox = cBox;
+										}
+										collision = true;
+									}
+								}
+							}
+						}
+
+						if(collision) {
+							collisionCount++;
+
+							float minDistance;
+							Vec3 dir = vec3(0,0,0);
+							int face;
+
+								// check all the 6 planes and take the one with the shortest distance
+							for(int i = 0; i < 6; i++) {
+								Vec3 n;
+								if(i == 0) 		n = vec3(1,0,0);
+								else if(i == 1) n = vec3(-1,0,0);
+								else if(i == 2) n = vec3(0,1,0);
+								else if(i == 3) n = vec3(0,-1,0);
+								else if(i == 4) n = vec3(0,0,1);
+								else if(i == 5) n = vec3(0,0,-1);
+
+									// assuming voxel size is 1
+									// this could be simpler because the voxels are axis aligned
+								Vec3 p = collisionBox + (n * ((pSize/2) + 0.5));
+								float d = -dot(p, n);
+								float d2 = dot(nPos, n);
+
+									// distances are lower then zero in this case where the point is 
+									// not on the same side as the normal
+								float distance = d + d2;
+
+								if(i == 0 || distance > minDistance) {
+									minDistance = distance;
+									dir = n;
+									face = i;
+								}
+							}
+
+							float error = 0.0001f;
+								// float error = 0;
+							nPos += dir*(-minDistance + error);
+
+							if(face == 5) playerCeilingCollision = true;
+							else if(face == 4) playerGroundCollision = true;
+							else playerSideCollision = true;
+						}
+
+							// something went wrong and we reject the move, for now
+						if(collisionCount > 5) {
+								// nPos = ad->playerPos;
+
+							nPos.z += 5;
+								// ad->playerVel = vec3(0,0,0);
+								// break;
+						}
+					}
+
+					float stillnessThreshold = 0.0001f;
+					if(valueBetween(e->vel.z, -stillnessThreshold, stillnessThreshold)) {
+						e->vel.z = 0;
+					}
+
+					if(playerCeilingCollision) {
+						e->vel.z = 0;
+					}
+
+					if(playerSideCollision) {
+						float sideFriction = 0.0010f;
+						e->vel.x *= pow(sideFriction,dt);
+						e->vel.y *= pow(sideFriction,dt);
+					}
+
+					if(collisionCount > 5) {
+						e->vel = vec3(0,0,0);
+					}
+
+					e->pos = nPos;
+				}
+
+
+
+			} break;
+
+			case ET_Camera: {
+				Camera cam = getCamData(e->pos, e->rot);
+
+				e->acc = vec3(0,0,0);
+
+				bool rightLock = false;
+				float runBoost = 2.0f;
+				float speed = 150;
+				if(input->keysDown[VK_T]) speed = 1000;
+
+				if((!fpsMode && input->mouseButtonDown[1]) || fpsMode) {
+					float turnRate = ad->dt*0.3f;
+					e->rot.y += turnRate * input->mouseDeltaY;
+					e->rot.x += turnRate * input->mouseDeltaX;
+
+					float margin = 0.00001f;
+					clamp(&e->rot.y, -M_PI+margin, M_PI-margin);
+				}
+
+				if( input->keysDown[VK_W] || input->keysDown[VK_A] || input->keysDown[VK_S] || 
+					input->keysDown[VK_D] || input->keysDown[VK_E] || input->keysDown[VK_Q]) {
+
+					if(rightLock || input->keysDown[VK_CONTROL]) cam.look = cross(up, cam.right);
+
+					Vec3 acceleration = vec3(0,0,0);
+					if(input->keysDown[VK_SHIFT]) speed *= runBoost;
+					if(input->keysDown[VK_W]) acceleration +=  normVec3(cam.look);
+					if(input->keysDown[VK_S]) acceleration += -normVec3(cam.look);
+					if(input->keysDown[VK_D]) acceleration +=  normVec3(cam.right);
+					if(input->keysDown[VK_A]) acceleration += -normVec3(cam.right);
+					if(input->keysDown[VK_E]) acceleration +=  normVec3(up);
+					if(input->keysDown[VK_Q]) acceleration += -normVec3(up);
+					e->acc += normVec3(acceleration)*speed;
+				}
+
+				e->vel = e->vel + e->acc*dt;
+				float friction = 0.01f;
+				e->vel = e->vel * pow(friction,dt);
+
+				if(e->vel != vec3(0,0,0)) {
+					e->pos = e->pos - 0.5f*e->acc*dt*dt + e->vel*dt;
+				}
+
+			} break;
+
+			case ET_Rocket: {
+				// float gravity = 20.0f;
+				float gravity = 1.0f;
+
+				e->acc += -up*gravity;
+				e->vel = e->vel + e->acc*dt;
+
+				float friction = 0.01f;
+				e->vel.x *= pow(friction,dt);
+				e->vel.y *= pow(friction,dt);
+				e->vel.z *= pow(friction,dt);
+
+				if(e->vel != vec3(0,0,0)) {
+					Vec3 pPos = e->pos;
+					Vec3 pSize = e->dim;
+
+					Vec3 nPos = pPos + -0.5f*e->acc*dt*dt + e->vel*dt;
+
+					bool collision = false;
+
+					Rect3 box = rect3CenDim(nPos, pSize);
+					Vec3i voxelMin = coordToVoxel(box.min);
+					Vec3i voxelMax = coordToVoxel(box.max+1);
+
+					collision = false;
+					Vec3 collisionBox;
+
+					for(int x = voxelMin.x; x < voxelMax.x; x++) {
+						for(int y = voxelMin.y; y < voxelMax.y; y++) {
+							for(int z = voxelMin.z; z < voxelMax.z; z++) {
+								Vec3i coord = vec3i(x,y,z);
+								uchar* block = getBlockFromVoxel(ad->voxelHash, ad->voxelHashSize, coord);
+
+								if(*block > 0) {
+									collisionBox = voxelToVoxelCoord(coord);
+									collision = true;
+									goto forGoto;
+								}
+							}
+						}
+					} forGoto:
+
+					if(collision) {
+						e->deleted = true;
+						e->exploded = true;
+					}
+
+					Vec2i updateMeshList[8];
+					int updateMeshListSize = 0;
+
+					if(e->exploded) {
+						Vec3 startPos = collisionBox;
+						float sRad = 10;
+
+						// float resolution = M_2PI;
+						// float vStep = 0.5f;
+						float resolution = M_PI;
+						float vStep = 0.75f;
+
+						int itCount = sRad*resolution;
+						for(int it = 0; it < itCount+1; it++) {
+							float off = degreeToRadian(it * (360/(float)itCount));
+							Vec3 dir = rotateVec3(normVec3(vec3(0,1,0)), off, vec3(1,0,0));
+							float off2 = sin(off/(float)2)*sRad;
+
+							float rad = (dir*sRad).y;
+							for(int i = 0; i < 2; i++) {
+								Vec3 pos;
+								if(i == 0) pos = startPos + vec3(0,off2,0);
+								else pos = startPos + vec3(0,-off2,0);
+
+								int itCount = rad*resolution;
+								for(int it = 0; it < itCount+1; it++) {
+									float off = degreeToRadian(it * (360/(float)itCount));
+									Vec3 dir = rotateVec3(normVec3(vec3(1,0,0)), off, vec3(0,-1,0));
+									Vec3 p = pos + dir*rad;
+
+									float cubeSize = 1.0f;
+
+									// dcCube({coordToVoxelCoord(pos + dir*rad), vec3(cubeSize), vec4(1,0.5f,0,1), 0, vec3(0,0,0)});
+									// dcCube({coordToVoxelCoord(pos - dir*rad), vec3(cubeSize), vec4(1,0.5f,0,1), 0, vec3(0,0,0)});
+
+									*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, pos+dir*rad) = 0; 
+									*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos+dir*rad) = 255; 
+									*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, pos-dir*rad) = 0; 
+									*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos-dir*rad) = 255; 
+
+									for(int it = 0; it < 2; it++) {
+										bool found = false;
+										Vec2i mc;
+										if(it == 0) mc = coordToMesh(pos+dir*rad);
+										else mc = coordToMesh(pos-dir*rad);
+										for(int i = 0; i < updateMeshListSize; i++) {
+											if(updateMeshList[i] == mc) {
+												found = true;
+												break;
+											}
+										}
+										if(!found) {
+											updateMeshList[updateMeshListSize++] = mc;
+										}
+
+									}
+
+									float off2 = sin(off/(float)2)*rad;
+									for(float z = 0; z < (dir*rad).x; z += vStep) {
+										// dcCube({coordToVoxelCoord(pos + vec3(off2,0, z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
+										// dcCube({coordToVoxelCoord(pos + vec3(off2,0,-z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
+										// dcCube({coordToVoxelCoord(pos - vec3(off2,0,z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
+										// dcCube({coordToVoxelCoord(pos - vec3(off2,0,-z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
+
+										*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos + vec3(off2,0, z)) = 0; 
+										*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos + vec3(off2,0, z)) = 255; 
+										*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos + vec3(off2,0,-z)) = 0; 
+										*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos + vec3(off2,0,-z)) = 255; 
+										*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos - vec3(off2,0, z)) = 0; 
+										*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos - vec3(off2,0, z)) = 255; 
+										*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos - vec3(off2,0,-z)) = 0; 
+										*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos - vec3(off2,0,-z)) = 255; 
+									}
+								}
+							}
+						}
+
+						for(int i = 0; i < updateMeshListSize; i++) {
+							VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, updateMeshList[i]);
+							m->upToDate = false;
+							m->meshUploaded = false;
+							m->modifiedByUser = true;
+						}
+					}
+
+					e->pos = nPos;
+
+					dcCube({e->pos, e->dim, vec4(1,0.5f,0,1), 0, vec3(0,0,0)});
+				}
+			} break;
+
+			default: {
+
+			};
 		}
 	}
 
+	for(int i = 0; i < ad->entityList.size; i++) {
+		Entity* e = &ad->entityList.e[i];
 
-	for(int i = 0; i < ad->bombListSize; i++) {
-		Bomb* bomb = &ad->bombList[i];
-		if(bomb->active) {
-			float dt = ad->dt;
-			// float gravity = 20.0f;
-			float gravity = 1.0f;
-
-			bomb->acc += -gUp*gravity;
-			bomb->vel = bomb->vel + bomb->acc*dt;
-
-			float friction = 0.01f;
-			bomb->vel.x *= pow(friction,dt);
-			bomb->vel.y *= pow(friction,dt);
-			bomb->vel.z *= pow(friction,dt);
-
-			if(bomb->vel != vec3(0,0,0)) {
-				Vec3 pPos = bomb->pos;
-				Vec3 pSize = bomb->size;
-
-				Vec3 nPos = pPos + -0.5f*bomb->acc*dt*dt + bomb->vel*dt;
-
-				bool collision = false;
-
-				Rect3 box = rect3CenDim(nPos, pSize);
-				Vec3i voxelMin = coordToVoxel(box.min);
-				Vec3i voxelMax = coordToVoxel(box.max+1);
-
-				collision = false;
-				Vec3 collisionBox;
-
-				for(int x = voxelMin.x; x < voxelMax.x; x++) {
-					for(int y = voxelMin.y; y < voxelMax.y; y++) {
-						for(int z = voxelMin.z; z < voxelMax.z; z++) {
-							Vec3i coord = vec3i(x,y,z);
-							uchar* block = getBlockFromVoxel(ad->voxelHash, ad->voxelHashSize, coord);
-
-							if(*block > 0) {
-								collisionBox = voxelToVoxelCoord(coord);
-								collision = true;
-								goto forGoto;
-							}
-						}
-					}
-				} forGoto:
-
-				if(collision) {
-					bomb->active = false;
-					bomb->exploded = collisionBox;
-				}
-
-				Vec2i updateMeshList[8];
-				int updateMeshListSize = 0;
-
-				if(collision) {
-					Vec3 startPos = collisionBox;
-					float sRad = 10;
-
-					// float resolution = M_2PI;
-					// float vStep = 0.5f;
-					float resolution = M_PI;
-					float vStep = 0.75f;
-
-					int itCount = sRad*resolution;
-					for(int it = 0; it < itCount+1; it++) {
-						float off = degreeToRadian(it * (360/(float)itCount));
-						Vec3 dir = rotateVec3(normVec3(vec3(0,1,0)), off, vec3(1,0,0));
-						float off2 = sin(off/(float)2)*sRad;
-
-						float rad = (dir*sRad).y;
-						for(int i = 0; i < 2; i++) {
-							Vec3 pos;
-							if(i == 0) pos = startPos + vec3(0,off2,0);
-							else pos = startPos + vec3(0,-off2,0);
-
-							int itCount = rad*resolution;
-							for(int it = 0; it < itCount+1; it++) {
-								float off = degreeToRadian(it * (360/(float)itCount));
-								Vec3 dir = rotateVec3(normVec3(vec3(1,0,0)), off, vec3(0,-1,0));
-								Vec3 p = pos + dir*rad;
-
-								float cubeSize = 1.0f;
-
-								// dcCube({coordToVoxelCoord(pos + dir*rad), vec3(cubeSize), vec4(1,0.5f,0,1), 0, vec3(0,0,0)});
-								// dcCube({coordToVoxelCoord(pos - dir*rad), vec3(cubeSize), vec4(1,0.5f,0,1), 0, vec3(0,0,0)});
-
-								*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, pos+dir*rad) = 0; 
-								*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos+dir*rad) = 255; 
-								*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, pos-dir*rad) = 0; 
-								*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos-dir*rad) = 255; 
-
-								for(int it = 0; it < 2; it++) {
-									bool found = false;
-									Vec2i mc;
-									if(it == 0) mc = coordToMesh(pos+dir*rad);
-									else mc = coordToMesh(pos-dir*rad);
-									for(int i = 0; i < updateMeshListSize; i++) {
-										if(updateMeshList[i] == mc) {
-											found = true;
-											break;
-										}
-									}
-									if(!found) {
-										updateMeshList[updateMeshListSize++] = mc;
-									}
-
-								}
-
-								float off2 = sin(off/(float)2)*rad;
-								for(float z = 0; z < (dir*rad).x; z += vStep) {
-									// dcCube({coordToVoxelCoord(pos + vec3(off2,0, z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
-									// dcCube({coordToVoxelCoord(pos + vec3(off2,0,-z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
-									// dcCube({coordToVoxelCoord(pos - vec3(off2,0,z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
-									// dcCube({coordToVoxelCoord(pos - vec3(off2,0,-z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
-
-									*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos + vec3(off2,0, z)) = 0; 
-									*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos + vec3(off2,0, z)) = 255; 
-									*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos + vec3(off2,0,-z)) = 0; 
-									*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos + vec3(off2,0,-z)) = 255; 
-									*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos - vec3(off2,0, z)) = 0; 
-									*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos - vec3(off2,0, z)) = 255; 
-									*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos - vec3(off2,0,-z)) = 0; 
-									*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos - vec3(off2,0,-z)) = 255; 
-								}
-							}
-						}
-						
-						// drawCube(startPos + dir*rad, vec3(0.1f), vec4(1,0.5f,0,1), 0, vec3(0,0,0));
-						// drawCube(startPos - dir*rad, vec3(0.1f), vec4(1,0.5f,0,1), 0, vec3(0,0,0));
-					}
-
-					for(int i = 0; i < updateMeshListSize; i++) {
-						VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, updateMeshList[i]);
-						m->upToDate = false;
-						m->meshUploaded = false;
-						m->modifiedByUser = true;
-					}
-				}
-
-				bomb->pos = nPos;
-			}
-		}
-
-		if(bomb->pos.z < 0) {
-			bomb->active = false;
-		}
-
-		if(!bomb->active) {
-			ad->bombList[i] = ad->bombList[ad->bombListSize-1];
-			ad->bombListSize--;
-		}
-
-		if(bomb->active) {
-			dcCube({bomb->pos, bomb->size, vec4(1,0,1,1), 0, vec3(0,0,0)});
+		if(e->deleted) {
+			removeEntity(&ad->entityList, e->id);
+			i--;
 		}
 	}
 
@@ -3092,7 +3361,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 	}
 
-		// raycast for touching ground
+	// raycast for touching ground
 	if(ad->playerMode) {
 		if(playerGroundCollision && ad->playerVel.z <= 0) {
 			ad->playerOnGround = true;
@@ -3146,6 +3415,20 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->activeCamUp = cUp;
 		ad->activeCamRight = cRight;
 	}
+
+	// Entity* camE = &ad->entityList.e[camEntityId];
+	// Camera cam = getCamData(camE->pos, camE->rot);
+	// ad->activeCamPos = cam.pos;
+	// ad->activeCamLook = cam.look;
+	// ad->activeCamUp = cam.up;
+	// ad->activeCamRight = cam.right;
+
+	// Entity* camE = &ad->entityList.e[camEntityId];
+	// Camera cam = getCamData(camE->pos, camE->rot);
+	// ad->activeCamPos = cam.pos;
+	// ad->activeCamLook = cam.look;
+	// ad->activeCamUp = cam.up;
+	// ad->activeCamRight = cam.right;
 
 	// selecting blocks and modifying them
 	// if(input->mouseButtonPressed[0] && ad->playerMode) {
@@ -4075,6 +4358,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glDrawArrays(GL_QUADS, 0, quadCountTrans*4);
 
 	#endif 
+
+
 
 
 
