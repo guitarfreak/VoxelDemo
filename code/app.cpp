@@ -145,8 +145,8 @@ DrawCommandList* globalCommandList2d;
 	GLOP(void, SamplerParameteri, GLuint sampler, GLenum pname, GLint param) \
 	GLOP(void, BindSamplers, GLuint first, GLsizei count, const GLuint *samplers) \
 	GLOP(void, TextureParameteri, GLuint texture, GLenum pname, GLint param) \
-	GLOP(void, ProgramUniform4f, GLuint program, GLint location, GLfloat v0, GLfloat v1, GLfloat v2,GLfloat v3) \
 	GLOP(GLint, GetUniformLocation, GLuint program, const GLchar *name) \
+	GLOP(void, ProgramUniform4f, GLuint program, GLint location, GLfloat v0, GLfloat v1, GLfloat v2,GLfloat v3) \
 	GLOP(void, ProgramUniform3f, GLuint program, GLint location, GLfloat v0, GLfloat v1, GLfloat v2) \
 	GLOP(void, ProgramUniform2f, GLuint program, GLint location, GLfloat v0, GLfloat v1) \
 	GLOP(void, ProgramUniform1f, GLuint program, GLint location, GLfloat v0) \
@@ -154,16 +154,9 @@ DrawCommandList* globalCommandList2d;
 	GLOP(void, ProgramUniform1fv, GLuint program, GLint location, GLsizei count, const GLfloat *value) \
 	GLOP(void, ProgramUniform2fv, GLuint program, GLint location, GLsizei count, const GLfloat *value) \
 	GLOP(void, ProgramUniform1iv, GLuint program, GLint location, GLsizei count, const GLint *value) \
-	GLOP(void, ProgramUniformMatrix3fv, GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) \
 	GLOP(void, ProgramUniformMatrix4fv, GLuint program, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) \
-	GLOP(void, UseProgram, GLuint program) \
-	GLOP(void, Uniform1i, GLint location, GLint v0) \
-	GLOP(void, Uniform1iv, GLint location, GLsizei count, const GLint *value) \
-	GLOP(void, Uniform1fv, GLint location, GLsizei count, const GLfloat *value) \
-	GLOP(void, Uniform2fv, GLint location, GLsizei count, const GLfloat *value) \
-	GLOP(void, Uniform3fv, GLint location, GLsizei count, const GLfloat *value) \
-	GLOP(void, Uniform4fv, GLint location, GLsizei count, const GLfloat *value) \
 	GLOP(void, ProgramUniform4fv, GLuint program, GLint location, GLsizei count, const GLfloat *value) \
+	GLOP(void, UseProgram, GLuint program) \
 	GLOP(void, ActiveTexture, GLenum texture) \
 	GLOP(void, EnableVertexAttribArray, GLuint index) \
 	GLOP(void, TexImage3DEXT,  GLenum	target, GLint	level, GLenum	internalformat, GLsizei	width, GLsizei	height, GLsizei	depth, GLint	border, GLenum	format, GLenum	type, const	GLvoid *pixels) \
@@ -203,8 +196,6 @@ DrawCommandList* globalCommandList2d;
 	GLOP(void, BlendFuncSeparate, GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha) \
 	GLOP(void, BlendEquation, GLenum mode) \
 	GLOP(void, GetTextureSubImage, uint texture, int level, int xoffset, int yoffset, int zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, GLsizei bufSize, void *pixels)
-
-
 
 
 
@@ -555,7 +546,7 @@ const char* vertexShaderCube = GLSL (
 
 	// gl_ClipVertex = vec4(1,1,1,1);
 	}
-	);
+);
 
 const char* fragmentShaderCube = GLSL (
 	layout(binding = 0) uniform sampler2D s;
@@ -570,7 +561,7 @@ const char* fragmentShaderCube = GLSL (
 	// color = texture(s, uv) * Color;
 		color = Color;
 	}
-	);
+);
 
 
 const char* vertexShaderAll = GLSL (
@@ -608,6 +599,104 @@ const char* fragmentShaderAll = GLSL (
 		color = Color;
 	}
 );
+
+
+
+
+
+const char* vertexShaderTest = GLSL (
+	const vec3 cube[] = vec3[] (
+		vec3(-0.5f,-0.5f,-0.5f), 
+		vec3( 0.5f,-0.5f,-0.5f), 
+		vec3( 0.5f, 0.5f,-0.5f),
+		vec3(-0.5f, 0.5f,-0.5f),
+		vec3(-0.5f,-0.5f, 0.5f), 
+		vec3(-0.5f, 0.5f, 0.5f), 
+		vec3( 0.5f, 0.5f, 0.5f),
+		vec3( 0.5f,-0.5f, 0.5f),
+		vec3(-0.5f, 0.5f,-0.5f), 
+		vec3( 0.5f, 0.5f,-0.5f), 
+		vec3( 0.5f, 0.5f, 0.5f),
+		vec3(-0.5f, 0.5f, 0.5f),
+		vec3(-0.5f,-0.5f,-0.5f), 
+		vec3(-0.5f,-0.5f, 0.5f), 
+		vec3( 0.5f,-0.5f, 0.5f),
+		vec3( 0.5f,-0.5f,-0.5f),
+		vec3( 0.5f,-0.5f,-0.5f), 
+		vec3( 0.5f,-0.5f, 0.5f), 
+		vec3( 0.5f, 0.5f, 0.5f),
+		vec3( 0.5f, 0.5f,-0.5f),
+		vec3(-0.5f,-0.5f,-0.5f), 
+		vec3(-0.5f, 0.5f,-0.5f), 
+		vec3(-0.5f, 0.5f, 0.5f),
+		vec3(-0.5f,-0.5f, 0.5f)
+		);
+
+// out gl_PerVertex { vec4 gl_Position; };
+	out gl_PerVertex { vec4 gl_Position; float gl_ClipDistance[]; };
+	out vec4 Color;
+
+	uniform mat4x4 model;
+	uniform mat4x4 view;
+	uniform mat4x4 proj;
+// uniform mat4x4 projViewModel;
+
+	uniform vec3 vertices[24];
+	uniform bool mode;
+
+	uniform vec4 setColor;
+	uniform vec4 cPlane;
+
+	void main() {
+		Color = setColor;
+		float v = gl_VertexID;
+	// Color = setColor * vec4(v*0.1f,v*0.1f,v*0.1f,1);
+	// Color = vec4(v*0.05f,v*0.05f,v*0.05f,1);
+
+		vec4 posModelView;
+
+		vec4 pos;
+		if(mode == true) {
+			pos = vec4(vertices[gl_VertexID], 1);
+			posModelView = view*pos;
+			gl_Position = proj*posModelView;
+		// gl_Position = proj*view*pos;
+		} else {
+			pos = vec4(cube[gl_VertexID], 1);
+			posModelView = view*model*pos;
+			gl_Position = proj*posModelView;
+		// gl_Position = proj*view*model*pos;
+		}
+
+	// gl_Position = proj*view*model*pos;
+	// gl_Position = projViewModel*pos;
+
+	// gl_ClipDistance[0] = dot(cPlane, posModelView);
+		gl_ClipDistance[0] = dot(cPlane, model*pos);
+	// float val = dot(vec4(1,2,3,1), vec4(0,0,0,0));
+	// gl_ClipDistance[0] = val;
+	// gl_ClipDistance[0] = 1.0f;
+	// gl_ClipDistance[0] = dot(vec4(1,2,3,1), vec4(0,0,0,0));
+
+	// gl_ClipVertex = vec4(1,1,1,1);
+	}
+);
+
+const char* fragmentShaderTest = GLSL (
+	layout(binding = 0) uniform sampler2D s;
+
+	// smooth in vec2 uv;
+	in vec4 Color;
+
+	layout(depth_less) out float gl_FragDepth;
+	out vec4 color;
+
+	void main() {
+	// color = texture(s, uv) * Color;
+		color = Color;
+	}
+);
+
 
 
 
@@ -697,6 +786,139 @@ const char* fragmentShaderQuad = GLSL (
 // 		color = Color;
 // 	}
 // );
+
+
+
+struct ShaderUniform {
+	int type;
+	uint vertexLocation;
+	uint fragmentLocation;
+};
+
+enum UniformType {
+	UNIFORM_TYPE_VEC4 = 0,
+	UNIFORM_TYPE_VEC3,
+	UNIFORM_TYPE_MAT4,
+	UNIFORM_TYPE_INT,
+	UNIFORM_TYPE_FLOAT,
+
+	UNIFORM_TYPE_SIZE,
+};
+
+struct ShaderUniformType {
+	uint type;
+	char* name;
+};
+
+struct MakeShaderInfo {
+	char* vertexString;
+	char* fragmentString;
+
+	int uniformCount;
+	ShaderUniformType* uniformNameMap;
+};
+
+enum ShaderProgram {
+	SHADER_CUBE = 0,
+	SHADER_QUAD,
+
+	SHADER_SIZE,
+};
+
+enum CubeUniforms {
+	CUBE_UNIFORM_MODEL = 0,
+	CUBE_UNIFORM_VIEW,
+	CUBE_UNIFORM_PROJ,
+	CUBE_UNIFORM_COLOR,
+	CUBE_UNIFORM_MODE,
+	CUBE_UNIFORM_VERTICES,
+	CUBE_UNIFORM_CPLANE,
+
+	CUBE_UNIFORM_SIZE,
+};
+
+ShaderUniformType cubeShaderUniformType[] = {
+	{UNIFORM_TYPE_MAT4, "mode"},
+	{UNIFORM_TYPE_MAT4, "view"},
+	{UNIFORM_TYPE_MAT4, "proj"},
+	{UNIFORM_TYPE_VEC4, "setColor"},
+	{UNIFORM_TYPE_INT,  "mode"},
+	{UNIFORM_TYPE_VEC3, "vertices"},
+	{UNIFORM_TYPE_VEC4, "cPlane"},
+};
+
+enum QuadUniforms {
+	QUAD_UNIFORM_UV = 0,
+	QUAD_UNIFORM_TEXZ,
+	QUAD_UNIFORM_MOD,
+	QUAD_UNIFORM_COLOR,
+	QUAD_UNIFORM_CAMERA,
+
+	QUAD_UNIFORM_SIZE,
+};
+
+ShaderUniformType quadShaderUniformType[] = {
+	{UNIFORM_TYPE_VEC4, "setUV"},
+	{UNIFORM_TYPE_FLOAT, "texZ"},
+	{UNIFORM_TYPE_VEC4, "mod"},
+	{UNIFORM_TYPE_VEC4, "setColor"},
+	{UNIFORM_TYPE_VEC4, "camera"},
+};
+
+MakeShaderInfo makeShaderInfo[] = {
+	{(char*)vertexShaderCube, (char*)fragmentShaderCube, CUBE_UNIFORM_SIZE, cubeShaderUniformType},
+	{(char*)vertexShaderQuad, (char*)fragmentShaderQuad, QUAD_UNIFORM_SIZE, quadShaderUniformType},
+};
+
+struct Shader {
+	uint program;
+	uint vertex;
+	uint fragment;
+	int uniformCount;
+	ShaderUniform* uniforms;
+};
+
+Shader* globalShaders;
+
+// void pushShader(uint shaderId, uint uniformId, int shaderStage, void* data, int count = 1) {
+void pushShader(Shader* shader, uint shaderId, uint uniformId, int shaderStage, void* data, int count = 1) {
+	// Shader* s = globalShaders + shaderId;
+	Shader* s = shader;
+
+	ShaderUniform* uni = s->uniforms + uniformId;
+	uint stage = shaderStage == 0 ? s->vertex : s->fragment;
+	uint location = shaderStage == 0 ? uni->vertexLocation : uni->fragmentLocation;
+
+	switch(uni->type) {
+		case UNIFORM_TYPE_MAT4: glProgramUniformMatrix4fv(stage, location, count, 1, (float*)data); break;
+		case UNIFORM_TYPE_VEC4: glProgramUniform4fv(stage, location, count, (float*)data); break;
+		case UNIFORM_TYPE_VEC3: glProgramUniform3fv(stage, location, count, (float*)data); break;
+		case UNIFORM_TYPE_INT:  glProgramUniform1iv(stage, location, count, (int*)data); break;
+		case UNIFORM_TYPE_FLOAT:  glProgramUniform1fv(stage, location, count, (float*)data); break;
+	}
+};
+
+// void pushShader(uint shaderId, uint uniformId, int shaderStage, bool data) {
+// 	pushShader(shaderId, uniformId, shaderStage, &data);
+// };
+// void pushShader(uint shaderId, uint uniformId, int shaderStage, float data) {
+// 	pushShader(shaderId, uniformId, shaderStage, &data);
+// };
+// void pushShader(uint shaderId, uint uniformId, int shaderStage, int data) {
+// 	pushShader(shaderId, uniformId, shaderStage, &data);
+// };
+
+/*
+	Shader s;
+
+	Mat4 m = matrix();
+	pushShader(s.vertexModel, m.e);
+	
+	bool b = true;
+	pushShader(s.vertexBool, &b);
+*/
+
+
 
 
 void drawRect(Rect r, Rect uv, Vec4 color, int texture, float texZ = -1) {
@@ -1976,6 +2198,8 @@ struct AppData {
 	Input input;
 	WindowSettings wSettings;
 
+	Shader shaders[SHADER_SIZE];
+
 	GraphicsState graphicsState;
 	DrawCommandList commandList2d;
 	DrawCommandList commandList3d;
@@ -2226,7 +2450,6 @@ struct Particle {
 	Vec3 velSize;
 	Vec3 accSize;
 
-	// float angle;
 	Vec3 rot;
 	Vec3 velRot;
 	Vec3 accRot;
@@ -2494,12 +2717,33 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ids->cubeVertexMode = glGetUniformLocation(ids->cubeVertex, "mode");
 		ids->cubeVertexVertices = glGetUniformLocation(ids->cubeVertex, "vertices");
 		ids->cubeVertexCPlane = glGetUniformLocation(ids->cubeVertex, "cPlane");
-
 		ad->programs[1] = ids->programCube;
 
-		ids->programAll = createShader(vertexShaderAll, fragmentShaderAll, &ids->allVertex, &ids->allFragment);
+		// ids->programAll = createShader(vertexShaderAll, fragmentShaderAll, &ids->allVertex, &ids->allFragment);
 
 		// ad->programs[2] = ids->programAll;
+
+
+
+
+		// int shaderCount = arrayCount(makeShaderInfo);
+		// Shader shaders[arrayCount(makeShaderInfo)];
+		for(int i = 0; i < SHADER_SIZE; i++) {
+			MakeShaderInfo* info = makeShaderInfo + i; 
+			Shader* s = ad->shaders + i;
+
+			s->program = createShader(info->vertexString, info->fragmentString, &s->vertex, &s->fragment);
+			s->uniformCount = info->uniformCount;
+			s->uniforms = getPArray(ShaderUniform, s->uniformCount);
+
+			for(int i = 0; i < s->uniformCount; i++) {
+				ShaderUniform* uni = s->uniforms + i;
+				uni->type = info->uniformNameMap[i].type;	
+				uni->vertexLocation = glGetUniformLocation(s->vertex, info->uniformNameMap[i].name);
+				uni->fragmentLocation = glGetUniformLocation(s->fragment, info->uniformNameMap[i].name);
+			}
+		}
+
 
 
 
@@ -3818,7 +4062,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 
-
 	// Vec3 off = vec3(0.5f, 0.5f, 0.5f);
 	// Vec3 s = vec3(1.01f, 1.01f, 1.01f);
 
@@ -3851,6 +4094,136 @@ extern "C" APPMAINFUNCTION(appMain) {
 			dcPolygonMode({POLYGON_MODE_FILL});
 		}
 	}
+
+
+
+
+	glBindProgramPipeline(globalGraphicsState->pipelineIds.programCube);
+
+
+
+	// void drawQuad(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec4 color) {
+		// Vec3 verts[4] = {vec3(0,0,70), vec3(5,0,70), vec3(5,20,70)};
+		// glProgramUniform3fv(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexVertices, 3, verts[0].e);
+		// glProgramUniform4f(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexColor, 1,0,0,1);
+		// glProgramUniform1i(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexMode, true);
+
+		// glDrawArrays(GL_TRIANGLES, 0, 3);
+	// }
+	// drawCube();
+
+
+
+
+
+	Vec3 ep = vec3(0,0,70);
+
+	static ParticleEmitter emitter;
+	static bool emitterInit = true; 
+	if(emitterInit) {
+		emitter = {};
+		// emitter.particleListSize = 1024;
+		emitter.particleListSize = 100000;
+		emitter.particleList = getPArray(Particle, emitter.particleListSize);
+		emitter.spawnRate = 0.001f;
+
+		emitter.pos = vec3(0,0,70);
+		emitter.friction = 0.5f;
+
+		emitterInit = false;
+	}
+
+	static float dt = 0;
+	dt += ad->dt;
+	emitter.pos = ep + vec3(sin(dt),0,0);
+	// drawCube(emitter.pos, vec3(0.5f), vec4(0,0,0,0.2f), 0, vec3(0,0,0));
+
+	// if(0)
+	{
+		ParticleEmitter* e = &emitter;
+		float dt = ad->dt;
+
+		e->dt += dt;
+		while(e->dt >= 0.1f) {
+			e->dt -= e->spawnRate;
+
+			if(e->particleListCount < e->particleListSize) {
+				Particle p = {};
+
+				p.pos = e->pos;
+				Vec3 dir = normVec3(vec3(randomFloat(-1,1,0.01f), randomFloat(-1,1,0.01f), randomFloat(-1,1,0.01f)));
+				p.vel = dir * 1.0f;
+				// p.acc = -dir*0.2f;
+				p.acc = dir*0.2f;
+
+				// float cOff = randomFloat(-0.2,0.2, 0.001f);
+				// p.color = vec4(0.8f + cOff, 0.1f + cOff, 0.6f + cOff, 1.0f);
+				p.color = vec4(0.8f, 0.1f, 0.6f, 1.0f);
+				// p.velColor = vec4(-0.2f,0,0.2f,-0.2f);
+				p.velColor = vec4(-0.2f,0,0.2f,0.0f);
+				// p.accColor = vec4(-0.2f,0,0.2f,0);
+
+				// p.size = vec3(0.1f);
+				p.size = vec3(0.1f, 0.1f, 0.005f);
+				// p.size = vec3(randomFloat(0.01f,0.2f,0.01f),randomFloat(0.01f,0.2f,0.01f),randomFloat(0.01f,0.2f,0.01f));
+				// p.velSize = vec3(-0.02f);
+				// p.accSize = ;
+
+				p.rot = vec3(degreeToRadian(randomInt(0,360)), degreeToRadian(randomInt(0,360)), degreeToRadian(randomInt(0,360)));
+				Vec3 rot = vec3(randomFloat(0,1,0.01f),randomFloat(0,1,0.01f),randomFloat(0,1,0.01f));
+				p.velRot = rot*10;
+				p.accRot = -rot*2.0f;
+
+				p.timeToLive = 5;
+
+				e->particleList[e->particleListCount++] = p;
+			}
+		}
+	}
+
+	particleEmitterUpdate(&emitter, ad->dt);
+
+	// for(int i = 0; i < emitter.particleListCount; i++) {
+	// 	Particle* p = emitter.particleList + i;
+
+	// 	Vec3 qr = p->rot;
+	// 	Quat q = quat(qr.x, vec3(1,0,0)) * quat(qr.y, vec3(0,1,0)) * quat(qr.z, vec3(0,0,1));
+	// 	drawCube(p->pos, p->size, p->color, q);
+	// }
+
+
+	glBindProgramPipeline(ad->shaders[SHADER_CUBE].program);
+
+	pushShader(ad->shaders + SHADER_CUBE, SHADER_CUBE, CUBE_UNIFORM_VIEW, 0, view.e);
+	pushShader(ad->shaders + SHADER_CUBE, SHADER_CUBE, CUBE_UNIFORM_PROJ, 0, proj.e);
+
+	for(int i = 0; i < emitter.particleListCount; i++) {
+		Particle* p = emitter.particleList + i;
+
+		Vec3 qr = p->rot;
+		Quat q = quat(qr.x, vec3(1,0,0)) * quat(qr.y, vec3(0,1,0)) * quat(qr.z, vec3(0,0,1));
+		drawCube(p->pos, p->size, p->color, q);
+// void drawCube(Vec3 trans, Vec3 scale, Vec4 color, float degrees, Vec3 rot) {
+
+		Vec3 trans = p->pos;
+		Vec3 scale = p->size;
+		Vec4 color = p->color;
+		Quat quat = q;
+
+		Mat4 sm; scaleMatrix(&sm, scale);
+		Mat4 rm; quatRotationMatrix(&rm, quat);
+		Mat4 tm; translationMatrix(&tm, trans);
+		Mat4 model = tm*rm*sm;
+
+		pushShader(ad->shaders + SHADER_CUBE, SHADER_CUBE, CUBE_UNIFORM_MODEL, 0, model.e);
+		pushShader(ad->shaders + SHADER_CUBE, SHADER_CUBE, CUBE_UNIFORM_COLOR, 0, &color);
+		bool mode = false;
+		pushShader(ad->shaders + SHADER_CUBE, SHADER_CUBE, CUBE_UNIFORM_MODE, 0, &mode);
+
+		glDrawArrays(GL_QUADS, 0, 6*4);
+	}
+
+
 
 	int fontSize = 22;
 	int pi = 0;
@@ -4150,94 +4523,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-	// glBindProgramPipeline(globalGraphicsState->pipelineIds.programCube);
-
-	// Vec3 verts[4] = {p0, p1};
-	// glProgramUniform3fv(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexVertices, 4, verts[0].e);
-	// glProgramUniform4f(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexColor, color.r, color.g, color.b, color.a);
-	// glProgramUniform1i(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexMode, true);
-
-	// glDrawArrays(GL_LINES, 0, 2);
-
-
-
-
-
-
-		glBindProgramPipeline(globalGraphicsState->pipelineIds.programCube);
-
-		Vec3 ep = vec3(0,0,70);
-
-		static ParticleEmitter emitter;
-		static bool emitterInit = true; 
-		if(emitterInit) {
-			emitter = {};
-			// emitter.particleListSize = 1024;
-			emitter.particleListSize = 100000;
-			emitter.particleList = getPArray(Particle, emitter.particleListSize);
-			emitter.spawnRate = 0.001f;
-
-			emitter.pos = vec3(0,0,70);
-			emitter.friction = 0.5f;
-
-			emitterInit = false;
-		}
-
-		static float dt = 0;
-		dt += ad->dt;
-		emitter.pos = ep + vec3(sin(dt),0,0);
-		drawCube(emitter.pos, vec3(0.5f), vec4(0,0,0,0.2f), 0, vec3(0,0,0));
-
-		{
-			ParticleEmitter* e = &emitter;
-			float dt = ad->dt;
-
-			e->dt += dt;
-			while(e->dt >= 0.1f) {
-				e->dt -= e->spawnRate;
-
-				if(e->particleListCount < e->particleListSize) {
-					Particle p = {};
-
-					p.pos = e->pos;
-					Vec3 dir = normVec3(vec3(randomFloat(-1,1,0.01f), randomFloat(-1,1,0.01f), randomFloat(-1,1,0.01f)));
-					p.vel = dir * 1.0f;
-					// p.acc = -dir*0.2f;
-					p.acc = dir*0.2f;
-
-					// float cOff = randomFloat(-0.2,0.2, 0.001f);
-					// p.color = vec4(0.8f + cOff, 0.1f + cOff, 0.6f + cOff, 1.0f);
-					p.color = vec4(0.8f, 0.1f, 0.6f, 1.0f);
-					p.velColor = vec4(-0.2f,0,0.2f,-0.2f);
-					// p.accColor = vec4(-0.2f,0,0.2f,0);
-
-					// p.size = vec3(0.1f);
-					p.size = vec3(0.1f, 0.1f, 0.005f);
-					// p.size = vec3(randomFloat(0.01f,0.2f,0.01f),randomFloat(0.01f,0.2f,0.01f),randomFloat(0.01f,0.2f,0.01f));
-					// p.velSize = vec3(-0.02f);
-					// p.accSize = ;
-
-					p.rot = vec3(degreeToRadian(randomInt(0,360)), degreeToRadian(randomInt(0,360)), degreeToRadian(randomInt(0,360)));
-					Vec3 rot = vec3(randomFloat(0,1,0.01f),randomFloat(0,1,0.01f),randomFloat(0,1,0.01f));
-					p.velRot = rot*10;
-					p.accRot = -rot*2.0f;
-
-					p.timeToLive = 5;
-
-					e->particleList[e->particleListCount++] = p;
-				}
-			}
-		}
-
-		particleEmitterUpdate(&emitter, ad->dt);
-
-		for(int i = 0; i < emitter.particleListCount; i++) {
-			Particle* p = emitter.particleList + i;
-
-			Vec3 qr = p->rot;
-			Quat q = quat(qr.x, vec3(1,0,0)) * quat(qr.y, vec3(0,1,0)) * quat(qr.z, vec3(0,0,1));
-			drawCube(p->pos, p->size, p->color, q);
-		}
 
 
 
