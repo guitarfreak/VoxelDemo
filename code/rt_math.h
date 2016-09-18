@@ -34,6 +34,12 @@ inline float mapRange(float value, float min, float max, float rangeMin, float r
 	return result;
 };
 
+// 0 to 1
+float lerp(float percent, float min, float max) {
+	float result = mapRange(percent, 0, 1, min, max);
+	return result;
+}
+
 int mod(int a, int b) {
 	int result;
 	result = a % b;
@@ -1829,6 +1835,38 @@ inline Vec4 vec4(Vec3 a, float w) {
 	vec.xyz = a;
 	vec.w = w;
 	return vec;
+}
+
+inline Vec4 operator*(Vec4 a, float b) {
+	a.x *= b;
+	a.y *= b;
+	a.z *= b;
+	a.w *= b;
+	return a;
+}
+
+inline Vec4 operator*(float a, Vec4 b) {
+	a *= b.x;
+	a *= b.y;
+	a *= b.z;
+	a *= b.w;
+	return b;
+}
+
+inline Vec4 operator+(Vec4 a, Vec4 b) {
+	a.x += b.x;
+	a.y += b.y;
+	a.z += b.z;
+	a.w += b.w;
+	return a;
+}
+
+inline Vec4 operator-(Vec4 a, Vec4 b) {
+	a.x -= b.x;
+	a.y -= b.y;
+	a.z -= b.z;
+	a.w -= b.w;
+	return a;
 }
 
 //

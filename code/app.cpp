@@ -46,31 +46,25 @@
 - round collision
 
 - advance timestep when window not in focus (stop game when not in focus)
-
 - reduce number of thread queue pushes
 - insert and init mesh not thread proof, make sure every mesh is initialized before generating
-
 - make voxel drop in tutorial code for stb_voxel
-
 - change bubblesort to mergesort\radixsort
 - implement sun and clouds that block beams of light
 - glowstone emmiting light
-
 - put code in for rect3i
 - pink noise from old projects
-
 - stb_voxel push block_selector, alpha test, clipping in voxel vertex shader
-
 - activate opengl debug output!
 - small menu
-
 - rocket launcher
-
 - make waterlevel a variable in generation and such
 - antialiased pixel graphics with neighbour sampling 
-
 - macros for array stuff so i dont have to inline updateMeshList[updateMeshListSize++] every time 
-								
+- level of detail for world gen back row								
+- 32x32 gen chunks
+
+- make shader code more straight forward
 
 //-------------------------------------
 //               BUGS
@@ -83,11 +77,6 @@
 - game input gets stuck when buttons are pressed right at the start
 - sort key assert firing randomly
 - hotload gets stuck sometimes, thread that won't complete
-- sloppy camera
-*/
-
-/*
-	- 32x32 gen chunks
 */
 
 MemoryBlock* globalMemory;
@@ -259,6 +248,10 @@ struct PipelineIds {
 	uint cubeVertexMode;
 	uint cubeVertexVertices;
 	uint cubeVertexCPlane;
+
+	uint programAll;
+	uint allVertex;
+	uint allFragment;
 
 	uint programVoxel;
 	uint voxelVertex;
@@ -523,7 +516,7 @@ const char* vertexShaderCube = GLSL (
 	uniform mat4x4 proj;
 // uniform mat4x4 projViewModel;
 
-	uniform vec3 vertices[4];
+	uniform vec3 vertices[24];
 	uniform bool mode;
 
 	uniform vec4 setColor;
@@ -567,7 +560,7 @@ const char* vertexShaderCube = GLSL (
 const char* fragmentShaderCube = GLSL (
 	layout(binding = 0) uniform sampler2D s;
 
-// smooth in vec2 uv;
+	// smooth in vec2 uv;
 	in vec4 Color;
 
 	layout(depth_less) out float gl_FragDepth;
@@ -580,20 +573,41 @@ const char* fragmentShaderCube = GLSL (
 	);
 
 
-// const char* testFragmentShader = GLSL (
-// 	// layout(binding = 0) uniform sampler2D s;
+const char* vertexShaderAll = GLSL (
+	// out gl_PerVertex { vec4 gl_Position; float gl_ClipDistance[]; };
+	out gl_PerVertex { vec4 gl_Position; };
+	out vec4 Color;
 
-// 	// smooth in vec2 uv;
-// 	// in vec4 Color;
+	uniform mat4x4 modelView;
 
-// 	layout(depth_less) out float gl_FragDepth;
-// 	out vec4 color;
+	// uniform mat4x4 model;
+	// uniform mat4x4 view;
+	// uniform mat4x4 proj;
 
-// 	void main() {
-// 		// color = texture(s, uv) * Color;
-// 		color = vec4(1,0,0,1);
-// 	}
-// );
+	uniform vec4 color;
+	// uniform vec4 plane;
+	in vec3 vertex;
+
+	void main() {
+		Color = color;
+		gl_Position = modelView * vec4(vertex,1);
+		// gl_Position = proj*view*model * vec4(vertex,1);
+		// gl_ClipDistance[0] = dot(plane, model*pos);
+	}
+);
+
+const char* fragmentShaderAll = GLSL (
+	layout(binding = 0) uniform sampler2D s;
+
+	in vec4 Color;
+
+	layout(depth_less) out float gl_FragDepth;
+	out vec4 color;
+
+	void main() {
+		color = Color;
+	}
+);
 
 
 
@@ -816,6 +830,21 @@ void drawCube(Vec3 trans, Vec3 scale, Vec4 color, float degrees, Vec3 rot) {
 	glDrawArrays(GL_QUADS, 0, 6*4);
 }
 
+void drawCube(Vec3 trans, Vec3 scale, Vec4 color, Quat q) {
+	Mat4 sm; scaleMatrix(&sm, scale);
+	Mat4 rm; quatRotationMatrix(&rm, q);
+	Mat4 tm; translationMatrix(&tm, trans);
+	Mat4 model = tm*rm*sm;
+
+	glProgramUniformMatrix4fv(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexModel, 1, 1, model.e);
+	glProgramUniform4f(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexColor, color.r, color.g, color.b, color.a);
+
+	glProgramUniform1i(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexMode, false);
+
+// glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 36, 1, 0);
+	glDrawArrays(GL_QUADS, 0, 6*4);
+}
+
 void drawLine(Vec3 p0, Vec3 p1, Vec4 color) {
 	Vec3 verts[4] = {p0, p1};
 	glProgramUniform3fv(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexVertices, 4, verts[0].e);
@@ -898,57 +927,57 @@ static int hash[] = {208,34,231,213,32,248,233,56,161,78,24,140,71,48,140,254,24
 	135,176,183,191,253,115,184,21,233,58,129,233,142,39,128,211,118,137,139,255,
 	114,20,218,113,154,27,127,246,250,1,8,198,250,209,92,222,173,21,88,102,219};
 
-	int noise2(int x, int y)
+int noise2(int x, int y)
+{
+	int tmp = hash[(y + SEED) % 256];
+	return hash[(tmp + x) % 256];
+}
+
+float lin_inter(float x, float y, float s)
+{
+	return x + s * (y-x);
+}
+
+float smooth_inter(float x, float y, float s)
+{
+	return lin_inter(x, y, s * s * (3-2*s));
+}
+
+float noise2d(float x, float y)
+{
+	int x_int = x;
+	int y_int = y;
+	float x_frac = x - x_int;
+	float y_frac = y - y_int;
+	int s = noise2(x_int, y_int);
+	int t = noise2(x_int+1, y_int);
+	int u = noise2(x_int, y_int+1);
+	int v = noise2(x_int+1, y_int+1);
+	float low = smooth_inter(s, t, x_frac);
+	float high = smooth_inter(u, v, x_frac);
+	return smooth_inter(low, high, y_frac);
+}
+
+float perlin2d(float x, float y, float freq, int depth)
+{
+	float xa = x*freq;
+	float ya = y*freq;
+	float amp = 1.0;
+	float fin = 0;
+	float div = 0.0;
+
+	int i;
+	for(i=0; i<depth; i++)
 	{
-		int tmp = hash[(y + SEED) % 256];
-		return hash[(tmp + x) % 256];
+		div += 256 * amp;
+		fin += noise2d(xa, ya) * amp;
+		amp /= 2;
+		xa *= 2;
+		ya *= 2;
 	}
 
-	float lin_inter(float x, float y, float s)
-	{
-		return x + s * (y-x);
-	}
-
-	float smooth_inter(float x, float y, float s)
-	{
-		return lin_inter(x, y, s * s * (3-2*s));
-	}
-
-	float noise2d(float x, float y)
-	{
-		int x_int = x;
-		int y_int = y;
-		float x_frac = x - x_int;
-		float y_frac = y - y_int;
-		int s = noise2(x_int, y_int);
-		int t = noise2(x_int+1, y_int);
-		int u = noise2(x_int, y_int+1);
-		int v = noise2(x_int+1, y_int+1);
-		float low = smooth_inter(s, t, x_frac);
-		float high = smooth_inter(u, v, x_frac);
-		return smooth_inter(low, high, y_frac);
-	}
-
-	float perlin2d(float x, float y, float freq, int depth)
-	{
-		float xa = x*freq;
-		float ya = y*freq;
-		float amp = 1.0;
-		float fin = 0;
-		float div = 0.0;
-
-		int i;
-		for(i=0; i<depth; i++)
-		{
-			div += 256 * amp;
-			fin += noise2d(xa, ya) * amp;
-			amp /= 2;
-			xa *= 2;
-			ya *= 2;
-		}
-
-		return fin/div;
-	}
+	return fin/div;
+}
 
 
 
@@ -1097,9 +1126,9 @@ void buildColorPalette() {
 // #define VIEW_DISTANCE 2500 // 32
 // #define VIEW_DISTANCE 2048 // 32
 // #define VIEW_DISTANCE 1024 // 16
-#define VIEW_DISTANCE 512  // 8
+// #define VIEW_DISTANCE 512  // 8
 // #define VIEW_DISTANCE 256 // 4
-// #define VIEW_DISTANCE 128 // 2
+#define VIEW_DISTANCE 128 // 2
 
 #define USE_MALLOC 1
 
@@ -1234,11 +1263,20 @@ int startY = 47850;
 int startXMod = 58000;
 int startYMod = 68000;
 
+const int WORLD_MIN = 60;
+const int WORLD_MAX = 255;
+// const int WATER_LEVEL_HEIGHT = WORLD_MIN*1.06f;
+const int WATER_LEVEL_HEIGHT = lerp(0.017f, WORLD_MIN, WORLD_MAX);
+// #define WATER_LEVEL_HEIGHT 62
+
 bool* treeNoise;
 
 void generateVoxelMeshThreaded(void* data) {
 	VoxelMesh* m = (VoxelMesh*)data;
 	Vec2i coord = m->coord;
+
+	// float worldHeightOffset = -0.1f;
+	float worldHeightOffset = -0.1f;
 
 	if(!m->generated) {
 		Vec3i min = vec3i(0,0,0);
@@ -1264,33 +1302,34 @@ void generateVoxelMeshThreaded(void* data) {
 
 	    		// float height = perlin2d(gx+4000+startX, gy+4000+startY, 0.004f, 7);
 				float height = perlin2d(gx+4000+startX, gy+4000+startY, 0.004f, 6);
-				height -= 0.1f; 
+				// float height = perlin2d(gx+4000+startX, gy+4000+startY, 0.04f, 6);
+				height += worldHeightOffset; 
 
 				// float mod = perlin2d(gx+startXMod, gy+startYMod, 0.008f, 4);
 				float perlinMod = perlin2d(gx+startXMod, gy+startYMod, 0.02f, 4);
 				float modOffset = 0.1f;
-				float mod = mapRange(perlinMod, 0, 1, -modOffset, modOffset);
+				float mod = lerp(perlinMod, -modOffset, modOffset);
 
+				float modHeight = height+mod;
 				int blockType;
 	    		// 	 if(height < 0.35f) blockType = 10; // water
 	    		// else if(height < 0.4f + mod) blockType = 11; // sand
-	    		if(height < 0.4f + mod) blockType = BT_Sand; // sand
-	    		else if(height < 0.6f + mod) blockType = BT_Grass; // grass
-	    		else if(height < 0.8f + mod) blockType = BT_Stone; // stone
-	    		else if(height <= 1.0f + mod) blockType = BT_Snow; // snow
+	    		if(modHeight < 0.4f) blockType = BT_Sand; // sand
+	    		else if(modHeight < 0.6f) blockType = BT_Grass; // grass
+	    		else if(modHeight < 0.8f) blockType = BT_Stone; // stone
+	    		else if(modHeight <= 1.0f) blockType = BT_Snow; // snow
 
-	    		float heightPercent = height;
 	    		height = clamp(height, 0, 1);
 	    		// height = pow(height,3.5f);
 	    		height = pow(height,4.0f);
-	    		height = mapRange(height, 0, 1, 20, 200);
+	    		int blockHeight = lerp(height, WORLD_MIN, WORLD_MAX);
 
-	    		for(int z = 0; z < height; z++) {
+	    		for(int z = 0; z < blockHeight; z++) {
 	    			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = blockType;
 	    			m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 0;
 	    		}
 
-	    		for(int z = height; z < VOXEL_Z; z++) {
+	    		for(int z = blockHeight; z < VOXEL_Z; z++) {
 	    			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 0;
 	    			m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 255;
 	    		}
@@ -1298,17 +1337,15 @@ void generateVoxelMeshThreaded(void* data) {
 	    		if(blockType == BT_Grass && treeNoise[y*VOXEL_Y + x] == 1 && 
 	    			valueBetween(y, min.y+3, max.y-3) && valueBetween(x, min.x+3, max.x-3) && 
 	    			valueBetween(perlinMod, 0.2f, 0.4f)) {
-	    			treePositions[treePositionsSize++] = vec3i(x,y,height);
+	    			treePositions[treePositionsSize++] = vec3i(x,y,blockHeight);
 		    	}
 
-		    	int waterLevel = 22;
-		    	if(height < waterLevel) {
-		    		for(int z = height; z < waterLevel; z++) {
+		    	if(blockHeight < WATER_LEVEL_HEIGHT) {
+		    		for(int z = blockHeight; z < WATER_LEVEL_HEIGHT; z++) {
 		    			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = BT_Water;
 
-		    			int lightValue;
-		    			if(z == 20)  lightValue = 50;
-		    			else if(z == 21) lightValue = 150;
+		    			Vec2i waterLightRange = vec2i(0,220);
+		    			int lightValue = mapRange(blockHeight, WORLD_MIN, WATER_LEVEL_HEIGHT, waterLightRange.x, waterLightRange.y);
 		    			m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = lightValue;
 		    		}
 		    	}
@@ -1911,8 +1948,28 @@ struct Entity;
 struct EntityList {
 	Entity* e;
 	int size;
-	int capacity;
 };
+
+
+struct Camera {
+	Vec3 pos;
+	Vec3 look;
+	Vec3 up;
+	Vec3 right;
+};
+
+Camera getCamData(Vec3 pos, Vec3 rot, Vec3 offset = vec3(0,0,0), Vec3 gUp = vec3(0,0,1), Vec3 startDir = vec3(0,1,0)) {
+	Camera c;
+	c.pos = pos + offset;
+	c.look = startDir;
+	rotateVec3(&c.look, rot.x, gUp);
+	rotateVec3(&c.look, rot.y, normVec3(cross(gUp, c.look)));
+	c.up = normVec3(cross(c.look, normVec3(cross(gUp, c.look))));
+	c.right = normVec3(cross(gUp, c.look));
+	c.look = -c.look;
+
+	return c;
+}
 
 struct AppData {
 	SystemData systemData;
@@ -1929,18 +1986,10 @@ struct AppData {
 	bool* treeNoise;
 
 	EntityList entityList;
+	Entity* player;
+	Entity* cameraEntity;
 
-	Vec3 activeCamPos;
-	Vec3 activeCamLook;
-	Vec3 activeCamUp;
-	Vec3 activeCamRight;
-
-	Vec3 camera;
-	Vec3 camPos;
-	Vec3 camLook;
-	Vec2 camRot;
-	Vec3 camVel;
-	Vec3 camAcc;
+	Camera activeCam;
 
 	uint programs[16];
 	uint textures[16];
@@ -1964,13 +2013,6 @@ struct AppData {
 	Vec2i fboRes;
 	bool useNativeRes;
 
-	Vec3 playerPos;
-	Vec3 playerLook;
-	Vec2 playerRot;
-	Vec3 playerSize;
-	Vec3 playerVel;
-	Vec3 playerAcc;
-	float playerCamZOffset;
 	bool playerMode;
 	bool pickMode;
 
@@ -2061,13 +2103,6 @@ void getPointsFromQuadAndNormal(Vec3 p, Vec3 normal, float size, Vec3 verts[4]) 
 	}
 }
 
-struct Camera {
-	Vec3 pos;
-	Vec3 look;
-	Vec3 up;
-	Vec3 right;
-};
-
 enum Entity_Type {
 	ET_Player = 0,
 	ET_Camera,
@@ -2077,6 +2112,8 @@ enum Entity_Type {
 };
 
 struct Entity {
+	int init;
+
 	int type;
 	int id;
 	char name[16];
@@ -2101,21 +2138,11 @@ struct Entity {
 
 	bool exploded;
 
+	bool playerOnGround;
+
 	void* data;
 };
 
-Camera getCamData(Vec3 pos, Vec3 rot, Vec3 gUp = vec3(0,0,1), Vec3 startDir = vec3(0,1,0)) {
-	Camera c;
-	c.pos = pos;
-	c.look = startDir;
-	rotateVec3(&c.look, rot.x, gUp);
-	rotateVec3(&c.look, rot.y, normVec3(cross(gUp, c.look)));
-	c.up = normVec3(cross(c.look, normVec3(cross(gUp, c.look))));
-	c.right = normVec3(cross(gUp, c.look));
-	c.look = -c.look;
-
-	return c;
-}
 
 Vec3 getRotationToVector(Vec3 start, Vec3 dest, float* angle) {
 	Vec3 side = normVec3(cross(start, normVec3(dest)));
@@ -2134,6 +2161,7 @@ Vec3 getRotationToVector(Vec3 start, Vec3 dest, float* angle) {
 
 void initEntity(Entity* e, int type, Vec3 pos, Vec3 dir, Vec3 dim, Vec3 camOff) {
 	*e = {};
+	e->init = true;
 	e->type = type;
 	e->pos = pos;
 	e->dir = dir;
@@ -2143,23 +2171,24 @@ void initEntity(Entity* e, int type, Vec3 pos, Vec3 dir, Vec3 dim, Vec3 camOff) 
 	e->rot = getRotationToVector(vec3(0,1,0), dir, &e->rotAngle);
 }
 
-void addEntity(EntityList* list, Entity* e) {
-	assert(list->size < list->capacity);
-
-	e->id = list->size;
-	list->e[list->size] = *e;
-	list->size++;
-}
-
-void removeEntity(EntityList* list, int id) {
-	if(list->size == 1 || id == list->size-1) {
-		list->size--;
-		return;
+Entity* addEntity(EntityList* list, Entity* e) {
+	bool foundSlot = false;
+	Entity* freeEntity = 0;
+	int id = 0;
+	for(int i = 0; i < list->size; i++) {
+		if(list->e[i].init == false) {
+			freeEntity = &list->e[i];
+			id = i;
+			break;
+		}
 	}
 
-	list->e[id] = list->e[list->size-1];
-	list->e[id].id = id;
-	list->size--;
+	assert(freeEntity);
+
+	*freeEntity = *e;
+	freeEntity->id = id;
+
+	return freeEntity;
 }
 
 
@@ -2177,6 +2206,106 @@ void removeEntity(EntityList* list, int id) {
 #define VK_Q 0x51
 
 #define VK_T 0x54
+
+#define KEYCODE_0 0x30
+#define KEYCODE_1 0x31
+#define KEYCODE_2 0x32
+#define KEYCODE_3 0x33
+#define KEYCODE_4 0x34
+
+struct Particle {
+	Vec3 pos;
+	Vec3 vel;
+	Vec3 acc;
+
+	Vec4 color;
+	Vec4 velColor;
+	Vec4 accColor;
+
+	Vec3 size;
+	Vec3 velSize;
+	Vec3 accSize;
+
+	// float angle;
+	Vec3 rot;
+	Vec3 velRot;
+	Vec3 accRot;
+
+	float dt;
+	float timeToLive;
+};
+
+struct ParticleEmitter {
+	Particle* particleList;
+	int particleListSize;
+	int particleListCount;
+
+	Vec3 pos;
+	float spawnRate;
+	float timeToLive;
+	float dt;
+	float friction;
+};
+
+void particleEmitterUpdate(ParticleEmitter* e, float dt) {
+	// push particles
+	// e->dt += dt;
+	// while(e->dt >= 0.1f) {
+	// 	e->dt -= e->spawnRate;
+
+	// 	if(e->particleListCount < e->particleListSize) {
+	// 		Particle p = {};
+	// 		p.pos = e->pos;
+	// 		p.vel = normVec3(vec3(randomFloat(-1,1,0.01f), randomFloat(-1,1,0.01f), randomFloat(-1,1,0.01f))) * 10;
+	// 		p.acc = vec3(0,0,0);
+
+	// 		p.timeToLive = 1;
+
+	// 		e->particleList[e->particleListCount++] = p;
+	// 	}
+	// }
+
+	// update
+	// float friction = 0.1f;
+	float friction = e->friction;
+	for(int i = 0; i < e->particleListCount; i++) {
+		Particle* p = e->particleList + i;
+
+		p->vel = p->vel + p->acc*dt;
+		// p->vel = p->vel * pow(friction,dt);
+		p->pos = p->pos - 0.5f*p->acc*dt*dt + p->vel*dt;
+
+		p->velColor = p->velColor + p->accColor*dt;
+		// p->velColor = p->velColor * pow(friction,dt);
+		p->color = p->color - 0.5f*p->accColor*dt*dt + p->velColor*dt;
+
+		p->velSize = p->velSize + p->accSize*dt;
+		// p->velColor = p->velColor * pow(friction,dt);
+		p->size = p->size - 0.5f*p->accSize*dt*dt + p->velSize*dt;
+
+		p->velRot = p->velRot + p->accRot*dt;
+		// p->velColor = p->velColor * pow(friction,dt);
+		p->rot = p->rot - 0.5f*p->accRot*dt*dt + p->velRot*dt;
+
+		p->dt += dt;
+	}
+
+	// remove dead
+	for(int i = 0; i < e->particleListCount; i++) {
+		Particle* p = e->particleList + i;
+
+		if(p->dt >= p->timeToLive) {
+			if(i == e->particleListCount-1) {
+				e->particleListCount--;
+				break;
+			}
+
+			e->particleList[i] = e->particleList[e->particleListCount-1];
+			e->particleListCount--;
+			i--;
+		}
+	}
+}
 
 
 extern "C" APPMAINFUNCTION(appMain) {
@@ -2262,12 +2391,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// ad->farPlane = 2000;
 		ad->farPlane = 3000;
 
-
-		ad->camera = vec3(0,0,10);
-		ad->camPos = vec3(35,35,32);
-		ad->camLook = normVec3(vec3(0,1,0));
-		ad->camRot = vec2(0,0);
-
 		ad->voxelHashSize = sizeof(arrayCount(ad->voxelHash));
 		for(int i = 0; i < ad->voxelHashSize; i++) {
 			ad->voxelHash[i] = (VoxelNode*)getPMemory(sizeof(VoxelNode));
@@ -2282,13 +2405,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 			ad->voxelCache[i] = (uchar*)getPMemory(sizeof(uchar)*VOXEL_CACHE_SIZE);
 			ad->voxelLightingCache[i] = (uchar*)getPMemory(sizeof(uchar)*VOXEL_CACHE_SIZE);
 		}
-
-
-		// ad->playerPos = vec3(35.5f,35.3f,30);
-		ad->playerPos = vec3(0,0,0);
-		ad->playerLook = vec3(0,-1,0);
-		ad->playerSize = vec3(0.8f, 0.8f, 1.8f);
-		ad->playerCamZOffset = ad->playerSize.z*0.5f - ad->playerSize.x*0.25f;
 
 		ad->playerMode = true;
 		ad->pickMode = true;
@@ -2318,18 +2434,23 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->bombFireInterval = 0.1f;
 		ad->bombButtonDown = false;
 
-		ad->entityList.capacity = 1000;
-		ad->entityList.e = (Entity*)getPMemory(sizeof(Entity)*ad->entityList.capacity);
-		ad->entityList.size = 0;
+		ad->entityList.size = 1000;
+		ad->entityList.e = (Entity*)getPMemory(sizeof(Entity)*ad->entityList.size);
+
+		Entity player;
+		Vec3 playerDim = vec3(0.8f, 0.8f, 1.8f);
+		float camOff = playerDim.z*0.5f - playerDim.x*0.25f;
+		initEntity(&player, ET_Player, vec3(0,0,40), normVec3(vec3(1,1,0)), playerDim, vec3(0,0,camOff));
+		player.playerOnGround = false;
+		ad->player = addEntity(&ad->entityList, &player);
 
 		Entity freeCam;
 		initEntity(&freeCam, ET_Camera, vec3(35,35,32), vec3(0,1,0), vec3(0,0,0), vec3(0,0,0));
-		addEntity(&ad->entityList, &freeCam);
+		ad->cameraEntity = addEntity(&ad->entityList, &freeCam);
 
-		Entity player;
-		float camOff = ad->playerSize.z*0.5f - ad->playerSize.x*0.25f;
-		initEntity(&player, ET_Player, vec3(0,0,0), vec3(0,-1,0), vec3(0.8f, 0.8f, 1.8f), vec3(0,0,camOff));
-		addEntity(&ad->entityList, &player);
+
+
+
 
 
 
@@ -2370,13 +2491,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ids->cubeVertexView = glGetUniformLocation(ids->cubeVertex, "view");
 		ids->cubeVertexProj = glGetUniformLocation(ids->cubeVertex, "proj");
 		ids->cubeVertexColor = glGetUniformLocation(ids->cubeVertex, "setColor");
-
 		ids->cubeVertexMode = glGetUniformLocation(ids->cubeVertex, "mode");
 		ids->cubeVertexVertices = glGetUniformLocation(ids->cubeVertex, "vertices");
-
 		ids->cubeVertexCPlane = glGetUniformLocation(ids->cubeVertex, "cPlane");
 
 		ad->programs[1] = ids->programCube;
+
+		ids->programAll = createShader(vertexShaderAll, fragmentShaderAll, &ids->allVertex, &ids->allFragment);
+
+		// ad->programs[2] = ids->programAll;
 
 
 
@@ -2580,7 +2703,25 @@ extern "C" APPMAINFUNCTION(appMain) {
 		updateFrameBuffers = true;
 	}
 
-	if(input->keysPressed[VK_F5]) {
+	if(input->keysPressed[VK_F2]) {
+		input->captureMouse = !input->captureMouse;
+	}
+
+	bool focus = GetFocus() == windowHandle;
+	bool fpsMode = input->captureMouse && focus;
+
+	if(fpsMode) {
+		int w,h;
+		Vec2i wPos;
+		getWindowProperties(systemData->windowHandle, &w, &h, 0, 0, &wPos.x, &wPos.y);
+		SetCursorPos(wPos.x + wSettings->currentRes.x/2, wPos.y + wSettings->currentRes.y/2);
+
+		while(ShowCursor(false) >= 0);
+	} else {
+		while(ShowCursor(true) < 0);
+	}
+
+	if(input->keysPressed[VK_F3]) {
 		static bool switchMonitor = false;
 
 		setWindowMode(windowHandle, wSettings, WINDOW_MODE_WINDOWED);
@@ -2639,23 +2780,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		GLenum result3 = glCheckNamedFramebufferStatus(ad->frameBuffers[2], GL_FRAMEBUFFER);
 	}
 
-	if(input->keysPressed[VK_F2]) {
-		input->captureMouse = !input->captureMouse;
-	}
 
-	bool focus = GetFocus() == windowHandle;
-	bool fpsMode = input->captureMouse && focus;
-
-	if(fpsMode) {
-		int w,h;
-		Vec2i wPos;
-		getWindowProperties(systemData->windowHandle, &w, &h, 0, 0, &wPos.x, &wPos.y);
-		SetCursorPos(wPos.x + wSettings->currentRes.x/2, wPos.y + wSettings->currentRes.y/2);
-
-		while(ShowCursor(false) >= 0);
-	} else {
-		while(ShowCursor(true) < 0);
-	}
 
 	// 2d camera controls
 	// Vec3* cam = &ad->camera;	
@@ -2670,28 +2795,18 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// 	cam->z = zoom;
 	// }
 
+	Entity* player = ad->player;
+	Entity* camera = ad->cameraEntity;
+
 	if(input->keysPressed[VK_F4]) {
 		if(ad->playerMode) {
-			ad->camPos = ad->playerPos + vec3(0,0,ad->playerCamZOffset);
-			ad->camLook = ad->playerLook;
-			ad->camRot = ad->playerRot;
+			camera->pos = player->pos + player->camOff;
+			camera->dir = player->dir;
+			camera->rot = player->rot;
+			camera->rotAngle = player->rotAngle;
 		}
 		ad->playerMode = !ad->playerMode;
 	}
-
-	#define KEYCODE_0 0x30
-	#define KEYCODE_1 0x31
-	#define KEYCODE_2 0x32
-	#define KEYCODE_3 0x33
-	#define KEYCODE_4 0x34
-
-	// if(input->keysPressed[KEYCODE_1]) {
-	// 	ad->pickMode = true;
-	// }
-
-	// if(input->keysPressed[KEYCODE_2]) {
-	// 	ad->pickMode = false;
-	// }
 
 	if(input->mouseWheel) {
 		ad->blockMenuSelected += -input->mouseWheel;
@@ -2704,100 +2819,20 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 	if(ad->playerMode) {
-		ad->camVel = vec3(0,0,0);
+		camera->vel = vec3(0,0,0);
 	} else {
-		ad->playerVel = vec3(0,0,0);
+		player->vel = vec3(0,0,0);
 	}
 
 	if(!ad->playerMode && input->keysPressed[VK_SPACE]) {
-		ad->playerPos = ad->camPos;
-		ad->playerLook = ad->camLook;
-		ad->playerRot = ad->camRot;
-		ad->playerVel = ad->camVel;
+		player->pos = camera->pos;
+		player->dir = camera->dir;
+		player->rot = camera->rot;
+		player->rotAngle = camera->rotAngle;
+		player->vel = camera->vel;
 		ad->playerMode = true;
 		input->keysPressed[VK_SPACE] = false;
 		input->keysDown[VK_SPACE] = false;
-	}
-
-	Vec3 gUp = vec3(0,0,1);
-
-	Vec3 pLook, pRight, pUp;
-	getCamData(ad->playerLook, ad->playerRot, gUp, &pLook, &pRight, &pUp);
-	ad->playerAcc = vec3(0,0,0);
-
-	Vec3 cLook, cRight, cUp;
-	getCamData(ad->camLook, ad->camRot, gUp, &cLook, &cRight, &cUp);
-	ad->camAcc = vec3(0,0,0);
-
-	Vec3 look, right, up;
-	Vec2* rot;
-	Vec3* acc;
-	float runBoost;
-	float speed;
-	bool rightLock;
-
-	if(!ad->playerMode) {
-		look = cLook;
-		right = cRight;
-		up = cUp;
-		rot = &ad->camRot;
-		acc = &ad->camAcc;
-
-		runBoost = 2.0f;
-		speed = 150;
-
-		#define VK_T 0x54
-		if(input->keysDown[VK_T]) speed = 1000;
-
-		rightLock = false;
-	} else {
-		look = pLook;
-		right = pRight;
-		up = pUp;
-		rot = &ad->playerRot;
-		acc = &ad->playerAcc;
-
-		runBoost = 1.5f;
-		speed = 30;
-
-		rightLock = true;
-	}
-
-	if((!fpsMode && input->mouseButtonDown[1]) || fpsMode) {
-		float turnRate = ad->dt*0.3f;
-		rot->y += turnRate * input->mouseDeltaY;
-		rot->x += turnRate * input->mouseDeltaX;
-
-		float margin = 0.00001f;
-		clamp(&rot->y, -M_PI+margin, M_PI-margin);
-	}
-
-	if( input->keysDown[VK_W] || input->keysDown[VK_A] || input->keysDown[VK_S] || 
-		input->keysDown[VK_D] || input->keysDown[VK_E] || input->keysDown[VK_Q]) {
-
-		if(rightLock || input->keysDown[VK_CONTROL]) look = cross(gUp, right);
-
-		Vec3 acceleration = vec3(0,0,0);
-		if(input->keysDown[VK_SHIFT]) speed *= runBoost;
-		if(input->keysDown[VK_W]) acceleration += normVec3(look);
-		if(input->keysDown[VK_S]) acceleration += -normVec3(look);
-		if(input->keysDown[VK_D]) acceleration += normVec3(right);
-		if(input->keysDown[VK_A]) acceleration += -normVec3(right);
-		if(input->keysDown[VK_E]) acceleration += normVec3(gUp);
-		if(input->keysDown[VK_Q]) acceleration += -normVec3(gUp);
-		*acc += normVec3(acceleration)*speed;
-	}
-
-	ad->playerAcc.z = 0;
-
-	if(ad->playerMode) {
-		// if(input->keysPressed[VK_SPACE]) {
-		if(input->keysDown[VK_SPACE]) {
-			if(ad->playerOnGround) {
-				ad->playerVel += gUp*7.0f;
-				ad->playerOnGround = false;
-			}
-		}
 	}
 
 	// spawn bomb
@@ -2818,22 +2853,22 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	if(spawnBomb) {
 		Entity b;
-		Vec3 bombPos = ad->activeCamPos + vec3(0,0,ad->playerCamZOffset) + ad->activeCamLook*4;
-		initEntity(&b, ET_Rocket, bombPos, ad->activeCamLook, vec3(0.5f), vec3(0,0,0));
-		b.vel = ad->activeCamLook*300;
-		b.acc = ad->activeCamLook*200;
+		Vec3 bombPos = ad->activeCam.pos + ad->activeCam.look*4;
+		initEntity(&b, ET_Rocket, bombPos, ad->activeCam.look, vec3(0.5f), vec3(0,0,0));
+		b.vel = ad->activeCam.look*300;
+		b.acc = ad->activeCam.look*200;
 		b.isMoving = true;
 
 		addEntity(&ad->entityList, &b);
 	}
 
-	// int camEntityId = 0;
-
 	// @update entities
 	for(int i = 0; i < ad->entityList.size; i++) {
 		Entity* e = &ad->entityList.e[i];
+		if(!e->init) continue;
+
 		float dt = ad->dt;
-		Vec3 up = gUp;
+		Vec3 up = vec3(0,0,1);
 
 		switch(e->type) {
 			case ET_Player: {
@@ -2843,7 +2878,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 				bool rightLock = true;
 				float runBoost = 1.5f;
 				float speed = 30;
-				if(input->keysDown[VK_T]) speed = 1000;
 
 				if((!fpsMode && input->mouseButtonDown[1]) || fpsMode) {
 					float turnRate = ad->dt*0.3f;
@@ -2852,10 +2886,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 					float margin = 0.00001f;
 					clamp(&e->rot.y, -M_PI+margin, M_PI-margin);
+
+					e->rot.x = fmod(e->rot.x, (float)M_PI*4);
 				}
 
 				if( input->keysDown[VK_W] || input->keysDown[VK_A] || input->keysDown[VK_S] || 
-					input->keysDown[VK_D] || input->keysDown[VK_E] || input->keysDown[VK_Q]) {
+					input->keysDown[VK_D]) {
 
 					if(rightLock || input->keysDown[VK_CONTROL]) cam.look = cross(up, cam.right);
 
@@ -2865,30 +2901,38 @@ extern "C" APPMAINFUNCTION(appMain) {
 					if(input->keysDown[VK_S]) acceleration += -normVec3(cam.look);
 					if(input->keysDown[VK_D]) acceleration +=  normVec3(cam.right);
 					if(input->keysDown[VK_A]) acceleration += -normVec3(cam.right);
-					if(input->keysDown[VK_E]) acceleration +=  normVec3(up);
-					if(input->keysDown[VK_Q]) acceleration += -normVec3(up);
 					e->acc += normVec3(acceleration)*speed;
 				}
 
-				ad->playerAcc.z = 0;
+				e->acc.z = 0;
+
+				if(ad->playerMode) {
+					// if(input->keysPressed[VK_SPACE]) {
+					if(input->keysDown[VK_SPACE]) {
+						if(player->playerOnGround) {
+							player->vel += up*7.0f;
+							player->playerOnGround = false;
+						}
+					}
+				}
 
 				float gravity = 20.0f;
-				if(!ad->playerOnGround) e->acc += -up*gravity;
+				if(!e->playerOnGround) e->acc += -up*gravity;
 				e->vel = e->vel + e->acc*dt;
 				float friction = 0.01f;
 				e->vel.x *= pow(friction,dt);
 				e->vel.y *= pow(friction,dt);
 				// e->vel *= 0.9f;
 
-				if(ad->playerOnGround) e->vel.z = 0;
+				if(e->playerOnGround) e->vel.z = 0;
 
 				bool playerGroundCollision = false;
 				bool playerCeilingCollision = false;
 				bool playerSideCollision = false;
 
 				if(e->vel != vec3(0,0,0)) {
-					Vec3 pPos = ad->playerPos;
-					Vec3 pSize = ad->playerSize;
+					Vec3 pPos = e->pos;
+					Vec3 pSize = e->dim;
 
 					Vec3 nPos = pPos + -0.5f*e->acc*dt*dt + e->vel*dt;
 
@@ -2968,13 +3012,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 							else playerSideCollision = true;
 						}
 
-							// something went wrong and we reject the move, for now
+						// something went wrong and we reject the move, for now
 						if(collisionCount > 5) {
-								// nPos = ad->playerPos;
+							// nPos = ad->playerPos;
 
 							nPos.z += 5;
-								// ad->playerVel = vec3(0,0,0);
-								// break;
+							// ad->playerVel = vec3(0,0,0);
+							break;	
 						}
 					}
 
@@ -3000,6 +3044,48 @@ extern "C" APPMAINFUNCTION(appMain) {
 					e->pos = nPos;
 				}
 
+				// raycast for touching ground
+				if(ad->playerMode) {
+					if(playerGroundCollision && e->vel.z <= 0) {
+						e->playerOnGround = true;
+						e->vel.z = 0;
+					}
+
+					if(e->playerOnGround) {
+						Vec3 pos = e->pos;
+						Vec3 size = e->dim;
+						Rect3 box = rect3CenDim(pos, size);
+
+						bool groundCollision = false;
+
+						for(int i = 0; i < 4; i++) {
+							Vec3 gp;
+							if(i == 0) 		gp = box.min + size*vec3(0,0,0);
+							else if(i == 1) gp = box.min + size*vec3(1,0,0);
+							else if(i == 2) gp = box.min + size*vec3(0,1,0);
+							else if(i == 3) gp = box.min + size*vec3(1,1,0);
+
+							// drawCube(&ad->pipelineIds, block, vec3(1,1,1)*1.01f, vec4(1,0,1,1), 0, vec3(0,0,0));
+
+							float raycastThreshold = 0.01f;
+							gp -= up*raycastThreshold;
+
+							Vec3 block = coordToVoxelCoord(gp);
+							uchar* blockType = getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, gp);
+
+							if(*blockType > 0) {
+								groundCollision = true;
+								break;
+							}
+						}
+
+						if(groundCollision) {
+							if(e->vel.z <= 0) e->playerOnGround = true;
+						} else {
+							e->playerOnGround = false;
+						}
+					}
+				}
 
 
 			} break;
@@ -3092,7 +3178,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 					} forGoto:
 
 					if(collision) {
-						e->deleted = true;
+						e->init = false;
 						e->exploded = true;
 					}
 
@@ -3193,18 +3279,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 	}
 
-	for(int i = 0; i < ad->entityList.size; i++) {
-		Entity* e = &ad->entityList.e[i];
-
-		if(e->deleted) {
-			removeEntity(&ad->entityList, e->id);
-			i--;
-		}
+	if(ad->playerMode) {
+		ad->activeCam = getCamData(ad->player->pos, ad->player->rot, ad->player->camOff);
+	} else {
+		ad->activeCam = getCamData(ad->cameraEntity->pos, ad->cameraEntity->rot, ad->cameraEntity->camOff);
 	}
 
 	// make sure the meshs around the player are loaded at startup
 	if(second) {
-		Vec2i pPos = coordToMesh(ad->activeCamPos);
+		Vec2i pPos = coordToMesh(ad->activeCam.pos);
 		for(int i = 0; i < 2; i++) {
 			for(int y = -1; y < 2; y++) {
 				for(int x = -1; x < 2; x++) {
@@ -3219,225 +3302,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 	}
 
-	bool playerGroundCollision = false;
-	bool playerCeilingCollision = false;
-	bool playerSideCollision = false;
-
-	float dt = ad->dt;
-	if(!ad->playerMode) {
-		ad->camVel += ad->camAcc*dt;
-		float friction = 0.01f;
-		ad->camVel *= pow(friction,dt);
-
-		if(ad->camVel != vec3(0,0,0)) {
-			ad->camPos = ad->camPos - 0.5f*ad->camAcc*dt*dt + ad->camVel*dt;
-		}
-	} else {
-		float gravity = 20.0f;
-
-		if(!ad->playerOnGround) ad->playerAcc += -gUp*gravity;
-		ad->playerVel = ad->playerVel + ad->playerAcc*dt;
-
-		float friction = 0.01f;
-		ad->playerVel.x *= pow(friction,dt);
-		ad->playerVel.y *= pow(friction,dt);
-			// ad->playerVel *= 0.9f;
-
-		if(ad->playerOnGround) ad->playerVel.z = 0;
-			// if(ad->playerOnGround) ad->playerAcc.z = 0;
-
-		if(ad->playerVel != vec3(0,0,0)) {
-			Vec3 pPos = ad->playerPos;
-			Vec3 pSize = ad->playerSize;
-
-			Vec3 nPos = pPos + -0.5f*ad->playerAcc*dt*dt + ad->playerVel*dt;
-
-			int collisionCount = 0;
-			bool collision = true;
-			while(collision) {
-
-				// get mesh coords that touch the player box
-				Rect3 box = rect3CenDim(nPos, pSize);
-				Vec3i voxelMin = coordToVoxel(box.min);
-				Vec3i voxelMax = coordToVoxel(box.max+1);
-
-				Vec3 collisionBox;
-				collision = false;
-				float minDistance = 100000;
-
-					// check collision with the voxel thats closest
-				for(int x = voxelMin.x; x < voxelMax.x; x++) {
-					for(int y = voxelMin.y; y < voxelMax.y; y++) {
-						for(int z = voxelMin.z; z < voxelMax.z; z++) {
-							Vec3i coord = vec3i(x,y,z);
-							uchar* block = getBlockFromVoxel(ad->voxelHash, ad->voxelHashSize, coord);
-
-							if(*block > 0) {
-								Vec3 cBox = voxelToVoxelCoord(coord);
-								float distance = lenVec3(nPos - cBox);
-								if(minDistance == 100000 || distance > minDistance) {
-									minDistance = distance;
-									collisionBox = cBox;
-								}
-								collision = true;
-							}
-						}
-					}
-				}
-
-				if(collision) {
-					collisionCount++;
-
-					float minDistance;
-					Vec3 dir = vec3(0,0,0);
-					int face;
-
-						// check all the 6 planes and take the one with the shortest distance
-					for(int i = 0; i < 6; i++) {
-						Vec3 n;
-						if(i == 0) 		n = vec3(1,0,0);
-						else if(i == 1) n = vec3(-1,0,0);
-						else if(i == 2) n = vec3(0,1,0);
-						else if(i == 3) n = vec3(0,-1,0);
-						else if(i == 4) n = vec3(0,0,1);
-						else if(i == 5) n = vec3(0,0,-1);
-
-							// assuming voxel size is 1
-							// this could be simpler because the voxels are axis aligned
-						Vec3 p = collisionBox + (n * ((pSize/2) + 0.5));
-						float d = -dot(p, n);
-						float d2 = dot(nPos, n);
-
-							// distances are lower then zero in this case where the point is 
-							// not on the same side as the normal
-						float distance = d + d2;
-
-						if(i == 0 || distance > minDistance) {
-							minDistance = distance;
-							dir = n;
-							face = i;
-						}
-					}
-
-					float error = 0.0001f;
-						// float error = 0;
-					nPos += dir*(-minDistance + error);
-
-					if(face == 5) playerCeilingCollision = true;
-					else if(face == 4) playerGroundCollision = true;
-					else playerSideCollision = true;
-				}
-
-					// something went wrong and we reject the move, for now
-				if(collisionCount > 5) {
-						// nPos = ad->playerPos;
-
-					nPos.z += 5;
-						// ad->playerVel = vec3(0,0,0);
-						// break;
-				}
-			}
-
-			float stillnessThreshold = 0.0001f;
-			if(valueBetween(ad->playerVel.z, -stillnessThreshold, stillnessThreshold)) {
-				ad->playerVel.z = 0;
-			}
-
-			if(playerCeilingCollision) {
-				ad->playerVel.z = 0;
-			}
-
-			if(playerSideCollision) {
-				float sideFriction = 0.0010f;
-				ad->playerVel.x *= pow(sideFriction,dt);
-				ad->playerVel.y *= pow(sideFriction,dt);
-			}
-
-			if(collisionCount > 5) {
-				ad->playerVel = vec3(0,0,0);
-			}
-
-			ad->playerPos = nPos;
-		}
-	}
-
-	// raycast for touching ground
-	if(ad->playerMode) {
-		if(playerGroundCollision && ad->playerVel.z <= 0) {
-			ad->playerOnGround = true;
-			ad->playerVel.z = 0;
-		}
-
-		if(ad->playerOnGround) {
-			Vec3 pos = ad->playerPos;
-			Vec3 size = ad->playerSize;
-			Rect3 box = rect3CenDim(pos, size);
-
-			bool groundCollision = false;
-
-			for(int i = 0; i < 4; i++) {
-				Vec3 gp;
-				if(i == 0) 		gp = box.min + size*vec3(0,0,0);
-				else if(i == 1) gp = box.min + size*vec3(1,0,0);
-				else if(i == 2) gp = box.min + size*vec3(0,1,0);
-				else if(i == 3) gp = box.min + size*vec3(1,1,0);
-
-					// drawCube(&ad->pipelineIds, block, vec3(1,1,1)*1.01f, vec4(1,0,1,1), 0, vec3(0,0,0));
-
-				float raycastThreshold = 0.01f;
-				gp -= gUp*raycastThreshold;
-
-				Vec3 block = coordToVoxelCoord(gp);
-				uchar* blockType = getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, gp);
-
-				if(*blockType > 0) {
-					groundCollision = true;
-					break;
-				}
-			}
-
-			if(groundCollision) {
-				if(ad->playerVel.z <= 0) ad->playerOnGround = true;
-			} else {
-				ad->playerOnGround = false;
-			}
-		}
-	}
-
-	if(ad->playerMode) {
-		ad->activeCamPos = ad->playerPos + vec3(0,0,ad->playerCamZOffset);
-		ad->activeCamLook = pLook;
-		ad->activeCamUp = pUp;
-		ad->activeCamRight = pRight;
-	} else {
-		ad->activeCamPos = ad->camPos;
-		ad->activeCamLook = cLook;
-		ad->activeCamUp = cUp;
-		ad->activeCamRight = cRight;
-	}
-
-	// Entity* camE = &ad->entityList.e[camEntityId];
-	// Camera cam = getCamData(camE->pos, camE->rot);
-	// ad->activeCamPos = cam.pos;
-	// ad->activeCamLook = cam.look;
-	// ad->activeCamUp = cam.up;
-	// ad->activeCamRight = cam.right;
-
-	// Entity* camE = &ad->entityList.e[camEntityId];
-	// Camera cam = getCamData(camE->pos, camE->rot);
-	// ad->activeCamPos = cam.pos;
-	// ad->activeCamLook = cam.look;
-	// ad->activeCamUp = cam.up;
-	// ad->activeCamRight = cam.right;
-
 	// selecting blocks and modifying them
-	// if(input->mouseButtonPressed[0] && ad->playerMode) {
 	if(ad->playerMode) {
 		ad->blockSelected = false;
 
-			// get block in line
-		Vec3 startDir = pLook;
-		Vec3 startPos = ad->playerPos + vec3(0,0,ad->playerCamZOffset);
+		// get block in line
+		Vec3 startDir = ad->activeCam.look;
+		Vec3 startPos = player->pos + player->camOff;
 
 		Vec3 newPos = startPos;
 		int smallerAxis[2];
@@ -3564,7 +3435,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 					// CodeDuplication:
 					// get mesh coords that touch the player box
-					Rect3 box = rect3CenDim(ad->playerPos, ad->playerSize);
+					Rect3 box = rect3CenDim(player->pos, player->dim);
 					Vec3i voxelMin = coordToVoxel(box.min);
 					Vec3i voxelMax = coordToVoxel(box.max+1);
 					bool collision = false;
@@ -3593,69 +3464,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 					if(*block > 0) {
 						*block = 0;
 						*lighting = 255;
-
-
-
-						// Vec3 startPos = vec3(0,0,30);
-						// startPos = ad->selectedBlock;
-						// float sRad = 5;
-
-						// // float resolution = M_2PI;
-						// // float vStep = 0.5f;
-						// float resolution = M_PI;
-						// float vStep = 0.75f;
-
-						// int itCount = sRad*resolution;
-						// for(int it = 0; it < itCount+1; it++) {
-						// 	float off = degreeToRadian(it * (360/(float)itCount));
-						// 	Vec3 dir = rotateVec3(normVec3(vec3(0,1,0)), off, vec3(1,0,0));
-						// 	float off2 = sin(off/(float)2)*sRad;
-
-						// 	float rad = (dir*sRad).y;
-						// 	for(int i = 0; i < 2; i++) {
-						// 		Vec3 pos;
-						// 		if(i == 0) pos = startPos + vec3(0,off2,0);
-						// 		else pos = startPos + vec3(0,-off2,0);
-
-						// 		int itCount = rad*resolution;
-						// 		for(int it = 0; it < itCount+1; it++) {
-						// 			float off = degreeToRadian(it * (360/(float)itCount));
-						// 			Vec3 dir = rotateVec3(normVec3(vec3(1,0,0)), off, vec3(0,-1,0));
-						// 			Vec3 p = pos + dir*rad;
-
-						// 			float cubeSize = 1.0f;
-
-						// 			// dcCube({coordToVoxelCoord(pos + dir*rad), vec3(cubeSize), vec4(1,0.5f,0,1), 0, vec3(0,0,0)});
-						// 			// dcCube({coordToVoxelCoord(pos - dir*rad), vec3(cubeSize), vec4(1,0.5f,0,1), 0, vec3(0,0,0)});
-
-						// 			*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, pos+dir*rad) = 0; 
-						// 			*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos+dir*rad) = 255; 
-						// 			*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, pos-dir*rad) = 0; 
-						// 			*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos-dir*rad) = 255; 
-
-						// 			float off2 = sin(off/(float)2)*rad;
-						// 			for(float z = 0; z < (dir*rad).x; z += vStep) {
-						// 				// dcCube({coordToVoxelCoord(pos + vec3(off2,0, z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
-						// 				// dcCube({coordToVoxelCoord(pos + vec3(off2,0,-z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
-						// 				// dcCube({coordToVoxelCoord(pos - vec3(off2,0,z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
-						// 				// dcCube({coordToVoxelCoord(pos - vec3(off2,0,-z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
-
-						// 				*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos + vec3(off2,0, z)) = 0; 
-						// 				*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos + vec3(off2,0, z)) = 255; 
-						// 				*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos + vec3(off2,0,-z)) = 0; 
-						// 				*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos + vec3(off2,0,-z)) = 255; 
-						// 				*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos - vec3(off2,0, z)) = 0; 
-						// 				*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos - vec3(off2,0, z)) = 255; 
-						// 				*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos - vec3(off2,0,-z)) = 0; 
-						// 				*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos - vec3(off2,0,-z)) = 255; 
-						// 			}
-						// 		}
-						// 	}
-							
-						// 	// drawCube(startPos + dir*rad, vec3(0.1f), vec4(1,0.5f,0,1), 0, vec3(0,0,0));
-						// 	// drawCube(startPos - dir*rad, vec3(0.1f), vec4(1,0.5f,0,1), 0, vec3(0,0,0));
-
-						// }
 					}
 				}
 			}
@@ -3670,10 +3478,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 	Vec3 fogColor = vec3(0.75f, 0.85f, 0.95f);
 
 	// for tech showcase
-		#ifdef STBVOX_CONFIG_LIGHTING_SIMPLE
+	#ifdef STBVOX_CONFIG_LIGHTING_SIMPLE
 	skyColor = skyColor * vec3(0.3f);
 	fogColor = fogColor * vec3(0.3f);
-		#endif 
+	#endif 
 
 	glViewport(0,0, ad->curRes.x, ad->curRes.y);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -3684,7 +3492,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[0]);
 	glClearColor(skyColor.x, skyColor.y, skyColor.z, 0.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-		// glDepthRange(-1.0,1.0);
+	// glDepthRange(-1.0,1.0);
 	glFrontFace(GL_CW);
 
 	glEnable(GL_DEPTH_TEST);
@@ -3709,11 +3517,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glBlendEquation(GL_FUNC_ADD);
 
-	lookAt(ad->activeCamPos, -ad->activeCamLook, ad->activeCamUp, ad->activeCamRight);
+	lookAt(ad->activeCam.pos, -ad->activeCam.look, ad->activeCam.up, ad->activeCam.right);
 	perspective(degreeToRadian(ad->fieldOfView), ad->aspectRatio, ad->nearPlane, ad->farPlane);
 
 	Mat4 view, proj; 
-	viewMatrix(&view, ad->activeCamPos, -ad->activeCamLook, ad->activeCamUp, ad->activeCamRight);
+	viewMatrix(&view, ad->activeCam.pos, -ad->activeCam.look, ad->activeCam.up, ad->activeCam.right);
 	projMatrix(&proj, degreeToRadian(ad->fieldOfView), ad->aspectRatio, ad->nearPlane, ad->farPlane);
 
 	globalGraphicsState->textureUnits[0] = ad->voxelTextures[0];
@@ -3722,7 +3530,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	globalGraphicsState->samplerUnits[1] = ad->voxelSamplers[1];
 	globalGraphicsState->samplerUnits[2] = ad->voxelSamplers[2];
 
-	setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor);
+	setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, fogColor);
 
 
 
@@ -3730,24 +3538,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	#if 1
 	// @worldgen
 	if(reload) {
-		// for(int i = 0; i < ad->vMeshsSize; i++) {
-			// ad->vMeshs[i].generated = false;
-			// ad->vMeshs[i].upToDate = false;
-
-			// startX = randomInt(0, 100000);
-			// startXMod = randomInt(0, 100000);
-			// startYMod = randomInt(0, 100000);
-		// }
-
 		int radius = VIEW_DISTANCE/VOXEL_X;
-
-		// bool generated;
-		// bool upToDate;
-		// bool meshUploaded;
-
-		// // volatile uint activeGeneration;
-		// // volatile uint activeMaking;
-
 
 		for(int y = -radius; y < radius; y++) {
 			for(int x = -radius; x < radius; x++) {
@@ -3756,7 +3547,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 				VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
 				// m->upToDate = false;
 				// m->meshUploaded = false;
-
 				// m->generated = false;
 			}
 		}
@@ -3772,10 +3562,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 	int triangleCount = 0;
 	int drawCounter = 0;
 
-	Vec2i pPos = coordToMesh(ad->activeCamPos);
+	Vec2i pPos = coordToMesh(ad->activeCam.pos);
 	int radius = VIEW_DISTANCE/VOXEL_X;
-	// VoxelMesh* vms = ad->vMeshs;
-	// int* vmsSize = &ad->vMeshsSize;
 
 	// generate the meshes around the player in a spiral by drawing lines and rotating
 	// the directing every time we reach a corner
@@ -3813,10 +3601,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 			}
 
 			// frustum culling
-			Vec3 cp = ad->activeCamPos;
-			Vec3 cl = ad->activeCamLook;
-			Vec3 cu = ad->activeCamUp;
-			Vec3 cr = ad->activeCamRight;
+			Vec3 cp = ad->activeCam.pos;
+			Vec3 cl = ad->activeCam.look;
+			Vec3 cu = ad->activeCam.up;
+			Vec3 cr = ad->activeCam.right;
 
 			float ar = ad->aspectRatio;
 			float fov = degreeToRadian(ad->fieldOfView);
@@ -3898,7 +3686,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	for(int i = 0; i < coordListSize; i++) {
 		Vec2 c = meshToMeshCoord(coordList[i]).xy;
-		float distanceToCamera = lenVec2(ad->activeCamPos.xy - c);
+		float distanceToCamera = lenVec2(ad->activeCam.pos.xy - c);
 		sortList[sortListSize++] = {distanceToCamera, i};
 	}
 
@@ -3930,7 +3718,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 	}
 
-	float waterMark = 22;
+	// float waterMark = 22;
 
 	// draw stencil
 	{
@@ -3948,9 +3736,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 		uint clipPlaneLoc = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "clipPlane");
 		glProgramUniform1i(globalGraphicsState->pipelineIds.voxelVertex, clipPlaneLoc, true);
 		uint clipLoc = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "cPlane");
-		glProgramUniform4f(globalGraphicsState->pipelineIds.voxelVertex, clipLoc, 0,0,1,-waterMark);
+		glProgramUniform4f(globalGraphicsState->pipelineIds.voxelVertex, clipLoc, 0,0,1,-WATER_LEVEL_HEIGHT);
 		uint clipLoc2 = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "cPlane2");
-		glProgramUniform4f(globalGraphicsState->pipelineIds.voxelVertex, clipLoc2, 0,0,-1,waterMark);
+		glProgramUniform4f(globalGraphicsState->pipelineIds.voxelVertex, clipLoc2, 0,0,-1,WATER_LEVEL_HEIGHT);
 
 		for(int i = 0; i < sortListSize; i++) {
 			VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
@@ -3986,11 +3774,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glEnable(GL_DEPTH_TEST);
 		glFrontFace(GL_CCW);
 
-		setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor, vec3(0,0,waterMark*2 + 0.01f), vec3(1,1,-1));
+		setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, fogColor, vec3(0,0,WATER_LEVEL_HEIGHT*2 + 0.01f), vec3(1,1,-1));
 		uint clipPlaneLoc2 = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "clipPlane");
 		glProgramUniform1i(globalGraphicsState->pipelineIds.voxelVertex, clipPlaneLoc2, true);
 		uint clipLo = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelVertex, "cPlane");
-		glProgramUniform4f(globalGraphicsState->pipelineIds.voxelVertex, clipLo, 0,0,-1,waterMark);
+		glProgramUniform4f(globalGraphicsState->pipelineIds.voxelVertex, clipLo, 0,0,-1,WATER_LEVEL_HEIGHT);
 
 		for(int i = 0; i < sortListSize; i++) {
 			VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
@@ -4020,7 +3808,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// draw water
 	{
-		setupVoxelUniforms(vec4(ad->activeCamPos, 1), 0, 1, 2, view, proj, fogColor);
+		setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, fogColor);
 		uint loc = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelFragment, "alphaTest");
 		glProgramUniform1f(globalGraphicsState->pipelineIds.voxelFragment, loc, 0.5f);
 		for(int i = sortListSize-1; i >= 0; i--) {
@@ -4041,13 +3829,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 	dcLineWidth({3});
 
 	if(!ad->playerMode) {
-		Vec3 pCamPos = ad->playerPos + vec3(0,0,ad->playerCamZOffset);
-		dcLine({pCamPos, pCamPos + pLook*0.5f, vec4(1,0,0,1)});
-		dcLine({pCamPos, pCamPos + pUp*0.5f, vec4(0,1,0,1)});
-		dcLine({pCamPos, pCamPos + pRight*0.5f, vec4(0,0,1,1)});
+		Vec3 pCamPos = player->pos + player->camOff;
+		dcLine({pCamPos, pCamPos + ad->activeCam.look*0.5f, vec4(1,0,0,1)});
+		dcLine({pCamPos, pCamPos + ad->activeCam.up*0.5f, vec4(0,1,0,1)});
+		dcLine({pCamPos, pCamPos + ad->activeCam.right*0.5f, vec4(0,0,1,1)});
 
 		dcPolygonMode({POLYGON_MODE_LINE});
-		dcCube({ad->playerPos, ad->playerSize, vec4(1,1,1,1), 0, vec3(0,0,0)});
+		dcCube({player->pos, player->dim, vec4(1,1,1,1), 0, vec3(0,0,0)});
 		dcPolygonMode({POLYGON_MODE_FILL});
 
 	} else {
@@ -4071,13 +3859,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	#define PVEC3(v) v.x, v.y, v.z
 	#define PVEC2(v) v.x, v.y
-	dcText({fillString("Pos  : (%f,%f,%f)", PVEC3(ad->activeCamPos)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
-	dcText({fillString("Look : (%f,%f,%f)", PVEC3(ad->activeCamLook)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
-	dcText({fillString("Up   : (%f,%f,%f)", PVEC3(ad->activeCamUp)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
-	dcText({fillString("Right: (%f,%f,%f)", PVEC3(ad->activeCamRight)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
-	dcText({fillString("Rot  : (%f,%f)", PVEC2(ad->camRot)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
-	dcText({fillString("Vec  : (%f,%f,%f)", PVEC3(ad->playerVel)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
-	dcText({fillString("Acc  : (%f,%f,%f)", PVEC3(ad->playerAcc)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
+	dcText({fillString("Pos  : (%f,%f,%f)", PVEC3(ad->activeCam.pos)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
+	dcText({fillString("Look : (%f,%f,%f)", PVEC3(ad->activeCam.look)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
+	dcText({fillString("Up   : (%f,%f,%f)", PVEC3(ad->activeCam.up)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
+	dcText({fillString("Right: (%f,%f,%f)", PVEC3(ad->activeCam.right)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
+	dcText({fillString("Rot  : (%f,%f)", PVEC2(player->rot)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
+	dcText({fillString("Vec  : (%f,%f,%f)", PVEC3(player->vel)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
+	dcText({fillString("Acc  : (%f,%f,%f)", PVEC3(player->acc)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
 	dcText({fillString("Draws: (%i)", drawCounter), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
 	dcText({fillString("Quads: (%i)", triangleCount), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
 
@@ -4283,7 +4071,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	int success = stbvox_make_mesh(&mm);
 
 
-	// Vec3 pos = ad->activeCamPos + ad->activeCamLook * 20;
+	// Vec3 pos = ad->activeCam.pos + ad->activeCam.look * 20;
 	// stbvox_set_mesh_coordinates(&mm, pos.x, pos.y, pos.z);
 	stbvox_set_mesh_coordinates(&mm, 0,0,30);
 
@@ -4361,6 +4149,253 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
+
+	// glBindProgramPipeline(globalGraphicsState->pipelineIds.programCube);
+
+	// Vec3 verts[4] = {p0, p1};
+	// glProgramUniform3fv(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexVertices, 4, verts[0].e);
+	// glProgramUniform4f(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexColor, color.r, color.g, color.b, color.a);
+	// glProgramUniform1i(globalGraphicsState->pipelineIds.cubeVertex, globalGraphicsState->pipelineIds.cubeVertexMode, true);
+
+	// glDrawArrays(GL_LINES, 0, 2);
+
+
+
+
+
+
+		glBindProgramPipeline(globalGraphicsState->pipelineIds.programCube);
+
+		Vec3 ep = vec3(0,0,70);
+
+		static ParticleEmitter emitter;
+		static bool emitterInit = true; 
+		if(emitterInit) {
+			emitter = {};
+			// emitter.particleListSize = 1024;
+			emitter.particleListSize = 100000;
+			emitter.particleList = getPArray(Particle, emitter.particleListSize);
+			emitter.spawnRate = 0.001f;
+
+			emitter.pos = vec3(0,0,70);
+			emitter.friction = 0.5f;
+
+			emitterInit = false;
+		}
+
+		static float dt = 0;
+		dt += ad->dt;
+		emitter.pos = ep + vec3(sin(dt),0,0);
+		drawCube(emitter.pos, vec3(0.5f), vec4(0,0,0,0.2f), 0, vec3(0,0,0));
+
+		{
+			ParticleEmitter* e = &emitter;
+			float dt = ad->dt;
+
+			e->dt += dt;
+			while(e->dt >= 0.1f) {
+				e->dt -= e->spawnRate;
+
+				if(e->particleListCount < e->particleListSize) {
+					Particle p = {};
+
+					p.pos = e->pos;
+					Vec3 dir = normVec3(vec3(randomFloat(-1,1,0.01f), randomFloat(-1,1,0.01f), randomFloat(-1,1,0.01f)));
+					p.vel = dir * 1.0f;
+					// p.acc = -dir*0.2f;
+					p.acc = dir*0.2f;
+
+					// float cOff = randomFloat(-0.2,0.2, 0.001f);
+					// p.color = vec4(0.8f + cOff, 0.1f + cOff, 0.6f + cOff, 1.0f);
+					p.color = vec4(0.8f, 0.1f, 0.6f, 1.0f);
+					p.velColor = vec4(-0.2f,0,0.2f,-0.2f);
+					// p.accColor = vec4(-0.2f,0,0.2f,0);
+
+					// p.size = vec3(0.1f);
+					p.size = vec3(0.1f, 0.1f, 0.005f);
+					// p.size = vec3(randomFloat(0.01f,0.2f,0.01f),randomFloat(0.01f,0.2f,0.01f),randomFloat(0.01f,0.2f,0.01f));
+					// p.velSize = vec3(-0.02f);
+					// p.accSize = ;
+
+					p.rot = vec3(degreeToRadian(randomInt(0,360)), degreeToRadian(randomInt(0,360)), degreeToRadian(randomInt(0,360)));
+					Vec3 rot = vec3(randomFloat(0,1,0.01f),randomFloat(0,1,0.01f),randomFloat(0,1,0.01f));
+					p.velRot = rot*10;
+					p.accRot = -rot*2.0f;
+
+					p.timeToLive = 5;
+
+					e->particleList[e->particleListCount++] = p;
+				}
+			}
+		}
+
+		particleEmitterUpdate(&emitter, ad->dt);
+
+		for(int i = 0; i < emitter.particleListCount; i++) {
+			Particle* p = emitter.particleList + i;
+
+			Vec3 qr = p->rot;
+			Quat q = quat(qr.x, vec3(1,0,0)) * quat(qr.y, vec3(0,1,0)) * quat(qr.z, vec3(0,0,1));
+			drawCube(p->pos, p->size, p->color, q);
+		}
+
+
+
+
+
+	// static uint vertexBufferId = 0;
+	// static Vec3* vertexBuffer;
+	// if(vertexBuffer == 0) {
+	// 	glCreateBuffers(1, &vertexBufferId);
+	// 	vertexBuffer = (Vec3*)getPMemory(sizeof(Vec3)*100);
+	// 	// glNamedBufferData(vertexBufferId, sizeof(Vec3)*100, vertexBuffer, GL_DYNAMIC_DRAW);
+	// 	glNamedBufferData(vertexBufferId, sizeof(Vec3)*100, vertexBuffer, GL_STREAM_DRAW);
+
+	// 	// vertexBuffer[0] = vec3(0,0,40);
+	// 	// vertexBuffer[1] = vec3(10,0,40);
+	// 	// vertexBuffer[2] = vec3(10,10,40);
+	// 	// glNamedBufferSubData(vertexBufferId, 0, 3*sizeof(Vec3), vertexBuffer);
+
+	// 	glBindBuffer(GL_ARRAY_BUFFER, vertexBufferId);
+
+	// 	// uint vaLoc = glGetAttribLocation(globalGraphicsState->pipelineIds.allVertex, "vertex");
+	// 	// glVertexAttribPointer(vaLoc, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
+	// 	// glEnableVertexAttribArray(vaLoc);
+	// }
+
+
+
+	// glBindProgramPipeline(globalGraphicsState->pipelineIds.programAll);
+
+	// GLuint uniModelView = glGetUniformLocation(globalGraphicsState->pipelineIds.allVertex, "modelView");
+	// // GLuint uniModel = glGetUniformLocation(globalGraphicsState->pipelineIds.allVertex, "model");
+	// // GLuint uniView = glGetUniformLocation(globalGraphicsState->pipelineIds.allVertex, "view");
+	// // GLuint uniProj = glGetUniformLocation(globalGraphicsState->pipelineIds.allVertex, "proj");
+
+	// GLuint uniColor = glGetUniformLocation(globalGraphicsState->pipelineIds.allVertex, "color");
+
+	// uint vaLoc = glGetAttribLocation(globalGraphicsState->pipelineIds.allVertex, "vertex");
+
+	// glBindBuffer(GL_ARRAY_BUFFER, vertexBufferId);
+	// glVertexAttribPointer(vaLoc, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
+	// glEnableVertexAttribArray(vaLoc);
+
+	// view; viewMatrix(&view, ad->activeCam.pos, -ad->activeCam.look, ad->activeCam.up, ad->activeCam.right);
+	// proj; projMatrix(&proj, degreeToRadian(ad->fieldOfView), ad->aspectRatio, ad->nearPlane, ad->farPlane);
+
+	// // glProgramUniformMatrix4fv(globalGraphicsState->pipelineIds.allVertex, uniView, 1, 1, view.e);
+	// // glProgramUniformMatrix4fv(globalGraphicsState->pipelineIds.allVertex, uniProj, 1, 1, proj.e);
+
+
+	// int intervals = 10000;
+
+	// glBindBuffer(GL_ARRAY_BUFFER, vertexBufferId);
+
+
+	// vertexBuffer[0] = vec3(-0.5f,-0.5f,-0.5f);
+	// vertexBuffer[1] = vec3( 0.5f,-0.5f,-0.5f);
+	// vertexBuffer[2] = vec3( 0.5f, 0.5f,-0.5f);
+	// vertexBuffer[3] = vec3(-0.5f, 0.5f,-0.5f);
+	// vertexBuffer[4] = vec3(-0.5f,-0.5f, 0.5f);
+	// vertexBuffer[5] = vec3(-0.5f, 0.5f, 0.5f);
+	// vertexBuffer[6] = vec3( 0.5f, 0.5f, 0.5f);
+	// vertexBuffer[7] = vec3( 0.5f,-0.5f, 0.5f);
+	// vertexBuffer[8] = vec3(-0.5f, 0.5f,-0.5f);
+	// vertexBuffer[9] = vec3( 0.5f, 0.5f,-0.5f);
+	// vertexBuffer[10] = vec3( 0.5f, 0.5f, 0.5f);
+	// vertexBuffer[11] = vec3(-0.5f, 0.5f, 0.5f);
+	// vertexBuffer[12] = vec3(-0.5f,-0.5f,-0.5f);
+	// vertexBuffer[13] = vec3(-0.5f,-0.5f, 0.5f);
+	// vertexBuffer[14] = vec3( 0.5f,-0.5f, 0.5f);
+	// vertexBuffer[15] = vec3( 0.5f,-0.5f,-0.5f);
+	// vertexBuffer[16] = vec3( 0.5f,-0.5f,-0.5f);
+	// vertexBuffer[17] = vec3( 0.5f,-0.5f, 0.5f);
+	// vertexBuffer[18] = vec3( 0.5f, 0.5f, 0.5f);
+	// vertexBuffer[19] = vec3( 0.5f, 0.5f,-0.5f);
+	// vertexBuffer[20] = vec3(-0.5f,-0.5f,-0.5f);
+	// vertexBuffer[21] = vec3(-0.5f, 0.5f,-0.5f);
+	// vertexBuffer[22] = vec3(-0.5f, 0.5f, 0.5f);
+	// vertexBuffer[23] = vec3(-0.5f,-0.5f, 0.5f);
+	// glNamedBufferSubData(vertexBufferId, 0, 4*sizeof(Vec3), vertexBuffer);
+
+
+	// __int64 t = getTimestamp();
+	// for(int i = 0; i < intervals; i++) {
+
+	// 	glBindBuffer(GL_ARRAY_BUFFER, vertexBufferId);
+
+	// 	// vertexBuffer[0] = vec3(-0.5f,-0.5f,-0.5f);
+	// 	// vertexBuffer[1] = vec3( 0.5f,-0.5f,-0.5f);
+	// 	// vertexBuffer[2] = vec3( 0.5f, 0.5f,-0.5f);
+	// 	// vertexBuffer[3] = vec3(-0.5f, 0.5f,-0.5f);
+	// 	// vertexBuffer[4] = vec3(-0.5f,-0.5f, 0.5f);
+	// 	// vertexBuffer[5] = vec3(-0.5f, 0.5f, 0.5f);
+	// 	// vertexBuffer[6] = vec3( 0.5f, 0.5f, 0.5f);
+	// 	// vertexBuffer[7] = vec3( 0.5f,-0.5f, 0.5f);
+	// 	// vertexBuffer[8] = vec3(-0.5f, 0.5f,-0.5f);
+	// 	// vertexBuffer[9] = vec3( 0.5f, 0.5f,-0.5f);
+	// 	// vertexBuffer[10] = vec3( 0.5f, 0.5f, 0.5f);
+	// 	// vertexBuffer[11] = vec3(-0.5f, 0.5f, 0.5f);
+	// 	// vertexBuffer[12] = vec3(-0.5f,-0.5f,-0.5f);
+	// 	// vertexBuffer[13] = vec3(-0.5f,-0.5f, 0.5f);
+	// 	// vertexBuffer[14] = vec3( 0.5f,-0.5f, 0.5f);
+	// 	// vertexBuffer[15] = vec3( 0.5f,-0.5f,-0.5f);
+	// 	// vertexBuffer[16] = vec3( 0.5f,-0.5f,-0.5f);
+	// 	// vertexBuffer[17] = vec3( 0.5f,-0.5f, 0.5f);
+	// 	// vertexBuffer[18] = vec3( 0.5f, 0.5f, 0.5f);
+	// 	// vertexBuffer[19] = vec3( 0.5f, 0.5f,-0.5f);
+	// 	// vertexBuffer[20] = vec3(-0.5f,-0.5f,-0.5f);
+	// 	// vertexBuffer[21] = vec3(-0.5f, 0.5f,-0.5f);
+	// 	// vertexBuffer[22] = vec3(-0.5f, 0.5f, 0.5f);
+	// 	// vertexBuffer[23] = vec3(-0.5f,-0.5f, 0.5f);
+
+	// 	// vertexBuffer[0] = vec3(0,0,100);
+	// 	// vertexBuffer[1] = vec3(10,0,100);
+	// 	// vertexBuffer[2] = vec3(10,10,100);
+	// 	// vertexBuffer[3] = vec3(0,10,100);
+	// 	// glNamedBufferSubData(vertexBufferId, 0, 24*sizeof(Vec3), vertexBuffer);
+
+	// 	Mat4 sm; scaleMatrix(&sm, vec3(1,1,1));
+	// 	Mat4 rm; quatRotationMatrix(&rm, quat(0, vec3(0,0,0)));
+	// 	Mat4 tm; translationMatrix(&tm, vec3(0,0,0));
+	// 	// Mat4 model = tm*rm*sm;
+	// 	Mat4 modelView = proj*view*tm*rm*sm;
+	// 	// Mat4 modelView = proj*view;
+
+	// 	glProgramUniformMatrix4fv(globalGraphicsState->pipelineIds.allVertex, uniModelView, 1, 1, modelView.e);
+	// 	// glProgramUniformMatrix4fv(globalGraphicsState->pipelineIds.allVertex, uniModel, 1, 1, model.e);
+	// 	glProgramUniform4f(globalGraphicsState->pipelineIds.allVertex, uniColor, 1,0,1,1);
+
+	// 	glDrawArrays(GL_QUADS, 0, 24);
+
+	// 	// glBindProgramPipeline(globalGraphicsState->pipelineIds.programCube);
+	// 	// glBindProgramPipeline(globalGraphicsState->pipelineIds.programAll);
+
+	// }
+
+	// printf("%i \n", (getTimestamp() - t) / intervals);
+
+
+	// glBindProgramPipeline(globalGraphicsState->pipelineIds.programCube);
+
+	// intervals = 10000;
+
+	// t = getTimestamp();
+	// for(int i = 0; i < intervals; i++) {
+	// 	// drawQuad(vec3(0,0,100), vec3(10,0,100), vec3(10,10,100), vec3(0,10,100), vec4(1,0,1,1));
+
+	// 	drawCube(vec3(0,0,0), vec3(1,1,1), vec4(1,0,1,1), 0, vec3(0,0,0));
+	// }
+
+	// printf("%i \n", (getTimestamp() - t) / intervals);
+
+
+
+
+	/*
+		switching shader -> 550 ticks
+		using namedBufferSubData vs uniforms for vertices -> 2400 ticks vs 400 ticks
+	*/
 
 
 
