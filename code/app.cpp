@@ -48,23 +48,19 @@
 - advance timestep when window not in focus (stop game when not in focus)
 - reduce number of thread queue pushes
 - insert and init mesh not thread proof, make sure every mesh is initialized before generating
-- make voxel drop in tutorial code for stb_voxel
 - change bubblesort to mergesort\radixsort
 - implement sun and clouds that block beams of light
 - glowstone emmiting light
-- put code in for rect3i
-- pink noise from old projects
+- make voxel drop in tutorial code for stb_voxel
 - stb_voxel push block_selector, alpha test, clipping in voxel vertex shader
 - activate opengl debug output!
 - small menu
 - rocket launcher
-- make waterlevel a variable in generation and such
 - antialiased pixel graphics with neighbour sampling 
 - macros for array stuff so i dont have to inline updateMeshList[updateMeshListSize++] every time 
 - level of detail for world gen back row								
 - 32x32 gen chunks
 
-- make shader code more straight forward
 - put in a cubemap to make things prettier and not rely on white clear color as the sky
 
 //-------------------------------------
@@ -78,6 +74,11 @@
 - game input gets stuck when buttons are pressed right at the start
 - sort key assert firing randomly
 - hotload gets stuck sometimes, thread that won't complete
+*/
+
+/*
+	switching shader -> 550 ticks
+	using namedBufferSubData vs uniforms for vertices -> 2400 ticks vs 400 ticks
 */
 
 MemoryBlock* globalMemory;
@@ -421,7 +422,22 @@ const char* vertexShaderCube = GLSL (
 	uniform vec4 setColor;
 	uniform vec4 cPlane;
 
+
+	const ivec2 quad_uv[] = ivec2[] (
+		ivec2(  0.0,  0.0 ),
+		ivec2(  0.0,  1.0 ),
+		ivec2(  1.0,  1.0 ),
+		ivec2(  1.0,  0.0 )
+	);
+	// uniform vec4 setUV = vec4(0.0,1.0,0.0,1.0);
+	uniform vec4 setUV;
+	smooth out vec3 uv;
+
 	void main() {
+		ivec2 p = quad_uv[gl_VertexID];
+		// uv = vec3(setUV[p.x], setUV[2 + p.y], texZ);
+		uv = vec3(setUV[p.x], setUV[2 + p.y], 0);
+
 		Color = setColor;
 		float v = gl_VertexID;
 	// Color = setColor * vec4(v*0.1f,v*0.1f,v*0.1f,1);
@@ -459,15 +475,21 @@ const char* vertexShaderCube = GLSL (
 const char* fragmentShaderCube = GLSL (
 	layout(binding = 0) uniform sampler2D s;
 
-	// smooth in vec2 uv;
+	smooth in vec3 uv;
 	in vec4 Color;
 
 	layout(depth_less) out float gl_FragDepth;
 	out vec4 color;
 
+	uniform float alphaTest = 0.5f;
+
 	void main() {
-	// color = texture(s, uv) * Color;
-		color = Color;
+		// color = texture(s, uv) * Color;
+		color = texture(s, uv.xy) * Color;
+
+		if(color.a <= alphaTest) discard;
+
+		// color = Color;
 	}
 );
 
@@ -578,6 +600,7 @@ enum CubeUniforms {
 	CUBE_UNIFORM_MODE,
 	CUBE_UNIFORM_VERTICES,
 	CUBE_UNIFORM_CPLANE,
+	CUBE_UNIFORM_UV,
 	CUBE_UNIFORM_SIZE,
 };
 
@@ -589,6 +612,7 @@ ShaderUniformType cubeShaderUniformType[] = {
 	{UNIFORM_TYPE_INT,  "mode"},
 	{UNIFORM_TYPE_VEC3, "vertices"},
 	{UNIFORM_TYPE_VEC4, "cPlane"},
+	{UNIFORM_TYPE_VEC4, "setUV"},
 };
 
 enum QuadUniforms {
@@ -665,44 +689,134 @@ struct Shader {
 	ShaderUniform* uniforms;
 };
 
+enum TextureId {
+	TEXTURE_WHITE = 0,
+	TEXTURE_RECT,
+	TEXTURE_CIRCLE,
+	TEXTURE_TEST,
+	TEXTURE_SIZE,
+};
+
+char* texturePaths[] = {
+	"..\\data\\white.png",
+	"..\\data\\rect.png",
+	"..\\data\\circle.png",
+	"..\\data\\test.png",
+};
+
+struct Texture {
+	uint id;
+	Vec2i dim;
+	int channels;
+	int levels;
+};
+
+Texture loadTexture(unsigned char* buffer, int w, int h, int mipLevels, int internalFormat, int channelType, int channelFormat) {
+	uint textureId;
+	glCreateTextures(GL_TEXTURE_2D, 1, &textureId);
+	glTextureStorage2D(textureId, mipLevels, internalFormat, w, h);
+	glTextureSubImage2D(textureId, 0, 0, 0, w, h, channelType, channelFormat, buffer);
+	glGenerateTextureMipmap(textureId);
+
+	Texture tex = {textureId, vec2i(w,h), 4, 1};
+
+	return tex;
+}
+
+Texture loadTextureFile(char* path, int mipLevels, int internalFormat, int channelType, int channelFormat) {
+	int x,y,n;
+	unsigned char* stbData = stbi_load(path, &x, &y, &n, 0);
+
+	Texture tex = loadTexture(stbData, x, y, mipLevels, internalFormat, channelType, channelFormat);
+	stbi_image_free(stbData);	
+
+	return tex;
+}
+
+enum FontId {
+	FONT_LIBERATION_MONO = 0,
+	FONT_SOURCESANS_PRO,
+	FONT_CONSOLAS,
+	FONT_SIZE,
+};
+
+char* fontPaths[] = {
+	"..\\data\\LiberationMono-Bold.ttf",
+	"..\\data\\SourceSansPro-Regular.ttf",
+	"..\\data\\consola.ttf",
+};
+
+struct Font {
+	char* fileBuffer;
+	Texture tex;
+	int glyphStart, glyphCount;
+	stbtt_bakedchar* cData;
+	int height;
+};
+
 struct GraphicsState {
 	Shader shaders[SHADER_SIZE];
-
-	// // Mesh mesh;
-
-	// uint programs[16];
-	// uint textures[16];
-	// int texCount;
-	// uint samplers[16];
-
-	// uint frameBuffers[16];
-	// uint renderBuffers[16];
-	// uint frameBufferTextures[2];
-
-	// float aspectRatio;
-	// float fieldOfView;
-	// float nearPlane;
-	// float farPlane;
-
-	// // Font fontArial;
-
-	// Vec2i curRes;
-	// int msaaSamples;
-	// Vec2i fboRes;
-	// bool useNativeRes;
-
-	// // VoxelData;
-
-	// uint voxelShader;
-	// uint voxelVertex;
-	// uint voxelFragment;
-
-	// GLuint voxelSamplers[3];
-	// GLuint voxelTextures[3];
+	Texture textures[TEXTURE_SIZE];
+	Font fonts[FONT_SIZE];
 
 	GLuint textureUnits[16];
 	GLuint samplerUnits[16];
 };
+
+Shader* getShader(int shaderId) {
+	Shader* s = globalGraphicsState->shaders + shaderId;
+	return s;
+}
+
+Texture* getTexture(int textureId) {
+	Texture* t = globalGraphicsState->textures + textureId;
+	return t;
+}
+
+Font* getFont(int fontId) {
+	Font* f = globalGraphicsState->fonts + fontId;
+	return f;
+}
+
+Font* getFont(int fontId, int height) {
+	Font* f = globalGraphicsState->fonts + fontId;
+
+	if(f->height != height) {
+		Font font;
+		char* path = fontPaths[fontId];
+
+		// font.fileBuffer = (char*)getPMemory(fileSize(path) + 1);
+		char* fileBuffer = getTArray(char, fileSize(path) + 1);
+
+		readFileToBuffer(fileBuffer, path);
+		Vec2i size = vec2i(512,512);
+		unsigned char* fontBitmapBuffer = (unsigned char*)getTMemory(size.x*size.y);
+		unsigned char* fontBitmap = (unsigned char*)getTMemory(size.x*size.y*4);
+		
+		font.height = height;
+		font.glyphStart = 32;
+		font.glyphCount = 95;
+		font.cData = (stbtt_bakedchar*)getPMemory(sizeof(stbtt_bakedchar)*font.glyphCount);
+		stbtt_BakeFontBitmap((unsigned char*)fileBuffer, 0, font.height, fontBitmapBuffer, size.w, size.h, font.glyphStart, font.glyphCount, font.cData);
+		for(int i = 0; i < size.w*size.h; i++) {
+			fontBitmap[i*4] = fontBitmapBuffer[i];
+			fontBitmap[i*4+1] = fontBitmapBuffer[i];
+			fontBitmap[i*4+2] = fontBitmapBuffer[i];
+			fontBitmap[i*4+3] = fontBitmapBuffer[i];
+		}
+
+		Texture tex = loadTexture(fontBitmap, size.w, size.h, 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+		font.tex = tex;
+
+		globalGraphicsState->fonts[fontId] = font;
+	}
+	return f;
+}
+
+void bindShader(int shaderId) {
+	int shader = globalGraphicsState->shaders[shaderId].program;
+	glBindProgramPipeline(shader);
+}
 
 void pushUniform(uint shaderId, int shaderStage, uint uniformId, void* data, int count = 1) {
 	Shader* s = globalGraphicsState->shaders + shaderId;
@@ -741,6 +855,15 @@ void pushUniform(uint shaderId, int shaderStage, uint uniformId, float f0, float
 	Vec4 d = vec4(f0, f1, f2, f3);
 	pushUniform(shaderId, shaderStage, uniformId, &d);
 };
+void pushUniform(uint shaderId, int shaderStage, uint uniformId, Vec4 v) {
+	pushUniform(shaderId, shaderStage, uniformId, v.e);
+};
+void pushUniform(uint shaderId, int shaderStage, uint uniformId, Vec3 v) {
+	pushUniform(shaderId, shaderStage, uniformId, v.e);
+};
+void pushUniform(uint shaderId, int shaderStage, uint uniformId, Mat4 m) {
+	pushUniform(shaderId, shaderStage, uniformId, m.e);
+};
 
 void getUniform(uint shaderId, int shaderStage, uint uniformId, float* data) {
 	Shader* s = globalGraphicsState->shaders + shaderId;
@@ -778,26 +901,6 @@ struct Mesh {
 	uint id;
 };
 
-uint loadTexture(unsigned char* buffer, int w, int h, int mipLevels, int internalFormat, int channelType, int channelFormat) {
-	uint textureId;
-	glCreateTextures(GL_TEXTURE_2D, 1, &textureId);
-	glTextureStorage2D(textureId, mipLevels, internalFormat, w, h);
-	glTextureSubImage2D(textureId, 0, 0, 0, w, h, channelType, channelFormat, buffer);
-	glGenerateTextureMipmap(textureId);
-
-	return textureId;
-}
-
-uint loadTextureFile(char* path, int mipLevels, int internalFormat, int channelType, int channelFormat) {
-	int x,y,n;
-	unsigned char* stbData = stbi_load(path, &x, &y, &n, 0);
-
-	int result = loadTexture(stbData, x, y, mipLevels, internalFormat, channelType, channelFormat);
-	stbi_image_free(stbData);	
-
-	return result;
-}
-
 uint createShader(const char* vertexShaderString, const char* fragmentShaderString, uint* vId, uint* fId) {
 	*vId = glCreateShaderProgramv(GL_VERTEX_SHADER, 1, &vertexShaderString);
 	*fId = glCreateShaderProgramv(GL_FRAGMENT_SHADER, 1, &fragmentShaderString);
@@ -832,15 +935,6 @@ void perspective(float fov, float aspect, float n, float f) {
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_PROJ, proj.e);
 }
 
-struct Font {
-	char* fileBuffer;
-	Vec2i size;
-	int glyphStart, glyphCount;
-	stbtt_bakedchar* cData;
-	uint texId;
-	int height;
-};
-
 void drawText(char* text, Font* font, Vec2 pos, Vec4 color, int vAlign = 0, int hAlign = 0, int shadow = 0, Vec4 shadowColor = vec4(0,0,0,1)) {
 	int length = strLen(text);
 	Vec2 textDim = stbtt_GetTextDim(font->cData, font->height, font->glyphStart, text);
@@ -860,13 +954,14 @@ void drawText(char* text, Font* font, Vec2 pos, Vec4 color, int vAlign = 0, int 
 		}
 
 		stbtt_aligned_quad q;
-		stbtt_GetBakedQuad(font->cData, font->size.w, font->size.h, t-font->glyphStart, &pos.x, &pos.y, &q, 1);
+		// stbtt_GetBakedQuad(font->cData, font->size.w, font->size.h, t-font->glyphStart, &pos.x, &pos.y, &q, 1);
+		stbtt_GetBakedQuad(font->cData, font->tex.dim.w, font->tex.dim.h, t-font->glyphStart, &pos.x, &pos.y, &q, 1);
 
 		Rect r = rect(q.x0, q.y0, q.x1, q.y1);
 		if(shadow > 0) {
-			drawRect(rectAddOffset(r, shadowOffset), rect(q.s0,q.t0,q.s1,q.t1), shadowColor, 3);
+			drawRect(rectAddOffset(r, shadowOffset), rect(q.s0,q.t0,q.s1,q.t1), shadowColor, font->tex.id);
 		}
-		drawRect(r, rect(q.s0,q.t0,q.s1,q.t1), color, 3);
+		drawRect(r, rect(q.s0,q.t0,q.s1,q.t1), color, font->tex.id);
 	}
 }
 
@@ -949,17 +1044,6 @@ uint createSampler(float ani, int wrapS, int wrapT, int magF, int minF) {
 
 	return result;
 }
-
-
-
-struct Texture {
-	int id;
-	int width;
-	int height;
-	int channels;
-	int levels;
-};
-
 
 
 
@@ -1869,12 +1953,12 @@ void setupVoxelUniforms(Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit
 void drawVoxelMesh(VoxelMesh* m, int drawMode = 0) {
 	glBindSamplers(0,16,globalGraphicsState->samplerUnits);
 
-	glBindProgramPipeline(globalGraphicsState->shaders[SHADER_VOXEL].program);
+	glBindProgramPipeline(getShader(SHADER_VOXEL)->program);
 	pushUniform(SHADER_VOXEL, 2, VOXEL_UNIFORM_TRANSFORM, m->transform[0], 3);
 
 	if(drawMode == 0 || drawMode == 2) {
 		glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
-		int vaLoc = glGetAttribLocation(globalGraphicsState->shaders[SHADER_VOXEL].vertex, "attr_vertex");
+		int vaLoc = glGetAttribLocation(getShader(SHADER_VOXEL)->vertex, "attr_vertex");
 		glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 0, (void*)0);
 		glEnableVertexAttribArray(vaLoc);
 
@@ -1886,7 +1970,7 @@ void drawVoxelMesh(VoxelMesh* m, int drawMode = 0) {
 
 	if(drawMode == 0 || drawMode == 1) {
 		glBindBuffer(GL_ARRAY_BUFFER, m->bufferTransId);
-		int vaLoc = glGetAttribLocation(globalGraphicsState->shaders[SHADER_VOXEL].vertex, "attr_vertex");
+		int vaLoc = glGetAttribLocation(getShader(SHADER_VOXEL)->vertex, "attr_vertex");
 		glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 0, (void*)0);
 		glEnableVertexAttribArray(vaLoc);
 
@@ -1895,14 +1979,6 @@ void drawVoxelMesh(VoxelMesh* m, int drawMode = 0) {
 
 		glDrawArrays(GL_QUADS, 0, m->quadCountTrans*4);
 	}
-}
-
-void getCamData(Vec3 look, Vec2 rot, Vec3 gUp, Vec3* cLook, Vec3* cRight, Vec3* cUp) {
-	rotateVec3(&look, rot.x, gUp);
-	rotateVec3(&look, rot.y, normVec3(cross(gUp, look)));
-	*cUp = normVec3(cross(look, normVec3(cross(gUp, look))));
-	*cRight = normVec3(cross(gUp, look));
-	*cLook = -look;
 }
 
 struct Bomb {
@@ -1963,11 +2039,7 @@ struct AppData {
 
 	Camera activeCam;
 
-	uint programs[16];
-	uint textures[16];
-	int texCount;
 	uint samplers[16];
-
 	uint frameBuffers[16];
 	uint renderBuffers[16];
 	uint frameBufferTextures[16];
@@ -1976,9 +2048,6 @@ struct AppData {
 	float fieldOfView;
 	float nearPlane;
 	float farPlane;
-
-	Font font;
-	Font font2;
 
 	Vec2i curRes;
 	int msaaSamples;
@@ -2198,9 +2267,14 @@ struct Particle {
 	Vec3 velSize;
 	Vec3 accSize;
 
-	Vec3 rot;
-	Vec3 velRot;
-	Vec3 accRot;
+	// Vec3 rot;
+	// Vec3 velRot;
+	// Vec3 accRot;
+
+	float rot;
+	float rot2;
+	float velRot;
+	float accRot;
 
 	float dt;
 	float timeToLive;
@@ -2420,25 +2494,17 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-		glEnable(GL_DEBUG_OUTPUT);
-		glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-		// glEnable(GL_FRAMEBUFFER_SRGB);
-		// glEnable(GL_DEPTH_TEST);
-		// glDepthRange(-1.0, 1.0);
-		glEnable(GL_CULL_FACE);
-		// glEnable(GL_BLEND);
-		// glBlendFunc(0x0302, 0x0303);
-		// glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		
 		uint vao = 0;
 		glCreateVertexArrays(1, &vao);
 		glBindVertexArray(vao);
 
-		ad->textures[ad->texCount++] = loadTextureFile("..\\data\\white.png", 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
-		ad->textures[ad->texCount++] = loadTextureFile("..\\data\\rect.png", 2, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+		// setup textures
+		for(int i = 0; i < TEXTURE_SIZE; i++) {
+			globalGraphicsState->textures[i] = loadTextureFile(texturePaths[i], 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+		}
 
-		// int shaderCount = arrayCount(makeShaderInfo);
-		// Shader shaders[arrayCount(makeShaderInfo)];
+		// setup shaders and uniforms
 		for(int i = 0; i < SHADER_SIZE; i++) {
 			MakeShaderInfo* info = makeShaderInfo + i; 
 			Shader* s = globalGraphicsState->shaders + i;
@@ -2455,32 +2521,36 @@ extern "C" APPMAINFUNCTION(appMain) {
 			}
 		}
 
+		// setup fonts
+		// for(int fontId = 0; fontId < FONT_SIZE; fontId++) {
+		// 	Font font;
+		// 	char* path = fontPaths[fontId];
 
+		// 	// font.fileBuffer = (char*)getPMemory(fileSize(path) + 1);
+		// 	char* fileBuffer = getTArray(char, fileSize(path) + 1);
 
-		Font font;
-		char* path = "..\\data\\LiberationMono-Bold.ttf";
-		font.fileBuffer = (char*)getPMemory(fileSize(path) + 1);
-		readFileToBuffer(font.fileBuffer, path);
-		font.size = vec2i(512,512);
-		unsigned char* fontBitmapBuffer = (unsigned char*)getTMemory(font.size.x*font.size.y);
-		unsigned char* fontBitmap = (unsigned char*)getTMemory(font.size.x*font.size.y*4);
-		
-		font.height = 22;
-		font.glyphStart = 32;
-		font.glyphCount = 95;
-		font.cData = (stbtt_bakedchar*)getPMemory(sizeof(stbtt_bakedchar)*font.glyphCount);
-		stbtt_BakeFontBitmap((unsigned char*)font.fileBuffer, 0, font.height, fontBitmapBuffer, font.size.w, font.size.h, font.glyphStart, font.glyphCount, font.cData);
-		for(int i = 0; i < font.size.w*font.size.h; i++) {
-			fontBitmap[i*4] = fontBitmapBuffer[i];
-			fontBitmap[i*4+1] = fontBitmapBuffer[i];
-			fontBitmap[i*4+2] = fontBitmapBuffer[i];
-			fontBitmap[i*4+3] = fontBitmapBuffer[i];
-		}
+		// 	readFileToBuffer(fileBuffer, path);
+		// 	Vec2i size = vec2i(512,512);
+		// 	unsigned char* fontBitmapBuffer = (unsigned char*)getTMemory(size.x*size.y);
+		// 	unsigned char* fontBitmap = (unsigned char*)getTMemory(size.x*size.y*4);
+			
+		// 	font.height = 22;
+		// 	font.glyphStart = 32;
+		// 	font.glyphCount = 95;
+		// 	font.cData = (stbtt_bakedchar*)getPMemory(sizeof(stbtt_bakedchar)*font.glyphCount);
+		// 	stbtt_BakeFontBitmap((unsigned char*)fileBuffer, 0, font.height, fontBitmapBuffer, size.w, size.h, font.glyphStart, font.glyphCount, font.cData);
+		// 	for(int i = 0; i < size.w*size.h; i++) {
+		// 		fontBitmap[i*4] = fontBitmapBuffer[i];
+		// 		fontBitmap[i*4+1] = fontBitmapBuffer[i];
+		// 		fontBitmap[i*4+2] = fontBitmapBuffer[i];
+		// 		fontBitmap[i*4+3] = fontBitmapBuffer[i];
+		// 	}
 
-		uint texId = loadTexture(fontBitmap, font.size.w, font.size.h, 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
-		ad->textures[ad->texCount++] = texId;
-		font.texId = texId;
-		ad->font = font;
+		// 	Texture tex = loadTexture(fontBitmap, size.w, size.h, 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+		// 	font.tex = tex;
+
+		// 	globalGraphicsState->fonts[fontId] = font;
+		// }
 
 
 		GLenum glError = glGetError(); printf("GLError: %i\n", glError);
@@ -2489,43 +2559,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->voxelSamplers[1] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_NEAREST, GL_NEAREST_MIPMAP_LINEAR);
 		ad->voxelSamplers[2] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
 
-		// ad->voxelSamplers[0] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
-		// ad->voxelSamplers[1] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
-		// ad->voxelSamplers[2] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
-
 		glCreateTextures(GL_TEXTURE_2D_ARRAY, 2, ad->voxelTextures);
 
-		char** files = (char**)getTMemory(sizeof(char*)*1024);
-
-		int index = 0;
-		int skip = 0;
-		WIN32_FIND_DATA data;
-		HANDLE handle = FindFirstFile("..\\data\\minecraft textures\\*", &data);
-		if(handle) {
-			while(FindNextFile(handle, &data)) {
-				skip--;
-				if(skip > 0) continue;
-
-				char* name = data.cFileName;
-				if(strLen(name) < 5) continue;
-
-				files[index] = getTString(strLen(name)+1);
-				strClear(files[index]);
-
-				strCpy(files[index++], name);
-			}
-		}
-		FindClose(handle);
 
 
 		const int mipMapCount = 5;
-		uint format = GL_RGBA;
-		uint internalFormat = GL_RGBA8;
-		int texCount = index;
-		// int texCount = 90;
-		int width = 32;
-		int height = 32;
-
 		char* p = getTString(34);
 		strClear(p);
 		strAppend(p, "..\\data\\minecraft textures\\");
@@ -2596,8 +2634,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glCreateFramebuffers(3, ad->frameBuffers);
 		glCreateRenderbuffers(2, ad->renderBuffers);
 		glCreateTextures(GL_TEXTURE_2D, 4, ad->frameBufferTextures);
-		// glCreateTextures(GL_TEXTURE_2D, 3, ad->frameBufferTextures + 1);
-		// GLenum result = glCheckNamedFramebufferStatus(ad->frameBuffers[0], GL_FRAMEBUFFER);
+		GLenum result = glCheckNamedFramebufferStatus(ad->frameBuffers[0], GL_FRAMEBUFFER);
 
 		return; // window operations only work after first frame?
 	}
@@ -3424,6 +3461,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
+	glEnable(GL_DEBUG_OUTPUT);
+	glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+	// glEnable(GL_FRAMEBUFFER_SRGB);
+	glEnable(GL_CULL_FACE);
+
 	// Vec3 skyColor = vec3(0.90f, 0.90f, 0.95f);
 	// Vec3 skyColor = vec3(0.95f);
 	Vec3 skyColor = vec3(0.90f);
@@ -3451,7 +3493,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glEnable(GL_CULL_FACE);
 	glDisable(GL_SCISSOR_TEST);
 	glEnable(GL_LINE_SMOOTH);
-
 
 	glEnable(GL_TEXTURE_2D);
 
@@ -3745,7 +3786,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[0]);
 		glDisable(GL_DEPTH_TEST);
 
-		glBindProgramPipeline(globalGraphicsState->shaders[SHADER_QUAD].program);
+		glBindProgramPipeline(getShader(SHADER_QUAD)->program);
 		drawRect(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0), rect(0,1,1,0), vec4(1,1,1,0.5f), ad->frameBufferTextures[1]);
 
 		glEnable(GL_DEPTH_TEST);
@@ -3797,7 +3838,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-	glBindProgramPipeline(globalGraphicsState->shaders[SHADER_CUBE].program);
+	glBindProgramPipeline(getShader(SHADER_CUBE)->program);
 
 
 	Vec3 ep = vec3(0,0,70);
@@ -3809,7 +3850,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// emitter.particleListSize = 1024;
 		emitter.particleListSize = 100000;
 		emitter.particleList = getPArray(Particle, emitter.particleListSize);
-		emitter.spawnRate = 0.001f;
+		// emitter.spawnRate = 0.005f;
+		emitter.spawnRate = 0.01f;
 
 		emitter.pos = vec3(0,0,70);
 		emitter.friction = 0.5f;
@@ -3818,7 +3860,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 	static float dt = 0;
-	dt += ad->dt;
+	// dt += ad->dt;
 	emitter.pos = ep + vec3(sin(dt),0,0);
 	drawCube(emitter.pos, vec3(0.5f), vec4(0,0,0,0.2f), 0, vec3(0,0,0));
 
@@ -3837,26 +3879,23 @@ extern "C" APPMAINFUNCTION(appMain) {
 				p.pos = e->pos;
 				Vec3 dir = normVec3(vec3(randomFloat(-1,1,0.01f), randomFloat(-1,1,0.01f), randomFloat(-1,1,0.01f)));
 				p.vel = dir * 1.0f;
-				// p.acc = -dir*0.2f;
-				p.acc = dir*0.2f;
+				// p.acc = dir*0.2f;
+				p.acc = -dir*0.2f;
 
 				// float cOff = randomFloat(-0.2,0.2, 0.001f);
 				// p.color = vec4(0.8f + cOff, 0.1f + cOff, 0.6f + cOff, 1.0f);
 				p.color = vec4(0.8f, 0.1f, 0.6f, 1.0f);
 				// p.velColor = vec4(-0.2f,0,0.2f,-0.2f);
-				p.velColor = vec4(-0.2f,0,0.2f,0.0f);
-				// p.accColor = vec4(-0.2f,0,0.2f,0);
+				// p.velColor = vec4(-0.2f,0,0.2f,0.0f);
+				p.accColor = vec4(-0.2f,0,0.2f,-0.05f);
 
 				// p.size = vec3(0.1f);
 				p.size = vec3(0.1f, 0.1f, 0.005f);
-				// p.size = vec3(randomFloat(0.01f,0.2f,0.01f),randomFloat(0.01f,0.2f,0.01f),randomFloat(0.01f,0.2f,0.01f));
-				// p.velSize = vec3(-0.02f);
-				// p.accSize = ;
 
-				p.rot = vec3(degreeToRadian(randomInt(0,360)), degreeToRadian(randomInt(0,360)), degreeToRadian(randomInt(0,360)));
-				Vec3 rot = vec3(randomFloat(0,1,0.01f),randomFloat(0,1,0.01f),randomFloat(0,1,0.01f));
-				p.velRot = rot*10;
-				p.accRot = -rot*2.0f;
+				p.rot = 0;
+				p.rot2 = degreeToRadian(randomInt(0,360));
+				p.velRot = 20.0f;
+				p.accRot = -5.0f;
 
 				p.timeToLive = 5;
 
@@ -3870,29 +3909,59 @@ extern "C" APPMAINFUNCTION(appMain) {
 	for(int i = 0; i < emitter.particleListCount; i++) {
 		Particle* p = emitter.particleList + i;
 
-		Vec3 qr = p->rot;
-		Quat q = quat(qr.x, vec3(1,0,0)) * quat(qr.y, vec3(0,1,0)) * quat(qr.z, vec3(0,0,1));
-		drawCube(p->pos, p->size, p->color, q);
+		uint tex[2] = {getTexture(TEXTURE_CIRCLE)->id, 0};
+		glBindTextures(0,2,tex);
+
+		Vec3 normal = normVec3(p->vel);
+
+		float size = 0.1f;
+		Vec4 color = p->color;
+		Vec3 base = p->pos;
+
+		Vec3 dir1 = normVec3(cross(normal, vec3(1,0,0)));
+		rotateVec3(&dir1, p->rot2, normal);
+		rotateVec3(&normal, p->rot, dir1);
+		Vec3 dir2 = normVec3(cross(normal, dir1));
+
+		dir1 *= size*0.5f;
+		dir2 *= size*0.5f;
+
+		Vec3 verts[4] = {base + dir1+dir2, base + dir1+(-dir2), base + (-dir1)+(-dir2), base + (-dir1)+dir2};
+
+		pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_UV, 0.0f,1.0f,1.0f,0.0f);
+
+		pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_VERTICES, verts[0].e, arrayCount(verts));
+		pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, &color);
+		pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODE, true);
+
+		glDisable(GL_CULL_FACE);
+		glDrawArrays(GL_QUADS, 0, arrayCount(verts));
+		glEnable(GL_CULL_FACE);
 	}
 
 
 
-	int fontSize = 22;
+
+	int fontSize = 20;
 	int pi = 0;
 	Vec4 c = vec4(1.0f,0.3f,0.0f,1);
 	Vec4 c2 = vec4(0,0,0,1);
+	// Font* font = getFont(FONT_LIBERATION_MONO, fontSize);
+	// Font* font = getFont(FONT_SOURCESANS_PRO, fontSize);
+	Font* font = getFont(FONT_CONSOLAS, fontSize);
+	float shadow = 1;
 
 	#define PVEC3(v) v.x, v.y, v.z
 	#define PVEC2(v) v.x, v.y
-	dcText({fillString("Pos  : (%f,%f,%f)", PVEC3(ad->activeCam.pos)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
-	dcText({fillString("Look : (%f,%f,%f)", PVEC3(ad->activeCam.look)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
-	dcText({fillString("Up   : (%f,%f,%f)", PVEC3(ad->activeCam.up)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
-	dcText({fillString("Right: (%f,%f,%f)", PVEC3(ad->activeCam.right)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
-	dcText({fillString("Rot  : (%f,%f)", PVEC2(player->rot)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
-	dcText({fillString("Vec  : (%f,%f,%f)", PVEC3(player->vel)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
-	dcText({fillString("Acc  : (%f,%f,%f)", PVEC3(player->acc)), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
-	dcText({fillString("Draws: (%i)", drawCounter), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
-	dcText({fillString("Quads: (%i)", triangleCount), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
+	dcText({fillString("Pos  : (%f,%f,%f)", PVEC3(ad->activeCam.pos)), font, vec2(0,-fontSize*pi++), c, 0, 2, shadow, vec4(0,0,0,1)});
+	dcText({fillString("Look : (%f,%f,%f)", PVEC3(ad->activeCam.look)), font, vec2(0,-fontSize*pi++), c, 0, 2, shadow, vec4(0,0,0,1)});
+	dcText({fillString("Up   : (%f,%f,%f)", PVEC3(ad->activeCam.up)), font, vec2(0,-fontSize*pi++), c, 0, 2, shadow, vec4(0,0,0,1)});
+	dcText({fillString("Right: (%f,%f,%f)", PVEC3(ad->activeCam.right)), font, vec2(0,-fontSize*pi++), c, 0, 2, shadow, vec4(0,0,0,1)});
+	dcText({fillString("Rot  : (%f,%f)", 	PVEC2(player->rot)), font, vec2(0,-fontSize*pi++), c, 0, 2, shadow, vec4(0,0,0,1)});
+	dcText({fillString("Vec  : (%f,%f,%f)", PVEC3(player->vel)), font, vec2(0,-fontSize*pi++), c, 0, 2, shadow, vec4(0,0,0,1)});
+	dcText({fillString("Acc  : (%f,%f,%f)", PVEC3(player->acc)), font, vec2(0,-fontSize*pi++), c, 0, 2, shadow, vec4(0,0,0,1)});
+	dcText({fillString("Draws: (%i)", 		drawCounter), font, vec2(0,-fontSize*pi++), c, 0, 2, shadow, vec4(0,0,0,1)});
+	dcText({fillString("Quads: (%i)", 		triangleCount), font, vec2(0,-fontSize*pi++), c, 0, 2, shadow, vec4(0,0,0,1)});
 
 	// dcText({fillString("Quads: (%i %i)", (int)input->mouseButtonDown[0], (int)input->mouseButtonDown[1]), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
 	// if(input->keysDown[VK_W])
@@ -3934,7 +4003,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 
-	glBindProgramPipeline(globalGraphicsState->shaders[SHADER_CUBE].program);
+	glBindProgramPipeline(getShader(SHADER_CUBE)->program);
 
 	char* drawListIndex = (char*)globalCommandList3d->data;
 	for(int i = 0; i < globalCommandList3d->count; i++) {
@@ -3985,6 +4054,49 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 	}
 
+
+
+
+
+	bindShader(SHADER_CUBE);
+
+	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODEL, modelMatrix(vec3(0,0,80), vec3(1,1,1)));
+	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, vec4(1,0,0,1));
+	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODE, false);
+
+	uint tex[2] = {getTexture(TEXTURE_WHITE)->id, 0};
+	glBindTextures(0,2,tex);
+
+	glDrawArrays(GL_QUADS, 0, 6*4);
+
+
+
+	// void drawLine(Vec3 p0, Vec3 p1, Vec4 color) {
+	// 	Vec3 verts[] = {p0, p1};
+
+	// 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_VERTICES, verts[0].e, arrayCount(verts));
+	// 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, &color);
+	// 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODE, true);
+
+	// 	glDrawArrays(GL_LINES, 0, arrayCount(verts));
+	// }
+
+	// void drawQuad(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec4 color) {
+	// 	Vec3 verts[] = {p0, p1, p2, p3};
+
+	// 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_VERTICES, verts[0].e, arrayCount(verts));
+	// 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, &color);
+	// 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODE, true);
+
+	// 	glDrawArrays(GL_QUADS, 0, arrayCount(verts));
+	// }
+
+
+
+
+
+
+
 	// ortho(rectCenDim(cam->x,cam->y, cam->z, cam->z/ad->aspectRatio));
 	// glBindProgramPipeline(globalGraphicsState->pipelineIds.programQuad);
 	// drawRect(rectCenDim(0, 0, 0.01f, 100), rect(0,0,1,1), vec4(0.4f,1,0.4f,1), ad->textures[0]);
@@ -3995,11 +4107,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// drawRect(rect(2,2,4,4), rect(0,0,1,1), vec4(1,1,0,1), 2);
 
-
-
 	ortho(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0));
 	glDisable(GL_DEPTH_TEST);
-	glBindProgramPipeline(globalGraphicsState->shaders[SHADER_QUAD].program);
+	glBindProgramPipeline(getShader(SHADER_QUAD)->program);
 
 	glBindFramebuffer (GL_FRAMEBUFFER, ad->frameBuffers[1]);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -4017,7 +4127,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glDisable(GL_DEPTH_TEST);
 
 	glViewport(0,0, wSettings->currentRes.x, wSettings->currentRes.y);
-	glBindProgramPipeline(globalGraphicsState->shaders[SHADER_QUAD].program);
+	glBindProgramPipeline(getShader(SHADER_QUAD)->program);
 	drawRect(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0), rect(0,1,1,0), vec4(1), ad->frameBufferTextures[0]);
 
 	glBindFramebuffer (GL_FRAMEBUFFER, 0);	
@@ -4179,169 +4289,20 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-
-	// static uint vertexBufferId = 0;
-	// static Vec3* vertexBuffer;
-	// if(vertexBuffer == 0) {
-	// 	glCreateBuffers(1, &vertexBufferId);
-	// 	vertexBuffer = (Vec3*)getPMemory(sizeof(Vec3)*100);
-	// 	// glNamedBufferData(vertexBufferId, sizeof(Vec3)*100, vertexBuffer, GL_DYNAMIC_DRAW);
-	// 	glNamedBufferData(vertexBufferId, sizeof(Vec3)*100, vertexBuffer, GL_STREAM_DRAW);
-
-	// 	// vertexBuffer[0] = vec3(0,0,40);
-	// 	// vertexBuffer[1] = vec3(10,0,40);
-	// 	// vertexBuffer[2] = vec3(10,10,40);
-	// 	// glNamedBufferSubData(vertexBufferId, 0, 3*sizeof(Vec3), vertexBuffer);
-
-	// 	glBindBuffer(GL_ARRAY_BUFFER, vertexBufferId);
-
-	// 	// uint vaLoc = glGetAttribLocation(globalGraphicsState->pipelineIds.allVertex, "vertex");
-	// 	// glVertexAttribPointer(vaLoc, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
-	// 	// glEnableVertexAttribArray(vaLoc);
-	// }
-
-
-
-	// glBindProgramPipeline(globalGraphicsState->pipelineIds.programAll);
-
-	// GLuint uniModelView = glGetUniformLocation(globalGraphicsState->pipelineIds.allVertex, "modelView");
-	// // GLuint uniModel = glGetUniformLocation(globalGraphicsState->pipelineIds.allVertex, "model");
-	// // GLuint uniView = glGetUniformLocation(globalGraphicsState->pipelineIds.allVertex, "view");
-	// // GLuint uniProj = glGetUniformLocation(globalGraphicsState->pipelineIds.allVertex, "proj");
-
-	// GLuint uniColor = glGetUniformLocation(globalGraphicsState->pipelineIds.allVertex, "color");
-
-	// uint vaLoc = glGetAttribLocation(globalGraphicsState->pipelineIds.allVertex, "vertex");
-
-	// glBindBuffer(GL_ARRAY_BUFFER, vertexBufferId);
-	// glVertexAttribPointer(vaLoc, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
-	// glEnableVertexAttribArray(vaLoc);
-
-	// view; viewMatrix(&view, ad->activeCam.pos, -ad->activeCam.look, ad->activeCam.up, ad->activeCam.right);
-	// proj; projMatrix(&proj, degreeToRadian(ad->fieldOfView), ad->aspectRatio, ad->nearPlane, ad->farPlane);
-
-	// // glProgramUniformMatrix4fv(globalGraphicsState->pipelineIds.allVertex, uniView, 1, 1, view.e);
-	// // glProgramUniformMatrix4fv(globalGraphicsState->pipelineIds.allVertex, uniProj, 1, 1, proj.e);
-
-
-	// int intervals = 10000;
-
-	// glBindBuffer(GL_ARRAY_BUFFER, vertexBufferId);
-
-
-	// vertexBuffer[0] = vec3(-0.5f,-0.5f,-0.5f);
-	// vertexBuffer[1] = vec3( 0.5f,-0.5f,-0.5f);
-	// vertexBuffer[2] = vec3( 0.5f, 0.5f,-0.5f);
-	// vertexBuffer[3] = vec3(-0.5f, 0.5f,-0.5f);
-	// vertexBuffer[4] = vec3(-0.5f,-0.5f, 0.5f);
-	// vertexBuffer[5] = vec3(-0.5f, 0.5f, 0.5f);
-	// vertexBuffer[6] = vec3( 0.5f, 0.5f, 0.5f);
-	// vertexBuffer[7] = vec3( 0.5f,-0.5f, 0.5f);
-	// vertexBuffer[8] = vec3(-0.5f, 0.5f,-0.5f);
-	// vertexBuffer[9] = vec3( 0.5f, 0.5f,-0.5f);
-	// vertexBuffer[10] = vec3( 0.5f, 0.5f, 0.5f);
-	// vertexBuffer[11] = vec3(-0.5f, 0.5f, 0.5f);
-	// vertexBuffer[12] = vec3(-0.5f,-0.5f,-0.5f);
-	// vertexBuffer[13] = vec3(-0.5f,-0.5f, 0.5f);
-	// vertexBuffer[14] = vec3( 0.5f,-0.5f, 0.5f);
-	// vertexBuffer[15] = vec3( 0.5f,-0.5f,-0.5f);
-	// vertexBuffer[16] = vec3( 0.5f,-0.5f,-0.5f);
-	// vertexBuffer[17] = vec3( 0.5f,-0.5f, 0.5f);
-	// vertexBuffer[18] = vec3( 0.5f, 0.5f, 0.5f);
-	// vertexBuffer[19] = vec3( 0.5f, 0.5f,-0.5f);
-	// vertexBuffer[20] = vec3(-0.5f,-0.5f,-0.5f);
-	// vertexBuffer[21] = vec3(-0.5f, 0.5f,-0.5f);
-	// vertexBuffer[22] = vec3(-0.5f, 0.5f, 0.5f);
-	// vertexBuffer[23] = vec3(-0.5f,-0.5f, 0.5f);
-	// glNamedBufferSubData(vertexBufferId, 0, 4*sizeof(Vec3), vertexBuffer);
-
-
-	// __int64 t = getTimestamp();
-	// for(int i = 0; i < intervals; i++) {
-
-	// 	glBindBuffer(GL_ARRAY_BUFFER, vertexBufferId);
-
-	// 	// vertexBuffer[0] = vec3(-0.5f,-0.5f,-0.5f);
-	// 	// vertexBuffer[1] = vec3( 0.5f,-0.5f,-0.5f);
-	// 	// vertexBuffer[2] = vec3( 0.5f, 0.5f,-0.5f);
-	// 	// vertexBuffer[3] = vec3(-0.5f, 0.5f,-0.5f);
-	// 	// vertexBuffer[4] = vec3(-0.5f,-0.5f, 0.5f);
-	// 	// vertexBuffer[5] = vec3(-0.5f, 0.5f, 0.5f);
-	// 	// vertexBuffer[6] = vec3( 0.5f, 0.5f, 0.5f);
-	// 	// vertexBuffer[7] = vec3( 0.5f,-0.5f, 0.5f);
-	// 	// vertexBuffer[8] = vec3(-0.5f, 0.5f,-0.5f);
-	// 	// vertexBuffer[9] = vec3( 0.5f, 0.5f,-0.5f);
-	// 	// vertexBuffer[10] = vec3( 0.5f, 0.5f, 0.5f);
-	// 	// vertexBuffer[11] = vec3(-0.5f, 0.5f, 0.5f);
-	// 	// vertexBuffer[12] = vec3(-0.5f,-0.5f,-0.5f);
-	// 	// vertexBuffer[13] = vec3(-0.5f,-0.5f, 0.5f);
-	// 	// vertexBuffer[14] = vec3( 0.5f,-0.5f, 0.5f);
-	// 	// vertexBuffer[15] = vec3( 0.5f,-0.5f,-0.5f);
-	// 	// vertexBuffer[16] = vec3( 0.5f,-0.5f,-0.5f);
-	// 	// vertexBuffer[17] = vec3( 0.5f,-0.5f, 0.5f);
-	// 	// vertexBuffer[18] = vec3( 0.5f, 0.5f, 0.5f);
-	// 	// vertexBuffer[19] = vec3( 0.5f, 0.5f,-0.5f);
-	// 	// vertexBuffer[20] = vec3(-0.5f,-0.5f,-0.5f);
-	// 	// vertexBuffer[21] = vec3(-0.5f, 0.5f,-0.5f);
-	// 	// vertexBuffer[22] = vec3(-0.5f, 0.5f, 0.5f);
-	// 	// vertexBuffer[23] = vec3(-0.5f,-0.5f, 0.5f);
-
-	// 	// vertexBuffer[0] = vec3(0,0,100);
-	// 	// vertexBuffer[1] = vec3(10,0,100);
-	// 	// vertexBuffer[2] = vec3(10,10,100);
-	// 	// vertexBuffer[3] = vec3(0,10,100);
-	// 	// glNamedBufferSubData(vertexBufferId, 0, 24*sizeof(Vec3), vertexBuffer);
-
-	// 	Mat4 sm; scaleMatrix(&sm, vec3(1,1,1));
-	// 	Mat4 rm; quatRotationMatrix(&rm, quat(0, vec3(0,0,0)));
-	// 	Mat4 tm; translationMatrix(&tm, vec3(0,0,0));
-	// 	// Mat4 model = tm*rm*sm;
-	// 	Mat4 modelView = proj*view*tm*rm*sm;
-	// 	// Mat4 modelView = proj*view;
-
-	// 	glProgramUniformMatrix4fv(globalGraphicsState->pipelineIds.allVertex, uniModelView, 1, 1, modelView.e);
-	// 	// glProgramUniformMatrix4fv(globalGraphicsState->pipelineIds.allVertex, uniModel, 1, 1, model.e);
-	// 	glProgramUniform4f(globalGraphicsState->pipelineIds.allVertex, uniColor, 1,0,1,1);
-
-	// 	glDrawArrays(GL_QUADS, 0, 24);
-
-	// 	// glBindProgramPipeline(globalGraphicsState->pipelineIds.programCube);
-	// 	// glBindProgramPipeline(globalGraphicsState->pipelineIds.programAll);
-
-	// }
-
-	// printf("%i \n", (getTimestamp() - t) / intervals);
-
-
-	// glBindProgramPipeline(globalGraphicsState->pipelineIds.programCube);
-
-	// intervals = 10000;
-
-	// t = getTimestamp();
-	// for(int i = 0; i < intervals; i++) {
-	// 	// drawQuad(vec3(0,0,100), vec3(10,0,100), vec3(10,10,100), vec3(0,10,100), vec4(1,0,1,1));
-
-	// 	drawCube(vec3(0,0,0), vec3(1,1,1), vec4(1,0,1,1), 0, vec3(0,0,0));
-	// }
-
-	// printf("%i \n", (getTimestamp() - t) / intervals);
-
-
-
-
-	/*
-		switching shader -> 550 ticks
-		using namedBufferSubData vs uniforms for vertices -> 2400 ticks vs 400 ticks
-	*/
-
-
-
 	#if 0
-	Vec2 size = vec2(800, 800/ad->aspectRatio);
+	glBindProgramPipeline(getShader(SHADER_QUAD)->program);
+
+	// Vec2 size = vec2(800, 800/ad->aspectRatio);
 	// Vec2 size = vec2(ad->curRes);
-	Rect tb = rectCenDim(vec2(ad->curRes.x - size.x*0.5f, -size.y*0.5f), size);
-	drawRect(tb, rect(0,0,1,1), vec4(0,0,0,1), ad->textures[0]);
-	drawRect(tb, rect(0,0,1,1), vec4(1,1,1,1), ad->frameBufferTextures[1]);
+	// Rect tb = rectCenDim(vec2(ad->curRes.x - size.x*0.5f, -size.y*0.5f), size);
+	Texture* st = &ad->textures[TEXTURE_TEST];
+	drawRect(rectCenDim(vec2(400,-400), vec2(st->dim)), rect(0,0,1,1), vec4(1,1,1,1), st->id);
+
+	// Vec2 size = vec2(800, 800/ad->aspectRatio);
+	// // Vec2 size = vec2(ad->curRes);
+	// Rect tb = rectCenDim(vec2(ad->curRes.x - size.x*0.5f, -size.y*0.5f), size);
+	// drawRect(tb, rect(0,0,1,1), vec4(0,0,0,1), ad->textures[TEXTURE_WHITE]);
+	// drawRect(tb, rect(0,0,1,1), vec4(1,1,1,1), ad->frameBufferTextures[1]);
 	#endif
 
 	swapBuffers(&ad->systemData);

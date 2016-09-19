@@ -1902,6 +1902,16 @@ inline void scaleMatrix(Mat4* m, Vec3 a) {
 	m->w4 = 1;
 }
 
+inline Mat4 scaleMatrix(Vec3 a) {
+	Mat4 m = {};
+	m.x1 = a.x;
+	m.y2 = a.y;
+	m.z3 = a.z;
+	m.w4 = 1;
+
+	return m;
+}
+
 inline void rotationMatrix(Mat4* m, Vec3 a) {
 	*m = {	cos(a.y)*cos(a.z), cos(a.z)*sin(a.x)*sin(a.y)-cos(a.x)*sin(a.z), cos(a.x)*cos(a.z)*sin(a.x)+sin(a.x)*sin(a.z), 0,
 			cos(a.y)*sin(a.z), cos(a.x)*cos(a.z)+sin(a.x)*sin(a.y)*sin(a.z), -cos(a.z)*sin(a.x)+cos(a.x)*sin(a.y)*sin(a.z), 0,
@@ -1946,6 +1956,20 @@ inline void translationMatrix(Mat4* m, Vec3 a) {
 	m->w1 = a.x;
 	m->w2 = a.y;
 	m->w3 = a.z;
+}
+
+inline Mat4 translationMatrix(Vec3 a) {
+	Mat4 m = {};
+	m.x1 = 1;
+	m.y2 = 1;
+	m.z3 = 1;
+	m.w4 = 1;
+
+	m.w1 = a.x;
+	m.w2 = a.y;
+	m.w3 = a.z;
+
+	return m;
 }
 
 inline void viewMatrix(Mat4* m, Vec3 cPos, Vec3 cLook, Vec3 cUp, Vec3 cRight) {
@@ -2029,6 +2053,18 @@ void quatRotationMatrix(Mat4* m, Quat q) {
 			0, 			 0, 		  0, 		   1};
 }
 
+Mat4 quatRotationMatrix(Quat q) {
+	float w = q.w, x = q.x, y = q.y, z = q.z;
+	float x2 = x*x, y2 = y*y, z2 = z*z;
+	float w2 = w*w;
+	Mat4 m = {	w2+x2-y2-z2, 2*x*y-2*w*z, 2*x*z+2*w*y, 0,
+				2*x*y+2*w*z, w2-x2+y2-z2, 2*y*z-2*w*x, 0,
+				2*x*z-2*w*y, 2*y*z+2*w*x, w2-x2-y2+z2, 0,
+				0, 			 0, 		  0, 		   1};
+
+	return m;
+}
+
 Vec3 operator*(Quat q, Vec3 v) {
 	Quat r = q*quat(0, v.x, v.y, v.z);
 	return r.xyz;
@@ -2042,6 +2078,16 @@ Vec3 rotateVec3(Vec3 v, float a, Vec3 axis) {
 void rotateVec3(Vec3* v, float a, Vec3 axis) {
 	*v = quat(a, axis)*(*v);
 	*v = normVec3(*v);
+}
+
+
+Mat4 modelMatrix(Vec3 trans, Vec3 scale, float degrees = 0, Vec3 rot = vec3(0,0,0)) {
+	Mat4 sm; scaleMatrix(&sm, scale);
+	Mat4 rm; quatRotationMatrix(&rm, quat(degrees, rot));
+	Mat4 tm; translationMatrix(&tm, trans);
+	Mat4 model = tm*rm*sm;
+
+	return model;
 }
 
 //
