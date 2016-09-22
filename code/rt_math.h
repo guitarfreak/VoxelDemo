@@ -1885,8 +1885,8 @@ inline Mat4 operator*(Mat4 a, Mat4 b) {
 }
 
 inline void rowToColumn(Mat4* m) {
-	for(int y = 0; y < 4; y++) {
-		for(int x = 0; x < 4; x++) {
+	for(int x = 1; x < 4; x++) {
+		for(int y = 0; y < x; y++) {
 			float temp = m->e2[y][x];
 			m->e2[y][x] = m->e2[x][y];
 			m->e2[x][y] = temp;
