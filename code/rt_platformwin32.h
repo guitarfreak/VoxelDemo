@@ -194,7 +194,9 @@ void initSystem(SystemData* systemData, WindowsData wData, uint style, int x, in
         0,
         0, 0, 0, 0,
         24,                        //Number of bits for the depthbuffer
+        // 0,                        //Number of bits for the depthbuffer
         8,                        //Number of bits for the stencilbuffer
+        // 0,                        //Number of bits for the stencilbuffer
         0,                        //Number of Aux buffers in the framebuffer.
         PFD_MAIN_PLANE,
         0,

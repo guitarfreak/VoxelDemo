@@ -13,6 +13,7 @@
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
+#define STBI_ONLY_BMP
 #include "stb_image.h"
 
 #define STB_TRUETYPE_IMPLEMENTATION
@@ -26,6 +27,7 @@
 #define STBVOX_CONFIG_MODE 1
 #include "stb_voxel_render.h"
 
+#define USE_SRGB 1
 
 /*
 //-----------------------------------------
@@ -64,8 +66,6 @@
 
 - put in a cubemap to make things prettier and not rely on white clear color as the sky
 
-- get. the. opengl. debug. thing. working.
-
 //-------------------------------------
 //               BUGS
 //-------------------------------------
@@ -77,6 +77,8 @@
 - game input gets stuck when buttons are pressed right at the start
 - sort key assert firing randomly
 - hotload gets stuck sometimes, thread that won't complete
+
+- draw line crashes
 */
 
 /*
@@ -836,14 +838,17 @@ const char* fragmentShaderCube = GLSL (
 	layout(depth_less) out float gl_FragDepth;
 	out vec4 color;
 
-	uniform float alphaTest = 0.5f;
+	uniform bool alphaTest = false;
+	uniform float alpha = 0.5f;
 
 	void main() {
 		// color = texture(s, uv) * Color;
 		color = texture(s, uv.xy) * Color;
 		// color = Color;
 
-		if(color.a <= alphaTest) discard;
+		if(alphaTest) {
+			if(color.a <= alpha) discard;
+		}
 	}
 );
 
@@ -1061,7 +1066,7 @@ const char* fragmentShaderParticle = GLSL (
 	out float gl_FragDepth;
 	out vec4 color;
 
-	uniform float alphaTest = 0.5f;
+	// uniform float alphaTest = 0.5f;
 
 	void main() {
 		color = texture(s, uv) * Color;
@@ -1069,12 +1074,83 @@ const char* fragmentShaderParticle = GLSL (
 		// color = Color;
 		// color = vec4(1,0,0,1);
 
-		if(color.a <= alphaTest) discard;
+		// if(color.a <= alphaTest) discard;
 	}
 );
 
 
 
+
+
+const char* vertexShaderCubeMap = GLSL (
+	const vec3 cube[] = vec3[] (
+	  vec3( -1.0,  1.0, -1.0 ),
+	  vec3( -1.0, -1.0, -1.0 ),
+	  vec3(  1.0, -1.0, -1.0 ),
+	  vec3(  1.0, -1.0, -1.0 ),
+	  vec3(  1.0,  1.0, -1.0 ),
+	  vec3( -1.0,  1.0, -1.0 ),
+
+	  vec3( -1.0, -1.0,  1.0 ),
+	  vec3( -1.0, -1.0, -1.0 ),
+	  vec3( -1.0,  1.0, -1.0 ),
+	  vec3( -1.0,  1.0, -1.0 ),
+	  vec3( -1.0,  1.0,  1.0 ),
+	  vec3( -1.0, -1.0,  1.0 ),
+
+	  vec3(  1.0, -1.0, -1.0 ),
+	  vec3(  1.0, -1.0,  1.0 ),
+	  vec3(  1.0,  1.0,  1.0 ),
+	  vec3(  1.0,  1.0,  1.0 ),
+	  vec3(  1.0,  1.0, -1.0 ),
+	  vec3(  1.0, -1.0, -1.0 ),
+
+	  vec3( -1.0, -1.0,  1.0 ),
+	  vec3( -1.0,  1.0,  1.0 ),
+	  vec3(  1.0,  1.0,  1.0 ),
+	  vec3(  1.0,  1.0,  1.0 ),
+	  vec3(  1.0, -1.0,  1.0 ),
+	  vec3( -1.0, -1.0,  1.0 ),
+
+	  vec3( -1.0,  1.0, -1.0 ),
+	  vec3(  1.0,  1.0, -1.0 ),
+	  vec3(  1.0,  1.0,  1.0 ),
+	  vec3(  1.0,  1.0,  1.0 ),
+	  vec3( -1.0,  1.0,  1.0 ),
+	  vec3( -1.0,  1.0, -1.0 ),
+
+	  vec3( -1.0, -1.0, -1.0 ),
+	  vec3( -1.0, -1.0,  1.0 ),
+	  vec3(  1.0, -1.0, -1.0 ),
+	  vec3(  1.0, -1.0, -1.0 ),
+	  vec3( -1.0, -1.0,  1.0 ),
+	  vec3(  1.0, -1.0,  1.0 )
+	);
+
+	out gl_PerVertex { vec4 gl_Position; };
+
+	uniform mat4x4 view;
+	uniform mat4x4 proj;
+
+	smooth out vec3 pos;
+
+	void main() {
+		pos = cube[gl_VertexID];
+		gl_Position = proj*view*vec4(pos,1);
+	}
+);
+
+const char* fragmentShaderCubeMap = GLSL (
+	layout(depth_less) out float gl_FragDepth;
+	layout(binding = 0) uniform samplerCubeArray s;
+	smooth in vec3 pos;
+
+	out vec4 color;
+
+	void main() {
+		color = texture(s, vec4(pos, 0));
+	}
+);
 
 
 
@@ -1115,6 +1191,7 @@ enum ShaderProgram {
 	SHADER_VOXEL,
 	SHADER_TEST,
 	SHADER_PARTICLE,
+	SHADER_CUBEMAP,
 
 	SHADER_SIZE,
 };
@@ -1128,6 +1205,8 @@ enum CubeUniforms {
 	CUBE_UNIFORM_VERTICES,
 	CUBE_UNIFORM_CPLANE,
 	CUBE_UNIFORM_UV,
+	CUBE_UNIFORM_ALPHA_TEST,
+	CUBE_UNIFORM_ALPHA,
 	CUBE_UNIFORM_SIZE,
 };
 
@@ -1140,6 +1219,8 @@ ShaderUniformType cubeShaderUniformType[] = {
 	{UNIFORM_TYPE_VEC3, "vertices"},
 	{UNIFORM_TYPE_VEC4, "cPlane"},
 	{UNIFORM_TYPE_VEC2, "setUV"},
+	{UNIFORM_TYPE_FLOAT, "alpha"},
+	{UNIFORM_TYPE_INT, "alphaTest"},
 };
 
 enum QuadUniforms {
@@ -1220,12 +1301,25 @@ ShaderUniformType particleShaderUniformType[] = {
 	{UNIFORM_TYPE_MAT4, "proj"},
 };
 
+enum CubemapUniforms {
+	CUBEMAP_UNIFORM_VIEW = 0,
+	CUBEMAP_UNIFORM_PROJ,
+
+	CUBEMAP_UNIFORM_SIZE,
+};
+
+ShaderUniformType cubemapShaderUniformType[] = {
+	{UNIFORM_TYPE_MAT4, "view"},
+	{UNIFORM_TYPE_MAT4, "proj"},
+};
+
 MakeShaderInfo makeShaderInfo[] = {
 	{(char*)vertexShaderCube, (char*)fragmentShaderCube, CUBE_UNIFORM_SIZE, cubeShaderUniformType},
 	{(char*)vertexShaderQuad, (char*)fragmentShaderQuad, QUAD_UNIFORM_SIZE, quadShaderUniformType},
 	{(char*)stbvox_get_vertex_shader(), (char*)stbvox_get_fragment_shader(), VOXEL_UNIFORM_SIZE, voxelShaderUniformType},
 	{(char*)vertexShaderTest, (char*)fragmentShaderTest, TEST_UNIFORM_SIZE, 0},
 	{(char*)vertexShaderParticle, (char*)fragmentShaderParticle, PARTICLE_UNIFORM_SIZE, particleShaderUniformType},
+	{(char*)vertexShaderCubeMap, (char*)fragmentShaderCubeMap, CUBEMAP_UNIFORM_SIZE, cubemapShaderUniformType},
 };
 
 struct Shader {
@@ -1429,7 +1523,9 @@ Font* getFont(int fontId, int height) {
 			fontBitmap[i*4+3] = fontBitmapBuffer[i];
 		}
 
-		Texture tex = loadTexture(fontBitmap, size.w, size.h, 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+		Texture tex;
+		if(USE_SRGB) tex = loadTexture(fontBitmap, size.w, size.h, 1, GL_SRGB8_ALPHA8, GL_RGBA, GL_UNSIGNED_BYTE);
+		else tex = loadTexture(fontBitmap, size.w, size.h, 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
 		font.tex = tex;
 
 		globalGraphicsState->fonts[fontId] = font;
@@ -1620,17 +1716,23 @@ void drawLine(Vec3 p0, Vec3 p1, Vec4 color) {
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, color.e);
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODE, true);
 
-	glDrawArrays(GL_LINES, 0, arrayCount(verts));
+	// glDrawArrays(GL_LINES, 0, arrayCount(verts));
 }
 
 void drawQuad(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec4 color) {
 	Vec3 verts[] = {p0, p1, p2, p3};
 
+	uint tex[2] = {getTexture(TEXTURE_WHITE)->id, 0};
+	glBindTextures(0,2,tex);
+
+	// Vec2 quadUVs[] = {{0,0}, {0,1}, {1,1}, {1,0}};
+	// pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_UV, quadUVs[0].e, arrayCount(quadUVs));
+
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_VERTICES, verts[0].e, arrayCount(verts));
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, &color);
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODE, true);
 
-	glDrawArrays(GL_QUADS, 0, arrayCount(verts));
+	// glDrawArrays(GL_QUADS, 0, arrayCount(verts));
 }
 
 void drawQuad(Vec3 p, Vec3 normal, float size, Vec4 color) {
@@ -1851,7 +1953,9 @@ static unsigned char colorPaletteCompact[64][3] =
    { 119,119,119 }, { 102,102,102 }, {  85, 85, 85 }, {  68, 68, 68 },
    {  51, 51, 51 }, {  34, 34, 34 }, {  17, 17, 17 }, {   0,  0,  0 },
 
-   { 220,100,30 }, { 0,100,220 }, { 255,160,160 }, { 255, 32, 32 },
+   // { 220,100,30 }, { 0,100,220 }, { 255,160,160 }, { 255, 32, 32 },
+   // { 220,100,30 }, { 0,100,220 }, { 255,160,160 }, { 255, 32, 32 },
+   { 200,20,0 }, { 0,70,180 }, { 255,160,160 }, { 255, 32, 32 },
    { 200,120,160 }, { 200, 60,150 }, { 220,100,130 }, { 255,  0,128 },
    { 240,240,255 }, { 220,220,255 }, { 160,160,255 }, {  32, 32,255 },
    { 120,160,200 }, {  60,150,200 }, { 100,130,220 }, {   0,128,255 },
@@ -1885,8 +1989,8 @@ void buildColorPalette() {
 // #define VIEW_DISTANCE 2500 // 32
 // #define VIEW_DISTANCE 2048 // 32
 // #define VIEW_DISTANCE 1024 // 16
-// #define VIEW_DISTANCE 512  // 8
-#define VIEW_DISTANCE 256 // 4
+#define VIEW_DISTANCE 512  // 8
+// #define VIEW_DISTANCE 256 // 4
 // #define VIEW_DISTANCE 128 // 2
 
 #define USE_MALLOC 1
@@ -2016,6 +2120,13 @@ VoxelMesh* getVoxelMesh(VoxelNode** voxelHash, int voxelHashSize, Vec2i coord) {
 // int startX = 37800;
 // int startY = 48000;
 
+float reflectionAlpha = 0.75f;
+// float reflectionAlpha = 1.0f;
+float waterAlpha = 0.75f;
+// float waterAlpha = 1;
+// int globalLumen = 255;
+int globalLumen = 210;
+
 int startX = 37750;
 int startY = 47850;
 
@@ -2090,7 +2201,7 @@ void generateVoxelMeshThreaded(void* data) {
 
 	    		for(int z = blockHeight; z < VOXEL_Z; z++) {
 	    			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 0;
-	    			m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 255;
+	    			m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = globalLumen;
 	    		}
 
 	    		if(blockType == BT_Grass && treeNoise[y*VOXEL_Y + x] == 1 && 
@@ -2103,7 +2214,7 @@ void generateVoxelMeshThreaded(void* data) {
 		    		for(int z = blockHeight; z < WATER_LEVEL_HEIGHT; z++) {
 		    			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = BT_Water;
 
-		    			Vec2i waterLightRange = vec2i(0,220);
+		    			Vec2i waterLightRange = vec2i(0,globalLumen);
 		    			int lightValue = mapRange(blockHeight, WORLD_MIN, WATER_LEVEL_HEIGHT, waterLightRange.x, waterLightRange.y);
 		    			m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = lightValue;
 		    		}
@@ -2144,14 +2255,14 @@ void generateVoxelMeshThreaded(void* data) {
 			m->voxels[voxelArray(max.x, min.y, min.z)] = 0;
 			m->voxels[voxelArray(max.x, max.y, max.z)] = 0;
 			m->voxels[voxelArray(max.x, max.y, min.z)] = 0;
-			m->lighting[voxelArray(min.x, min.y, max.z)] = 255;
-			m->lighting[voxelArray(min.x, min.y, min.z)] = 255;
-			m->lighting[voxelArray(min.x, max.y, max.z)] = 255;
-			m->lighting[voxelArray(min.x, max.y, min.z)] = 255;
-			m->lighting[voxelArray(max.x, min.y, max.z)] = 255;
-			m->lighting[voxelArray(max.x, min.y, min.z)] = 255;
-			m->lighting[voxelArray(max.x, max.y, max.z)] = 255;
-			m->lighting[voxelArray(max.x, max.y, min.z)] = 255;
+			m->lighting[voxelArray(min.x, min.y, max.z)] = globalLumen;
+			m->lighting[voxelArray(min.x, min.y, min.z)] = globalLumen;
+			m->lighting[voxelArray(min.x, max.y, max.z)] = globalLumen;
+			m->lighting[voxelArray(min.x, max.y, min.z)] = globalLumen;
+			m->lighting[voxelArray(max.x, min.y, max.z)] = globalLumen;
+			m->lighting[voxelArray(max.x, min.y, min.z)] = globalLumen;
+			m->lighting[voxelArray(max.x, max.y, max.z)] = globalLumen;
+			m->lighting[voxelArray(max.x, max.y, min.z)] = globalLumen;
 
 			for(int i = 0; i < treeHeight; i++) {
 				m->voxels[voxelArray(p.x,p.y,p.z+i)] = BT_TreeLog;
@@ -2500,10 +2611,15 @@ void setupVoxelUniforms(Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit
 
 	// ambient direction is sky-colored upwards
 	// "ambient" lighting is from above
-	al.e2[0][0] =  0.3f;
-	al.e2[0][1] = -0.5f;
-	al.e2[0][2] =  0.9f;
+	Vec3 li2 = normVec3(vec3(-1,1,1));
+	al.e2[0][0] = li2.x;
+	al.e2[0][1] = li2.y;
+	al.e2[0][2] = li2.z;
 	al.e2[0][3] = 0;
+
+	// al.e2[0][0] =  0.3f;
+	// al.e2[0][1] = -0.5f;
+	// al.e2[0][2] =  0.9f;
 
 	amb[1][0] = 0.3f; amb[1][1] = 0.3f; amb[1][2] = 0.3f; // dark-grey
 	amb[2][0] = 1.0; amb[2][1] = 1.0; amb[2][2] = 1.0; // white
@@ -2633,6 +2749,9 @@ Camera getCamData(Vec3 pos, Vec3 rot, Vec3 offset = vec3(0,0,0), Vec3 gUp = vec3
 }
 
 struct AppData {
+	uint cubemapTextureId;
+	uint cubemapSamplerId;
+
 	SystemData systemData;
 	Input input;
 	WindowSettings wSettings;
@@ -2810,13 +2929,6 @@ Vec3 getRotationToVector(Vec3 start, Vec3 dest, float* angle) {
 	return side;
 }	
 
-/*
-	Entity player;
-	initEntity(&player, );
-
-	
-*/
-
 void initEntity(Entity* e, int type, Vec3 pos, Vec3 dir, Vec3 dim, Vec3 camOff) {
 	*e = {};
 	e->init = true;
@@ -2827,6 +2939,7 @@ void initEntity(Entity* e, int type, Vec3 pos, Vec3 dir, Vec3 dim, Vec3 camOff) 
 	e->camOff = camOff;
 	
 	e->rot = getRotationToVector(vec3(0,1,0), dir, &e->rotAngle);
+	int stop = 234;
 }
 
 Entity* addEntity(EntityList* list, Entity* e) {
@@ -3210,15 +3323,18 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->entityList.size = 1000;
 		ad->entityList.e = (Entity*)getPMemory(sizeof(Entity)*ad->entityList.size);
 
+		Vec3 startDir = normVec3(vec3(1,0,0));
+
 		Entity player;
 		Vec3 playerDim = vec3(0.8f, 0.8f, 1.8f);
 		float camOff = playerDim.z*0.5f - playerDim.x*0.25f;
-		initEntity(&player, ET_Player, vec3(0,0,40), normVec3(vec3(1,1,0)), playerDim, vec3(0,0,camOff));
+		initEntity(&player, ET_Player, vec3(0,0,40), startDir, playerDim, vec3(0,0,camOff));
+		player.rot = vec3(M_2PI,0,0);
 		player.playerOnGround = false;
 		ad->player = addEntity(&ad->entityList, &player);
 
 		Entity freeCam;
-		initEntity(&freeCam, ET_Camera, vec3(35,35,32), vec3(0,1,0), vec3(0,0,0), vec3(0,0,0));
+		initEntity(&freeCam, ET_Camera, vec3(35,35,32), startDir, vec3(0,0,0), vec3(0,0,0));
 		ad->cameraEntity = addEntity(&ad->entityList, &freeCam);
 
 
@@ -3230,8 +3346,38 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		// setup textures
 		for(int i = 0; i < TEXTURE_SIZE; i++) {
-			globalGraphicsState->textures[i] = loadTextureFile(texturePaths[i], 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+			if(USE_SRGB) globalGraphicsState->textures[i] = loadTextureFile(texturePaths[i], 1, GL_SRGB8_ALPHA8, GL_RGBA, GL_UNSIGNED_BYTE);
+			else globalGraphicsState->textures[i] = loadTextureFile(texturePaths[i], 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
 		}
+
+		// load cubemap
+
+		glCreateTextures(GL_TEXTURE_CUBE_MAP_ARRAY, 1, &ad->cubemapTextureId);
+		glTextureParameteri(ad->cubemapTextureId, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTextureParameteri(ad->cubemapTextureId, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTextureParameteri(ad->cubemapTextureId, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTextureParameteri(ad->cubemapTextureId, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTextureParameteri(ad->cubemapTextureId, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+		glTextureStorage3D(ad->cubemapTextureId, 5, GL_SRGB8_ALPHA8, 1024, 1024, 6);
+
+		char* skyboxPaths[] = { "..\\data\\skybox\\skyrender0001.bmp", 
+								"..\\data\\skybox\\skyrender0004.bmp", 
+								"..\\data\\skybox\\skyrender0003.bmp", 
+								"..\\data\\skybox\\asdf.png", 
+								"..\\data\\skybox\\skyrender0005.bmp", 
+								"..\\data\\skybox\\skyrender0002.bmp"};
+
+		for(int i = 0; i < 6; i++) {
+			int x, y, n;
+			unsigned char* stbData = stbi_load(skyboxPaths[i], &x, &y, &n, 4);
+
+			glTextureSubImage3D(ad->cubemapTextureId, 0, 0, 0, i, x, y, 1, GL_RGBA, GL_UNSIGNED_BYTE, stbData);
+
+			stbi_image_free(stbData);
+		}
+		glGenerateTextureMipmap(ad->cubemapTextureId);
+
 
 		// setup shaders and uniforms
 		for(int i = 0; i < SHADER_SIZE; i++) {
@@ -3279,18 +3425,31 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->samplers[0] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
 
 
+		// voxel textures
 		const int mipMapCount = 5;
 		char* p = getTString(34);
 		strClear(p);
 		strAppend(p, "..\\data\\minecraft textures\\");
 
 		char* fullPath = getTString(234);
-		glTextureStorage3D(ad->voxelTextures[0], mipMapCount, GL_RGBA8, 32, 32, BX_Size);
-		// glTextureStorage3D(ad->voxelTextures[0], 2, GL_RGBA8, 32, 32, BX_Size);
+		if(USE_SRGB) glTextureStorage3D(ad->voxelTextures[0], mipMapCount, GL_SRGB8_ALPHA8, 32, 32, BX_Size);
+		else glTextureStorage3D(ad->voxelTextures[0], mipMapCount, GL_RGBA8, 32, 32, BX_Size);
 		for(int layerIndex = 0; layerIndex < BX_Size; layerIndex++) {
 			int x,y,n;
 			unsigned char* stbData = stbi_load(textureFilePaths[layerIndex], &x, &y, &n, 4);
 			
+			if(layerIndex == BX_Water) {
+				uint* data = (uint*)stbData;
+				for(int x = 0; x < 32; x++) {
+					for(int y = 0; y < 32; y++) {
+						Vec4 c;
+						colorGetRGBA(data[y*32 + x], c.e);
+						c.r = waterAlpha;
+						data[y*32 + x] = mapRGBA(c.e);
+					}
+				}
+			}
+
 			glTextureSubImage3D(ad->voxelTextures[0], 0, 0, 0, layerIndex, x, y, 1, GL_RGBA, GL_UNSIGNED_BYTE, stbData);
 
 			stbi_image_free(stbData);
@@ -3337,7 +3496,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 
 
-		glTextureStorage3D(ad->voxelTextures[1], 1, GL_RGBA8, 32, 32, BX2_Size);
+		if(USE_SRGB) glTextureStorage3D(ad->voxelTextures[1], 1, GL_SRGB8_ALPHA8, 32, 32, BX2_Size);
+		else glTextureStorage3D(ad->voxelTextures[1], 1, GL_RGBA8, 32, 32, BX2_Size);
 		for(int layerIndex = 0; layerIndex < BX2_Size; layerIndex++) {
 			int x,y,n;
 			unsigned char* stbData = stbi_load(textureFilePaths2[layerIndex], &x, &y, &n, 4);
@@ -3930,9 +4090,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 									// dcCube({coordToVoxelCoord(pos - dir*rad), vec3(cubeSize), vec4(1,0.5f,0,1), 0, vec3(0,0,0)});
 
 									*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, pos+dir*rad) = 0; 
-									*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos+dir*rad) = 255; 
+									*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos+dir*rad) = globalLumen; 
 									*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, pos-dir*rad) = 0; 
-									*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos-dir*rad) = 255; 
+									*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos-dir*rad) = globalLumen; 
 
 									for(int it = 0; it < 2; it++) {
 										bool found = false;
@@ -3959,13 +4119,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 										// dcCube({coordToVoxelCoord(pos - vec3(off2,0,-z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
 
 										*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos + vec3(off2,0, z)) = 0; 
-										*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos + vec3(off2,0, z)) = 255; 
+										*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos + vec3(off2,0, z)) = globalLumen; 
 										*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos + vec3(off2,0,-z)) = 0; 
-										*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos + vec3(off2,0,-z)) = 255; 
+										*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos + vec3(off2,0,-z)) = globalLumen; 
 										*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos - vec3(off2,0, z)) = 0; 
-										*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos - vec3(off2,0, z)) = 255; 
+										*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos - vec3(off2,0, z)) = globalLumen; 
 										*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos - vec3(off2,0,-z)) = 0; 
-										*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos - vec3(off2,0,-z)) = 255; 
+										*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos - vec3(off2,0,-z)) = globalLumen; 
 									}
 								}
 							}
@@ -4175,7 +4335,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				} else if(removeBlock) {
 					if(*block > 0) {
 						*block = 0;
-						*lighting = 255;
+						*lighting = globalLumen;
 					}
 				}
 			}
@@ -4208,14 +4368,18 @@ extern "C" APPMAINFUNCTION(appMain) {
 		printf("\t%s \n", messageLog);
 	}
 
-
 	// glEnable(GL_FRAMEBUFFER_SRGB);
 	glEnable(GL_CULL_FACE);
 
 	// Vec3 skyColor = vec3(0.90f, 0.90f, 0.95f);
 	// Vec3 skyColor = vec3(0.95f);
 	Vec3 skyColor = vec3(0.90f);
-	Vec3 fogColor = vec3(0.75f, 0.85f, 0.95f);
+	// Vec3 fogColor = vec3(0.75f, 0.85f, 0.95f);
+	// Vec3 fogColor = vec3(0.43f,0.38f,0.44f);
+	Vec3 fogColor = vec3(0.43f,0.38f,0.44f);
+	fogColor.x = powf(fogColor.x, (float)2.2f);
+	fogColor.y = powf(fogColor.y, (float)2.2f);
+	fogColor.z = powf(fogColor.z, (float)2.2f);
 
 	// for tech showcase
 	#ifdef STBVOX_CONFIG_LIGHTING_SIMPLE
@@ -4224,13 +4388,16 @@ extern "C" APPMAINFUNCTION(appMain) {
 	#endif 
 
 	glViewport(0,0, ad->curRes.x, ad->curRes.y);
+	// glClearColor(0,0,0, 1.0f);
+	// glClearColor(skyColor.x, skyColor.y, skyColor.z, 1.0f);
+
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	glBindFramebuffer (GL_FRAMEBUFFER, ad->frameBuffers[1]);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[0]);
-	glClearColor(skyColor.x, skyColor.y, skyColor.z, 0.0f);
+	glClearColor(skyColor.x, skyColor.y, skyColor.z, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	// glDepthRange(-1.0,1.0);
 	glFrontFace(GL_CW);
@@ -4274,6 +4441,36 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
+	bindShader(SHADER_CUBEMAP);
+	glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+	glBindTextures(0, 1, &ad->cubemapTextureId);
+	glBindSamplers(0, 1, ad->samplers);
+
+	Vec3 skyBoxRot;
+	if(ad->playerMode) skyBoxRot = ad->player->rot;
+	else skyBoxRot = ad->cameraEntity->rot;
+	skyBoxRot.x += M_PI;
+
+	Camera skyBoxCam = getCamData(vec3(0,0,0), skyBoxRot, vec3(0,0,0), vec3(0,1,0), vec3(0,0,1));
+
+	Mat4 viewMat; viewMatrix(&viewMat, skyBoxCam.pos, -skyBoxCam.look, skyBoxCam.up, skyBoxCam.right);
+	Mat4 projMat; projMatrix(&projMat, degreeToRadian(ad->fieldOfView), ad->aspectRatio, 0.001f, 2);
+
+	pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_VIEW, viewMat.e);
+	pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_PROJ, projMat.e);
+
+	glDepthMask(false);
+	glFrontFace(GL_CCW);
+	glDrawArrays(GL_TRIANGLES, 0, 6*6);
+	glFrontFace(GL_CW);
+	glDepthMask(true);
+
+	glDisable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+
+
+
+
+
 	#if 1
 	// @worldgen
 	if(reload) {
@@ -4284,8 +4481,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 				Vec2i coord = vec2i(y, x);
 				// Vec2i coord = vec2i(0,0);	
 				VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
-				// m->upToDate = false;
-				// m->meshUploaded = false;
+				m->upToDate = false;
+				m->meshUploaded = false;
 				// m->generated = false;
 			}
 		}
@@ -4491,6 +4688,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glStencilFunc(GL_EQUAL, 1, 0xFF);
 
 		glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[2]);
+		glClearColor(0,0,0,0);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
 		Vec2i reflectionRes = ad->curRes;
@@ -4533,7 +4731,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glDisable(GL_DEPTH_TEST);
 
 		bindShader(SHADER_QUAD);
-		drawRect(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0), rect(0,1,1,0), vec4(1,1,1,0.5f), ad->frameBufferTextures[1]);
+		drawRect(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0), rect(0,1,1,0), vec4(1,1,1,reflectionAlpha), ad->frameBufferTextures[1]);
 
 		glEnable(GL_DEPTH_TEST);
 	}
@@ -4575,7 +4773,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			dcCull({false});
 			Vec3 vs[4];
 			getPointsFromQuadAndNormal(ad->selectedBlock + ad->selectedBlockFaceDir*0.5f*1.01f, ad->selectedBlockFaceDir, 1, vs);
-			dcQuad({vs[0], vs[1], vs[2], vs[3], vec4(1,1,1,0.05f)});
+			dcQuad({vs[0], vs[1], vs[2], vs[3], vec4(1,1,1,0.025f)});
 			dcCull({true});
 
 			dcPolygonMode({POLYGON_MODE_LINE});
@@ -4589,7 +4787,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	bindShader(SHADER_CUBE);
 
 
-	Vec3 ep = vec3(0,0,70);
+	Vec3 ep = vec3(0,0,80);
 
 	static ParticleEmitter emitter;
 	static bool emitterInit = true; 
@@ -4600,7 +4798,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		emitter.particleListSize = 100000;
 		emitter.particleList = getPArray(Particle, emitter.particleListSize);
 		// emitter.spawnRate = 0.00001f;
-		emitter.spawnRate = 0.001f;
+		// emitter.spawnRate = 0.001f;
+		emitter.spawnRate = 0.005f;
 		// emitter.spawnRate = 0.0001f;
 
 		emitter.pos = vec3(0,0,70);
@@ -4612,7 +4811,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	static float dt = 0;
 	// dt += ad->dt;
 	emitter.pos = ep + vec3(sin(dt),0,0);
-	drawCube(emitter.pos, vec3(0.5f), vec4(0,0,0,0.2f), 0, vec3(0,0,0));
+	// drawCube(emitter.pos, vec3(0.5f), vec4(0,0,0,0.2f), 0, vec3(0,0,0));
 
 	// if(0)
 	{
@@ -4634,12 +4833,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 				// p.acc = -dir*0.2f;
 				p.acc = -dir*1.0f;
 
-				// float cOff = randomFloat(-0.2,0.2, 0.001f);
-				// p.color = vec4(0.8f + cOff, 0.1f + cOff, 0.6f + cOff, 1.0f);
-				p.color = vec4(0.8f, 0.1f, 0.6f, 1.0f);
-				// p.velColor = vec4(-0.2f,0,0.2f,-0.2f);
-				// p.velColor = vec4(-0.2f,0,0.2f,0.0f);
-				p.accColor = vec4(-0.2f,0,0.2f,-0.05f);
+				// p.color = vec4(0.8f, 0.1f, 0.6f, 1.0f);
+				// p.accColor = vec4(-0.15f,0,0.15f,-0.05f);
+				p.color = vec4(0.8f, 0.8f, 0.1f, 1.0f);
+				p.accColor = vec4(+0.10f,-0.15f,0,-0.05f);
+
 
 				// p.size = vec3(0.1f);
 				p.size = vec3(0.1f, 0.1f, 0.005f);
@@ -4650,6 +4848,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				p.accRot = -4.0f;
 
 				p.timeToLive = 5;
+				// p.timeToLive = randomFloat(2.0f,6.0f, 0.01f);
 
 				e->particleList[e->particleListCount++] = p;
 			}
@@ -4754,10 +4953,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-
-
-
 	#if 1
+
 
 		bindShader(SHADER_PARTICLE);
 		pushUniform(SHADER_PARTICLE, 0, PARTICLE_UNIFORM_VIEW, view);
@@ -4831,7 +5028,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glEnable(GL_CULL_FACE);
 
 
-		#endif 
+	#endif 
+
+
 
 
 
@@ -4839,12 +5038,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	int fontSize = 20;
 	int pi = 0;
-	Vec4 c = vec4(1.0f,0.3f,0.0f,1);
+	// Vec4 c = vec4(1.0f,0.2f,0.0f,1);
+	Vec4 c = vec4(1.0f,0.2f,0.0f,1);
 	Vec4 c2 = vec4(0,0,0,1);
 	// Font* font = getFont(FONT_LIBERATION_MONO, fontSize);
 	// Font* font = getFont(FONT_SOURCESANS_PRO, fontSize);
 	Font* font = getFont(FONT_CONSOLAS, fontSize);
 	float shadow = 1;
+	// float shadow = 0;
 	float xo = 6;
 
 	#define PVEC3(v) v.x, v.y, v.z
@@ -4891,7 +5092,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 			}
 
 			Vec2 pos = vec2(start + i*(iconSize.w + iconDist), -res.y*bottom);
-			dcRect({rectCenDim(pos, iconSize*1.2f*iconOff), rect(0,0,1,1), vec4(vec3(0.1f),trans), 1});
+			// dcRect({rectCenDim(pos, iconSize*1.2f*iconOff), rect(0,0,1,1), vec4(vec3(0.1f),trans), 1});
+			dcRect({rectCenDim(pos, iconSize*1.2f*iconOff), rect(0,0,1,1), vec4(0,0,0,0.85f), 1});
 
 			uint textureId = ad->voxelTextures[0];
 			dcRect({rectCenDim(pos, iconSize*iconOff), rect(0,0,1,1), color, textureId, texture1Faces[i+1][0]+1});
@@ -4956,12 +5158,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-
-
-
-
-
-
 	// ortho(rectCenDim(cam->x,cam->y, cam->z, cam->z/ad->aspectRatio));
 	// bindShader(SHADER_QUAD);
 	// drawRect(rectCenDim(0, 0, 0.01f, 100), rect(0,0,1,1), vec4(0.4f,1,0.4f,1), ad->textures[0]);
@@ -4993,6 +5189,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	glViewport(0,0, wSettings->currentRes.x, wSettings->currentRes.y);
 	bindShader(SHADER_QUAD);
+	if(USE_SRGB) glEnable(GL_FRAMEBUFFER_SRGB);
 	drawRect(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0), rect(0,1,1,0), vec4(1), ad->frameBufferTextures[0]);
 
 	glBindFramebuffer (GL_FRAMEBUFFER, 0);	
@@ -5017,6 +5214,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			} break;
 		}
 	}
+	if(USE_SRGB) glDisable(GL_FRAMEBUFFER_SRGB);
 
 	#if 0
 	stbvox_mesh_maker mm;
@@ -5150,15 +5348,17 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-
+	if(USE_SRGB) glEnable(GL_FRAMEBUFFER_SRGB);
 	#if 0
 	bindShader(SHADER_QUAD);
 
 	// Vec2 size = vec2(800, 800/ad->aspectRatio);
 	// Vec2 size = vec2(ad->curRes);
 	// Rect tb = rectCenDim(vec2(ad->curRes.x - size.x*0.5f, -size.y*0.5f), size);
-	Texture* st = &ad->textures[TEXTURE_TEST];
-	drawRect(rectCenDim(vec2(400,-400), vec2(st->dim)), rect(0,0,1,1), vec4(1,1,1,1), st->id);
+	// Texture* st = &ad->textures[TEXTURE_TEST];
+	Texture* st = getTexture(TEXTURE_TEST);
+	Vec2i screenCenter = ad->wSettings.currentRes;
+	drawRect(rectCenDim(vec2(screenCenter.x, -screenCenter.y)/2, vec2(st->dim)), rect(0,0,1,1), vec4(1,1,1,1), st->id);
 
 	// Vec2 size = vec2(800, 800/ad->aspectRatio);
 	// // Vec2 size = vec2(ad->curRes);
@@ -5166,6 +5366,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// drawRect(tb, rect(0,0,1,1), vec4(0,0,0,1), ad->textures[TEXTURE_WHITE]);
 	// drawRect(tb, rect(0,0,1,1), vec4(1,1,1,1), ad->frameBufferTextures[1]);
 	#endif
+	if(USE_SRGB) glDisable(GL_FRAMEBUFFER_SRGB);
+
+
 
 	if(second) {
 		GLenum glError = glGetError(); printf("GLError: %i\n", glError);

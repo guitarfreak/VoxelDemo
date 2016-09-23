@@ -1648,6 +1648,239 @@ static const char *stbvox_vertex_program =
       "}\n"
 };
 
+// static const char *stbvox_fragment_program =
+// {
+//       STBVOX_SHADER_VERSION
+
+//       "uniform float alphaTest;\n"
+
+//       // rlerp is lerp but with t on the left, like god intended
+//       #if defined(STBVOX_ICONFIG_GLSL)
+//          "#define rlerp(t,x,y) mix(x,y,t)\n"
+//       #elif defined(STBVOX_CONFIG_HLSL)
+//          "#define rlerp(t,x,y) lerp(x,y,t)\n"
+//       #else
+//          #error "need definition of rlerp()"
+//       #endif
+
+
+//       // vertex-shader output data
+//       "flat in uvec4  facedata;\n"
+//       "     in  vec3  voxelspace_pos;\n"
+//       "     in  vec3  vnormal;\n"
+//       "     in float  texlerp;\n"
+//       "     in float  amb_occ;\n"
+
+//       // per-buffer data
+//       "uniform vec3 transform[3];\n"
+
+//       // per-frame data
+//       "uniform vec4 camera_pos;\n"  // 4th value is used for arbitrary hacking
+
+//       // probably constant data
+//       "uniform vec4 ambient[4];\n"
+
+//       #ifndef STBVOX_ICONFIG_UNTEXTURED
+//          // generally constant data
+//          "uniform sampler2DArray tex_array[2];\n"
+
+//          #ifdef STBVOX_CONFIG_PREFER_TEXBUFFER
+//             "uniform samplerBuffer color_table;\n"
+//             "uniform samplerBuffer texscale;\n"
+//             "uniform samplerBuffer texgen;\n"
+//          #else
+//             "uniform vec4 color_table[64];\n"
+//             "uniform vec4 texscale[64];\n" // instead of 128, to avoid running out of uniforms
+//             "uniform vec3 texgen[64];\n"
+//          #endif
+//       #endif
+
+//       "out vec4  outcolor;\n"
+
+//       #if defined(STBVOX_CONFIG_LIGHTING) || defined(STBVOX_CONFIG_LIGHTING_SIMPLE)
+//       "vec3 compute_lighting(vec3 pos, vec3 norm, vec3 albedo, vec3 ambient);\n"
+//       #endif
+//       #if defined(STBVOX_CONFIG_FOG) || defined(STBVOX_CONFIG_FOG_SMOOTHSTEP)
+//       "vec3 compute_fog(vec3 color, vec3 relative_pos, float fragment_alpha);\n"
+//       #endif
+
+//       "void main()\n"
+//       "{\n"
+//       "   vec3 albedo;\n"
+//       "   float fragment_alpha;\n"
+
+//       #ifndef STBVOX_ICONFIG_UNTEXTURED
+//          // unpack the values
+//          "   uint tex1_id = facedata.x;\n"
+//          "   uint tex2_id = facedata.y;\n"
+//          "   uint texprojid = facedata.w & 31u;\n"
+//          "   uint color_id  = facedata.z;\n"
+
+//          #ifndef STBVOX_CONFIG_PREFER_TEXBUFFER
+//             // load from uniforms / texture buffers 
+//             "   vec3 texgen_s = texgen[texprojid];\n"
+//             "   vec3 texgen_t = texgen[texprojid+32u];\n"
+//             "   float tex1_scale = texscale[tex1_id & 63u].x;\n"
+//             "   vec4 color = color_table[color_id & 63u];\n"
+//             #ifndef STBVOX_CONFIG_DISABLE_TEX2
+//             "   vec4 tex2_props = texscale[tex2_id & 63u];\n"
+//             #endif
+//          #else
+//             "   vec3 texgen_s = texelFetch(texgen, int(texprojid)).xyz;\n"
+//             "   vec3 texgen_t = texelFetch(texgen, int(texprojid+32u)).xyz;\n"
+//             "   float tex1_scale = texelFetch(texscale, int(tex1_id & 127u)).x;\n"
+//             "   vec4 color = texelFetch(color_table, int(color_id & 63u));\n"
+//             #ifndef STBVOX_CONFIG_DISABLE_TEX2
+//             "   vec4 tex2_props = texelFetch(texscale, int(tex1_id & 127u));\n"
+//             #endif
+//          #endif
+
+//          #ifndef STBVOX_CONFIG_DISABLE_TEX2
+//          "   float tex2_scale = tex2_props.y;\n"
+//          "   bool texblend_mode = tex2_props.z != 0.0;\n"
+//          #endif
+//          "   vec2 texcoord;\n"
+//          "   vec3 texturespace_pos = voxelspace_pos + transform[2].xyz;\n"
+//          "   texcoord.s = dot(texturespace_pos, texgen_s);\n"
+//          "   texcoord.t = dot(texturespace_pos, texgen_t);\n"
+
+//          "   vec2  texcoord_1 = tex1_scale * texcoord;\n"
+//          #ifndef STBVOX_CONFIG_DISABLE_TEX2
+//          "   vec2  texcoord_2 = tex2_scale * texcoord;\n"
+//          #endif
+
+//          #ifdef STBVOX_CONFIG_TEX1_EDGE_CLAMP
+//          "   texcoord_1 = texcoord_1 - floor(texcoord_1);\n"
+//          "   vec4 tex1 = textureGrad(tex_array[0], vec3(texcoord_1, float(tex1_id)), dFdx(tex1_scale*texcoord), dFdy(tex1_scale*texcoord));\n"
+//          #else
+//          "   vec4 tex1 = texture(tex_array[0], vec3(texcoord_1, float(tex1_id)));\n"
+//          #endif
+
+//          #ifndef STBVOX_CONFIG_DISABLE_TEX2
+//          #ifdef STBVOX_CONFIG_TEX2_EDGE_CLAMP
+//          "   texcoord_2 = texcoord_2 - floor(texcoord_2);\n"
+//          "   vec4 tex2 = textureGrad(tex_array[0], vec3(texcoord_2, float(tex2_id)), dFdx(tex2_scale*texcoord), dFdy(tex2_scale*texcoord));\n"
+//          #else
+//          "   vec4 tex2 = texture(tex_array[1], vec3(texcoord_2, float(tex2_id)));\n"
+//          #endif
+//          #endif
+
+//          "   bool emissive = (color.a > 1.0);\n"
+//          "   color.a = min(color.a, 1.0);\n"
+
+//          // recolor textures
+//          "   if ((color_id &  64u) != 0u) tex1.rgba *= color.rgba;\n"
+//          "   fragment_alpha = tex1.a;\n"
+//          #ifndef STBVOX_CONFIG_DISABLE_TEX2
+//             "   if ((color_id & 128u) != 0u) tex2.rgba *= color.rgba;\n"
+
+//             #ifdef STBVOX_CONFIG_PREMULTIPLIED_ALPHA
+//             "   tex2.rgba *= texlerp;\n"
+//             #else
+//             "   tex2.a *= texlerp;\n"
+//             #endif
+
+//             "   if (texblend_mode)\n"
+//             "      albedo = tex1.xyz * rlerp(tex2.a, vec3(1.0,1.0,1.0), 2.0*tex2.xyz);\n"
+//             "   else {\n"
+//             #ifdef STBVOX_CONFIG_PREMULTIPLIED_ALPHA
+//             "      albedo = (1.0-tex2.a)*tex1.xyz + tex2.xyz;\n"
+//             #else
+//             "      albedo = rlerp(tex2.a, tex1.xyz, tex2.xyz);\n"
+//             #endif
+//             "      fragment_alpha = tex1.a*(1-tex2.a)+tex2.a;\n"
+//             "   }\n"
+//          #else
+//             "      albedo = tex1.xyz;\n"
+//          #endif
+
+//       #else // UNTEXTURED
+//          "   vec4 color;"
+//          "   color.xyz = vec3(facedata.xyz) / 255.0;\n"
+//          "   bool emissive = false;\n"
+//          "   albedo = color.xyz;\n"
+//          "   fragment_alpha = 1.0;\n"
+//       #endif
+
+//       #ifdef STBVOX_ICONFIG_VARYING_VERTEX_NORMALS
+//          // currently, there are no modes that trigger this path; idea is that there
+//          // could be a couple of bits per vertex to perturb the normal to e.g. get curved look
+//          "   vec3 normal = normalize(vnormal);\n"
+//       #else
+//          "   vec3 normal = vnormal;\n"
+//       #endif
+
+//       "   vec3 ambient_color = dot(normal, ambient[0].xyz) * ambient[1].xyz + ambient[2].xyz;\n"
+
+//       "   ambient_color = clamp(ambient_color, 0.0, 1.0);"
+//       "   ambient_color *= amb_occ;\n"
+
+//       "   vec3 lit_color;\n"
+//       "   if (!emissive)\n"
+//       #if defined(STBVOX_ICONFIG_LIGHTING) || defined(STBVOX_CONFIG_LIGHTING_SIMPLE)
+//          "      lit_color = compute_lighting(voxelspace_pos + transform[1], normal, albedo, ambient_color);\n"
+//       #else
+//          "      lit_color = albedo * ambient_color ;\n"
+//       #endif
+//       "   else\n"
+//       "      lit_color = albedo;\n"
+
+//       #if defined(STBVOX_ICONFIG_FOG) || defined(STBVOX_CONFIG_FOG_SMOOTHSTEP)
+//          "   vec3 dist = voxelspace_pos + (transform[1] - camera_pos.xyz);\n"
+//          "   lit_color = compute_fog(lit_color, dist, fragment_alpha);\n"
+//       #endif
+      
+//       #ifdef STBVOX_CONFIG_UNPREMULTIPLY
+//       "   vec4 final_color = vec4(lit_color/fragment_alpha, fragment_alpha);\n"
+//       #else
+//       "   vec4 final_color = vec4(lit_color, fragment_alpha);\n"
+//       #endif
+//       "   if(final_color.a <= alphaTest) discard;\n"
+      
+//       "   outcolor = final_color;\n"
+//       // "   outcolor = vec4(final_color.xyz, 1);\n"
+//       "}\n"
+
+//    #ifdef STBVOX_CONFIG_LIGHTING_SIMPLE
+//       "\n"
+//       "uniform vec3 light_source[2];\n"
+//       "vec3 compute_lighting(vec3 pos, vec3 norm, vec3 albedo, vec3 ambient)\n"
+//       "{\n"
+//       "   vec3 light_dir = light_source[0] - pos;\n"
+//       "   float lambert = dot(light_dir, norm) / dot(light_dir, light_dir);\n"
+//       "   vec3 diffuse = clamp(light_source[1] * clamp(lambert, 0.0, 1.0), 0.0, 1.0);\n"
+//       "   return (diffuse + ambient) * albedo;\n"
+//       "}\n"
+//    #endif
+
+//    #ifdef STBVOX_CONFIG_FOG_SMOOTHSTEP
+//       "\n"
+//       "vec3 compute_fog(vec3 color, vec3 relative_pos, float fragment_alpha)\n"
+//       "{\n"
+//       "   float f = dot(relative_pos,relative_pos)*ambient[3].w;\n"
+//       //"   f = rlerp(f, -2,1);\n"
+//       "   f = clamp(f, 0.0, 1.0);\n" 
+//       "   f = 3.0*f*f - 2.0*f*f*f;\n" // smoothstep
+//       // "   f = f*f;\n"  // fade in more smoothly
+
+//       // "   f = rlerp(f, 0.);\n"
+//       "   f = f*f;\n"
+
+//       // "   if(f > 0.99f) f = 1;\n"
+
+//       // "   if(f > 0.01f) f = 1;\n"
+//       // "   else f = 0;\n"
+
+//       #ifdef STBVOX_CONFIG_PREMULTIPLIED_ALPHA
+//       "   return rlerp(f, color.xyz, ambient[3].xyz*fragment_alpha);\n"
+//       #else
+//       "   return rlerp(f, color.xyz, ambient[3].xyz);\n"
+//       // "   return ambient[3].xyz;\n"
+//       #endif
+//       "}\n"
+//    #endif
+// };
+
 static const char *stbvox_fragment_program =
 {
       STBVOX_SHADER_VERSION
@@ -1701,7 +1934,7 @@ static const char *stbvox_fragment_program =
       "vec3 compute_lighting(vec3 pos, vec3 norm, vec3 albedo, vec3 ambient);\n"
       #endif
       #if defined(STBVOX_CONFIG_FOG) || defined(STBVOX_CONFIG_FOG_SMOOTHSTEP)
-      "vec3 compute_fog(vec3 color, vec3 relative_pos, float fragment_alpha);\n"
+      "vec4 compute_fog(vec3 color, vec3 relative_pos, float fragment_alpha);\n"
       #endif
 
       "void main()\n"
@@ -1815,30 +2048,31 @@ static const char *stbvox_fragment_program =
       "   ambient_color = clamp(ambient_color, 0.0, 1.0);"
       "   ambient_color *= amb_occ;\n"
 
-      "   vec3 lit_color;\n"
+      "   vec4 lit_color;\n"
       "   if (!emissive)\n"
       #if defined(STBVOX_ICONFIG_LIGHTING) || defined(STBVOX_CONFIG_LIGHTING_SIMPLE)
-         "      lit_color = compute_lighting(voxelspace_pos + transform[1], normal, albedo, ambient_color);\n"
+         "      lit_color.xyz = compute_lighting(voxelspace_pos + transform[1], normal, albedo, ambient_color);\n"
       #else
-         "      lit_color = albedo * ambient_color ;\n"
+         "      lit_color.xyz = albedo * ambient_color ;\n"
       #endif
       "   else\n"
-      "      lit_color = albedo;\n"
+      "      lit_color.xyz = albedo;\n"
 
       #if defined(STBVOX_ICONFIG_FOG) || defined(STBVOX_CONFIG_FOG_SMOOTHSTEP)
          "   vec3 dist = voxelspace_pos + (transform[1] - camera_pos.xyz);\n"
-         "   lit_color = compute_fog(lit_color, dist, fragment_alpha);\n"
+         "   lit_color = compute_fog(lit_color.xyz, dist, fragment_alpha);\n"
       #endif
       
       #ifdef STBVOX_CONFIG_UNPREMULTIPLY
-      "   vec4 final_color = vec4(lit_color/fragment_alpha, fragment_alpha);\n"
+      "   vec4 final_color = vec4(lit_color.xyz/fragment_alpha, fragment_alpha);\n"
       #else
-      "   vec4 final_color = vec4(lit_color, fragment_alpha);\n"
+      "   vec4 final_color = vec4(lit_color.xyz, fragment_alpha);\n"
       #endif
       "   if(final_color.a <= alphaTest) discard;\n"
+      "   final_color.a = lit_color.a;\n"
       
       "   outcolor = final_color;\n"
-      // "   outcolor = vec4(1,1,0,1);\n"
+      // "   outcolor = vec4(final_color.xyz, 1);\n"
       "}\n"
 
    #ifdef STBVOX_CONFIG_LIGHTING_SIMPLE
@@ -1855,21 +2089,29 @@ static const char *stbvox_fragment_program =
 
    #ifdef STBVOX_CONFIG_FOG_SMOOTHSTEP
       "\n"
-      "vec3 compute_fog(vec3 color, vec3 relative_pos, float fragment_alpha)\n"
+      "vec4 compute_fog(vec3 color, vec3 relative_pos, float fragment_alpha)\n"
       "{\n"
       "   float f = dot(relative_pos,relative_pos)*ambient[3].w;\n"
       //"   f = rlerp(f, -2,1);\n"
       "   f = clamp(f, 0.0, 1.0);\n" 
       "   f = 3.0*f*f - 2.0*f*f*f;\n" // smoothstep
       // "   f = f*f;\n"  // fade in more smoothly
+
+      "   f = f*f;\n"
+
+      "float fogAlpha = fragment_alpha;\n"
+      "if(f >= fragment_alpha) fogAlpha = f;\n"
+
       #ifdef STBVOX_CONFIG_PREMULTIPLIED_ALPHA
       "   return rlerp(f, color.xyz, ambient[3].xyz*fragment_alpha);\n"
       #else
-      "   return rlerp(f, color.xyz, ambient[3].xyz);\n"
+      // "   return rlerp(f, color.xyz, ambient[3].xyz);\n"
+      "   return vec4(rlerp(f, color.xyz, ambient[3].xyz), fogAlpha);\n"
       #endif
       "}\n"
    #endif
 };
+
 
 
 // still requires full alpha lookups, including tex2 if texblend is enabled
