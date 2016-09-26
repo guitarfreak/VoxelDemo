@@ -39,7 +39,7 @@ int CALLBACK WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR commandLi
 	// initMemorySizes(globalMemory, megaBytes(500), megaBytes(100), megaBytes(100), kiloBytes(10));
 	// initMemorySizes(globalMemory, megaBytes(2000), megaBytes(100), megaBytes(100), kiloBytes(10));
 	// initMemorySizes(globalMemory, megaBytes(1000), megaBytes(100), megaBytes(100), kiloBytes(10));
-	initMemorySizes(globalMemory, megaBytes(1500), megaBytes(10), megaBytes(100), kiloBytes(10));
+	initMemorySizes(globalMemory, megaBytes(1500), megaBytes(30), megaBytes(100), kiloBytes(10));
 	initMemory(globalMemory);
 
 	HotloadDll hotloadDll;
@@ -55,7 +55,8 @@ int CALLBACK WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR commandLi
     bool isRunning = true;
     while(isRunning) {
     	bool reload = false;
-    	if(threadQueue.completionCount == threadQueue.completionGoal)
+    	// if(threadQueueFull()threadQueue.completionCount == threadQueue.completionGoal)
+		if(threadQueueFinished(&threadQueue)) 
     		reload = updateDll(&hotloadDll);
         // if(reload) Sleep(1000);
      	platform_appMain = (appMainType*)getDllFunction(&hotloadDll, "appMain");

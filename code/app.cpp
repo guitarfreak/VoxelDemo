@@ -14,6 +14,7 @@
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
 #define STBI_ONLY_BMP
+#define STBI_ONLY_JPEG
 #include "stb_image.h"
 
 #define STB_TRUETYPE_IMPLEMENTATION
@@ -65,6 +66,9 @@
 - 32x32 gen chunks
 
 - put in a cubemap to make things prettier and not rely on white clear color as the sky
+- fix srgbv
+- put in spaces for fillString
+- save mouse position at startup and place the mouse there when the app closes
 
 //-------------------------------------
 //               BUGS
@@ -79,6 +83,10 @@
 - hotload gets stuck sometimes, thread that won't complete
 
 - draw line crashes
+- text looks wrong after srgb conversion
+- release build takes forever
+- threadQueueComplete(ThreadQueue* queue) doesnt work
+- threadqueue do next work from main thread bug
 */
 
 /*
@@ -1603,7 +1611,7 @@ void drawRect(Rect r, Rect uv, Vec4 color, int texture, float texZ = -1) {
 
 	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_MOD, cd.e);
 	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_UV, uv.min.x, uv.max.x, uv.max.y, uv.min.y);
-	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_COLOR, color.e);
+	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_COLOR, colorSRGB(color).e);
 	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_TEXZ, texZ);
 
 	uint tex[2] = {texture, texture};
@@ -1654,6 +1662,8 @@ void drawText(char* text, Font* font, Vec2 pos, Vec4 color, int vAlign = 0, int 
 
 	Vec2 shadowOffset = vec2(shadow, -shadow);
 
+	if(shadow != 0 && shadowColor == vec4(0,0,0,0)) shadowColor = vec4(0,0,0,1);
+
 	Vec2 startPos = pos;
 	for(int i = 0; i < length; i++) {
 		char t = text[i];
@@ -1699,7 +1709,8 @@ void drawCube(Vec3 trans, Vec3 scale, Vec4 color, float degrees, Vec3 rot) {
 
 	Mat4 model = modelMatrix(trans, scale, degrees, rot);
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODEL, model.e);
-	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, color.e);
+	// pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, color.e);
+	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, colorSRGB(color).e);
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODE, false);
 
 	glDrawArrays(GL_QUADS, 0, cubeMesh->vertCount);
@@ -1713,7 +1724,7 @@ void drawLine(Vec3 p0, Vec3 p1, Vec4 color) {
 	glBindTextures(0,2,tex);
 
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_VERTICES, verts[0].e, arrayCount(verts));
-	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, color.e);
+	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, colorSRGB(color).e);
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODE, true);
 
 	// glDrawArrays(GL_LINES, 0, arrayCount(verts));
@@ -1729,7 +1740,7 @@ void drawQuad(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec4 color) {
 	// pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_UV, quadUVs[0].e, arrayCount(quadUVs));
 
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_VERTICES, verts[0].e, arrayCount(verts));
-	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, &color);
+	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, colorSRGB(color).e);
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODE, true);
 
 	// glDrawArrays(GL_QUADS, 0, arrayCount(verts));
@@ -1756,7 +1767,7 @@ void drawQuad(Vec3 p, Vec3 normal, float size, Vec4 color) {
 	drawQuad(verts[0], verts[1], verts[2], verts[3], color);
 }
 
-uint createSampler(float ani, int wrapS, int wrapT, int magF, int minF) {
+uint createSampler(float ani, int wrapS, int wrapT, int magF, int minF, int wrapR = GL_CLAMP_TO_EDGE) {
 	uint result;
 	glCreateSamplers(1, &result);
 
@@ -1765,6 +1776,8 @@ uint createSampler(float ani, int wrapS, int wrapT, int magF, int minF) {
 	glSamplerParameteri(result, GL_TEXTURE_WRAP_T, wrapT);
 	glSamplerParameteri(result, GL_TEXTURE_MAG_FILTER, magF);
 	glSamplerParameteri(result, GL_TEXTURE_MIN_FILTER, minF);
+
+	glSamplerParameteri(result, GL_TEXTURE_WRAP_R, wrapR);
 
 	return result;
 }
@@ -2121,10 +2134,7 @@ VoxelMesh* getVoxelMesh(VoxelNode** voxelHash, int voxelHashSize, Vec2i coord) {
 // int startY = 48000;
 
 float reflectionAlpha = 0.75f;
-// float reflectionAlpha = 1.0f;
 float waterAlpha = 0.75f;
-// float waterAlpha = 1;
-// int globalLumen = 255;
 int globalLumen = 210;
 
 int startX = 37750;
@@ -2133,11 +2143,22 @@ int startY = 47850;
 int startXMod = 58000;
 int startYMod = 68000;
 
-const int WORLD_MIN = 60;
-const int WORLD_MAX = 255;
+int WORLD_MIN = 60;
+int WORLD_MAX = 255;
 // const int WATER_LEVEL_HEIGHT = WORLD_MIN*1.06f;
-const int WATER_LEVEL_HEIGHT = lerp(0.017f, WORLD_MIN, WORLD_MAX);
+float waterLevelValue = 0.017f;
+int WATER_LEVEL_HEIGHT = lerp(waterLevelValue, WORLD_MIN, WORLD_MAX);
 // #define WATER_LEVEL_HEIGHT 62
+
+float worldFreq = 0.004f;
+int worldDepth = 6;
+float modFreq = 0.02f;
+int modDepth = 4;
+float modOffset = 0.1f;
+float heightLevels[4] = {0.4, 0.6, 0.8, 1.0f};
+float worldPowCurve = 4;
+
+#define THREADING 1
 
 bool* treeNoise;
 
@@ -2160,38 +2181,23 @@ void generateVoxelMeshThreaded(void* data) {
 				int gx = (coord.x*VOXEL_X)+x;
 				int gy = (coord.y*VOXEL_Y)+y;
 
-	    		// float perlin = perlin2d(gx+4000, gy+4000, 0.015f, 4);
-	    		// float height = perlin*50;
-	    		// float height = 5;
-
-	    		// static int startX = randomInt(0, 10000);
-	    		// static int startY = randomInt(0, 10000);
-
-	    		// static int startXMod = randomInt(0,10000);
-	    		// static int startYMod = randomInt(0,10000);
-
-	    		// float height = perlin2d(gx+4000+startX, gy+4000+startY, 0.004f, 7);
-				float height = perlin2d(gx+4000+startX, gy+4000+startY, 0.004f, 6);
-				// float height = perlin2d(gx+4000+startX, gy+4000+startY, 0.04f, 6);
+				float height = perlin2d(gx+4000+startX, gy+4000+startY, worldFreq, worldDepth);
 				height += worldHeightOffset; 
 
 				// float mod = perlin2d(gx+startXMod, gy+startYMod, 0.008f, 4);
-				float perlinMod = perlin2d(gx+startXMod, gy+startYMod, 0.02f, 4);
-				float modOffset = 0.1f;
+				float perlinMod = perlin2d(gx+startXMod, gy+startYMod, modFreq, modDepth);
 				float mod = lerp(perlinMod, -modOffset, modOffset);
 
 				float modHeight = height+mod;
 				int blockType;
-	    		// 	 if(height < 0.35f) blockType = 10; // water
-	    		// else if(height < 0.4f + mod) blockType = 11; // sand
-	    		if(modHeight < 0.4f) blockType = BT_Sand; // sand
-	    		else if(modHeight < 0.6f) blockType = BT_Grass; // grass
-	    		else if(modHeight < 0.8f) blockType = BT_Stone; // stone
-	    		else if(modHeight <= 1.0f) blockType = BT_Snow; // snow
+	    			 if(modHeight <  heightLevels[0]) blockType = BT_Sand; // sand
+	    		else if(modHeight <  heightLevels[1]) blockType = BT_Grass; // grass
+	    		else if(modHeight <  heightLevels[2]) blockType = BT_Stone; // stone
+	    		else if(modHeight <= heightLevels[3]) blockType = BT_Snow; // snow
 
 	    		height = clamp(height, 0, 1);
 	    		// height = pow(height,3.5f);
-	    		height = pow(height,4.0f);
+	    		height = pow(height,worldPowCurve);
 	    		int blockHeight = lerp(height, WORLD_MIN, WORLD_MAX);
 
 	    		for(int z = 0; z < blockHeight; z++) {
@@ -2271,7 +2277,7 @@ void generateVoxelMeshThreaded(void* data) {
 		}
 	}
 
-	atomicSub(&m->activeGeneration);
+	if(THREADING) atomicSub(&m->activeGeneration);
 	m->generated = true;
 }
 
@@ -2292,7 +2298,7 @@ void makeMeshThreaded(void* data) {
 	VoxelNode** voxelHash = d->voxelHash;
 	int voxelHashSize = d->voxelHashSize;
 
-	int cacheId = getThreadQueueId(globalThreadQueue);
+	int cacheId = THREADING ? getThreadQueueId(globalThreadQueue) : 1;
 
 	// gather voxel data in radius and copy to cache
 	Vec2i coord = m->coord;
@@ -2403,7 +2409,7 @@ void makeMeshThreaded(void* data) {
 
 
 
-	atomicSub(&m->activeMaking);
+	if(THREADING) atomicSub(&m->activeMaking);
 	m->upToDate = true;
 	d->inProgress = false;
 }
@@ -2421,37 +2427,52 @@ void makeMesh(VoxelMesh* m, VoxelNode** voxelHash, int voxelHashSize) {
 			VoxelMesh* lm = getVoxelMesh(voxelHash, voxelHashSize, c);
 
 			if(!lm->generated) {
-				if(!lm->activeGeneration && !threadQueueFull(globalThreadQueue)) {
-				// if(!lm->activeGeneration && threadQueueOpenJobs(globalThreadQueue) < threadJobsMax) {
-					atomicAdd(&lm->activeGeneration);
+				if(THREADING) {
+					// if(!lm->activeGeneration) {
+					if(!lm->activeGeneration && !threadQueueFull(globalThreadQueue)) {
+						// if(!lm->activeGeneration && threadQueueOpenJobs(globalThreadQueue) < threadJobsMax) {
+						atomicAdd(&lm->activeGeneration);
+						threadQueueAdd(globalThreadQueue, generateVoxelMeshThreaded, lm);
+					}
+					notAllMeshsAreReady = true;
+				} else {
+					// generateVoxelMeshThreaded(lm);
+
 					threadQueueAdd(globalThreadQueue, generateVoxelMeshThreaded, lm);
 				}
-				notAllMeshsAreReady = true;
 			} 
 		}
 	}
+
+	if(!THREADING) threadQueueComplete(globalThreadQueue);
 
 	if(notAllMeshsAreReady) return;
 
 	if(!m->upToDate) {
 		if(!m->activeMaking) {
-			if(threadQueueFull(globalThreadQueue)) return;
-			// if(threadQueueOpenJobs(globalThreadQueue) < threadJobsMax) return;
+			if(THREADING) {
+				if(threadQueueFull(globalThreadQueue)) return;
+				// if(threadQueueOpenJobs(globalThreadQueue) < threadJobsMax) return;
 
-			MakeMeshThreadedData* data;
-			for(int i = 0; i < 256; i++) {
-				if(!threadData[i].inProgress) {
-					threadData[i] = {m, voxelHash, voxelHashSize, true};
-					// data = threadData + i;
-					atomicAdd(&m->activeMaking);
-					threadQueueAdd(globalThreadQueue, makeMeshThreaded, &threadData[i]);
+				MakeMeshThreadedData* data;
+				for(int i = 0; i < 256; i++) {
+					if(!threadData[i].inProgress) {
+						threadData[i] = {m, voxelHash, voxelHashSize, true};
+						// data = threadData + i;
+						
+						atomicAdd(&m->activeMaking);
+						threadQueueAdd(globalThreadQueue, makeMeshThreaded, &threadData[i]);
 
-					break;
+						break;
+					}
 				}
+			} else {
+				threadData[1] = {m, voxelHash, voxelHashSize, true};
+				makeMeshThreaded(&threadData[1]);
 			}
 		}
 
-		return;
+		if(THREADING) return;
 	} 
 
 	glNamedBufferData(m->bufferId, m->bufferSizePerQuad*m->quadCount, m->meshBuffer, GL_STATIC_DRAW);
@@ -2748,9 +2769,14 @@ Camera getCamData(Vec3 pos, Vec3 rot, Vec3 offset = vec3(0,0,0), Vec3 gUp = vec3
 	return c;
 }
 
+
 struct AppData {
-	uint cubemapTextureId;
+	bool showHud;
+
+	uint cubemapTextureId[16];
 	uint cubemapSamplerId;
+	int cubeMapCount;
+	int cubeMapDrawIndex;
 
 	SystemData systemData;
 	Input input;
@@ -2808,6 +2834,8 @@ struct AppData {
 	uchar* voxelLightingCache[8];
 
 	MakeMeshThreadedData threadData[256];
+
+	bool reloadWorld;
 
 	GLuint voxelSamplers[3];
 	GLuint voxelTextures[3];
@@ -3158,6 +3186,236 @@ struct CmdList {
       NVTokenSequencee tokenSequenceEmu;
 };
 
+
+struct Gui {
+	Font* font;
+	Vec4 textColor;
+	Vec4 regionColor;
+	Vec4 hoverColorAdd;
+	Vec4 panelColor;
+	Vec4 switchColorOn;
+	Vec4 switchColorOff;
+	float sliderSize;
+	Vec2 offsets;
+	Vec2 border;
+
+	Vec2 mousePos;
+	bool mouseClick;
+	bool mouseDown;
+	Vec2 startPos;
+	float panelWidth;
+
+	Vec2 currentPos;
+	Vec2 currentDim;
+	Vec2 lastPos;
+	Vec2 lastDim;
+
+	bool columnMode;
+	float columnArray[8];
+	float columnSize;
+	int columnIndex;
+
+	void init(Vec2 sPos, Font* f, float width) {
+		*this = {};
+
+		font = f;
+		textColor = vec4(0.9f, 0.9f, 0.9f, 1);
+		regionColor = vec4(0.2f,0.2f,0.2f,0.3f);
+		hoverColorAdd = vec4(0.1f,0.1f,0.1f,0);
+		panelColor = vec4(0.3f,0,0.3f,0.7f);
+		switchColorOn = vec4(0.0f,0.3f,0.0f,0);
+		switchColorOff = vec4(0.3f,0.0f,0.0f,0);
+		sliderSize = 1;
+		offsets = vec2(1,1);
+		border = vec2(4,-4);
+		panelWidth = width;
+
+		startPos = sPos + border;
+	}
+
+	void update(Vec2i mPos, bool click, bool down) {
+		mousePos = vec2(mPos.x, -mPos.y);
+		mouseClick = click;
+		mouseDown = down;
+
+		currentPos = startPos + vec2(0,currentDim.h);
+
+		// draw background
+		if(lastPos != vec2(0,0)) {
+			Rect background = rectULDim(startPos - border, vec2(panelWidth+border.x*2, -(lastPos.y-startPos.y)+lastDim.h - border.y*2));
+			dcRect({background, rect(0,0,1,1), panelColor, getTexture(TEXTURE_WHITE)->id});
+		}
+	}
+
+	void post() {
+	}
+
+	void advancePosY() 	{currentPos.y -= currentDim.h+offsets.h;};
+	void defaultX() 	{currentPos.x = startPos.x;};
+	void defaultHeight(){currentDim.h = font->height*1.2f;};
+	void defaultWidth() {currentDim.w = panelWidth;};
+
+	void defaultValues() {
+		advancePosY();
+		defaultX();
+		defaultHeight();
+		defaultWidth();
+	}
+
+	void pre() {
+		if(columnMode) {
+			if(columnIndex == 0) {
+				defaultValues();
+			} else {
+				defaultHeight();
+				defaultWidth();
+				currentPos.x += lastDim.w + offsets.w;
+			}
+			currentDim.w -= (columnSize-1)*offsets.w;
+			currentDim.w *= columnArray[columnIndex];
+
+			columnIndex++;
+			if(columnIndex == columnSize) columnMode = false;
+		} else {
+			defaultValues();
+		}
+
+		lastPos = currentPos;
+		lastDim = currentDim;
+	}
+
+	void columns(float* c, int size) {
+		float sum = 0;
+		int dynamicElementsCount = 0;
+		for(int i = 0; i < size; i++) {
+			sum += c[i];
+			if(c[i] == 0) dynamicElementsCount++;
+		}
+		if(dynamicElementsCount) {
+			float val = (1-sum)/dynamicElementsCount;
+			for(int i = 0; i < size; i++) {
+				sum += c[i];
+				if(c[i] == 0) c[i] = val;
+			}
+		}
+
+		for(int i = 0; i < size; i++) columnArray[i] = c[i];
+
+		columnSize = size;
+		columnMode = true;
+		columnIndex = 0;
+	}
+	void columns(Vec2 v) {columns(v.e, 2);};
+	void columns(Vec3 v) {columns(v.e, 3);};
+	void columns(Vec4 v) {columns(v.e, 4);};
+	void columns(float a, float b) {columns(vec2(a,b));};
+	void columns(float a, float b, float c) {columns(vec3(a,b,c));};
+	void columns(float a, float b, float c, float d) {columns(vec4(a,b,c,d));};
+
+	Rect getCurrentRegion() {
+		Rect result = rectULDim(currentPos, currentDim);
+		return result;
+	}
+
+	void label(char* text) {
+		pre();
+
+		Rect region = getCurrentRegion();
+		bool mouseOver = pointInRect(mousePos, region);
+
+		dcText({text, font, rectGetCen(region), textColor, 1, 1, 1});
+
+		post();
+	}
+
+	bool switcher(char* text, bool* value) {
+		pre();
+
+		Rect region = getCurrentRegion();
+		bool mouseOver = pointInRect(mousePos, region);
+
+		Vec4 oc = {};
+		bool active = mouseOver && mouseClick;
+		if(active) {
+			oc = hoverColorAdd*2;
+			*value = !(*value);
+		}
+		else if(mouseOver) oc = hoverColorAdd;
+
+		Vec4 finalColor = regionColor + oc;
+		if((*value)) finalColor += switchColorOn;
+		else finalColor += switchColorOff;
+
+		dcRect({region, rect(0,0,1,1), finalColor, getTexture(TEXTURE_WHITE)->id});
+		dcText({text, font, rectGetCen(region), textColor, 1, 1, 1});
+
+		post();
+		return active;
+	}
+
+	bool button(char* text) {
+		pre();
+
+		Rect region = getCurrentRegion();
+		bool mouseOver = pointInRect(mousePos, region);
+
+		Vec4 oc = {};
+		bool active = mouseOver && mouseClick;
+		if(active) oc = hoverColorAdd*2;
+		else if(mouseOver) oc = hoverColorAdd;
+		dcRect({region, rect(0,0,1,1), regionColor + oc, getTexture(TEXTURE_WHITE)->id});
+		dcText({text, font, rectGetCen(region), textColor, 1, 1, 1});
+
+		post();
+		return active;
+	}
+
+	bool slider(void* value, float min, float max, bool typeFloat = true) {
+		pre();
+
+		Vec2 sliderRange = vec2(min, max);
+		char* text = "";
+
+		Rect region = getCurrentRegion();
+		bool mouseOver = pointInRect(mousePos, region);
+
+		Vec4 oc = {};
+		bool active = mouseOver && mouseClick;
+		if(active) oc = hoverColorAdd*2;
+		else if(mouseOver) oc = hoverColorAdd;
+
+		dcRect({region, rect(0,0,1,1), regionColor + oc, getTexture(TEXTURE_WHITE)->id}); // background
+
+		Rect regCen = rectGetCenDim(region);
+
+		float calc = typeFloat ? *((float*)value) : *((int*)value);
+		if(mouseOver && mouseDown) {
+			calc = mapRange(mousePos.x, region.min.x, region.max.x, sliderRange.x, sliderRange.y);
+
+			if(typeFloat) *((float*)value) = calc;
+			else *((int*)value) = roundInt(calc);
+		}
+
+		float sliderX = mapRange(calc, sliderRange.x, sliderRange.y, region.min.x, region.max.x);
+
+		dcRect({rectCenDim(vec2(sliderX, regCen.cen.y), vec2(sliderSize, regCen.dim.y)), rect(0,0,1,1), vec4(1,1,1,1), getTexture(TEXTURE_WHITE)->id}); // vert line
+
+		char* string;
+		if(typeFloat) string = fillString("%f", *((float*)value));
+		else string = fillString("%i", *((int*)value));
+
+		dcText({string, font, rectGetCen(region), textColor, 1, 1, 1});
+
+		post();
+		return active;
+	}
+
+	bool slider(int* value, float min, float max) {
+		return slider(value, min, max, false);
+	}
+};
+
+
 extern "C" APPMAINFUNCTION(appMain) {
 	globalMemory = memoryBlock;
 	AppData* ad = (AppData*)memoryBlock->permanent;
@@ -3276,6 +3534,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->nearPlane = 0.1f;
 		// ad->farPlane = 2000;
 		ad->farPlane = 3000;
+		ad->showHud = true;
 
 		ad->voxelHashSize = sizeof(arrayCount(ad->voxelHash));
 		for(int i = 0; i < ad->voxelHashSize; i++) {
@@ -3294,7 +3553,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		ad->playerMode = true;
 		ad->pickMode = true;
-		ad->selectionRadius = 20;
+		ad->selectionRadius = 5;
 		input->captureMouse = true;
 
 		*ad->blockMenu = {};
@@ -3351,32 +3610,46 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 
 		// load cubemap
+		glCreateTextures(GL_TEXTURE_CUBE_MAP_ARRAY, arrayCount(ad->cubemapTextureId), &ad->cubemapTextureId[0]);
 
-		glCreateTextures(GL_TEXTURE_CUBE_MAP_ARRAY, 1, &ad->cubemapTextureId);
-		glTextureParameteri(ad->cubemapTextureId, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glTextureParameteri(ad->cubemapTextureId, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		glTextureParameteri(ad->cubemapTextureId, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTextureParameteri(ad->cubemapTextureId, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		glTextureParameteri(ad->cubemapTextureId, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		char* texturePaths[] = {
+			 						"..\\data\\skybox\\sb1.png",
+								// "..\\data\\skybox\\sb2.png", 
+								// "..\\data\\skybox\\sb3.jpg", 
+								// "..\\data\\skybox\\sb4.png", 
+								// "..\\data\\skybox\\xoGVD3X.jpg", 
+								};
 
-		glTextureStorage3D(ad->cubemapTextureId, 5, GL_SRGB8_ALPHA8, 1024, 1024, 6);
+		ad->cubeMapCount = arrayCount(texturePaths);
 
-		char* skyboxPaths[] = { "..\\data\\skybox\\skyrender0001.bmp", 
-								"..\\data\\skybox\\skyrender0004.bmp", 
-								"..\\data\\skybox\\skyrender0003.bmp", 
-								"..\\data\\skybox\\asdf.png", 
-								"..\\data\\skybox\\skyrender0005.bmp", 
-								"..\\data\\skybox\\skyrender0002.bmp"};
+		// for(int textureIndex = 0; textureIndex < arrayCount(ad->cubemapTextureId); textureIndex++) {
+		for(int textureIndex = 0; textureIndex < arrayCount(texturePaths); textureIndex++) {
+			int texWidth, texHeight, n;
+			uint* stbData = (uint*)stbi_load(texturePaths[textureIndex], &texWidth, &texHeight, &n, 4);
 
-		for(int i = 0; i < 6; i++) {
-			int x, y, n;
-			unsigned char* stbData = stbi_load(skyboxPaths[i], &x, &y, &n, 4);
+			int skySize = texWidth/(float)4;
 
-			glTextureSubImage3D(ad->cubemapTextureId, 0, 0, 0, i, x, y, 1, GL_RGBA, GL_UNSIGNED_BYTE, stbData);
+			glTextureStorage3D(ad->cubemapTextureId[textureIndex], 5, GL_SRGB8_ALPHA8, skySize, skySize, 6);
+
+			uint* skyTex = getTArray(uint, skySize*skySize);
+			Vec2i texOffsets[] = {{2,1}, {0,1}, {1,0}, {1,2}, {1,1}, {3,1}};
+			for(int i = 0; i < 6; i++) {
+				Vec2i offset = texOffsets[i] * skySize;
+
+				for(int x = 0; x < skySize; x++) {
+					for(int y = 0; y < skySize; y++) {
+						skyTex[y*skySize + x] = stbData[(offset.y+y)*texWidth + (offset.x+x)];
+					}
+				}
+
+				glTextureSubImage3D(ad->cubemapTextureId[textureIndex], 0, 0, 0, i, skySize, skySize, 1, GL_RGBA, GL_UNSIGNED_BYTE, skyTex);
+			}
+			// glGenerateTextureMipmap(ad->cubemapTextureId);
 
 			stbi_image_free(stbData);
 		}
-		glGenerateTextureMipmap(ad->cubemapTextureId);
+
+
 
 
 		// setup shaders and uniforms
@@ -3422,7 +3695,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		glCreateTextures(GL_TEXTURE_2D_ARRAY, 2, ad->voxelTextures);
 
-		ad->samplers[0] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
+		ad->samplers[0] = createSampler(16.0f, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
 
 
 		// voxel textures
@@ -3507,9 +3780,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 
 
-		glCreateFramebuffers(3, ad->frameBuffers);
+		glCreateFramebuffers(4, ad->frameBuffers);
 		glCreateRenderbuffers(2, ad->renderBuffers);
-		glCreateTextures(GL_TEXTURE_2D, 4, ad->frameBufferTextures);
+		glCreateTextures(GL_TEXTURE_2D, 5, ad->frameBufferTextures);
 		GLenum result = glCheckNamedFramebufferStatus(ad->frameBuffers[0], GL_FRAMEBUFFER);
 
 
@@ -3645,6 +3918,17 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glTextureStorage2D(ad->frameBufferTextures[2], 1, GL_DEPTH24_STENCIL8, reflectionRes.w, reflectionRes.h);
 		glNamedFramebufferTexture(ad->frameBuffers[2], GL_DEPTH_STENCIL_ATTACHMENT, ad->frameBufferTextures[2], 0);
 
+
+
+		glDeleteTextures(1, &ad->frameBufferTextures[4]);
+		glCreateTextures(GL_TEXTURE_2D, 1, &ad->frameBufferTextures[4]);
+		// glTextureStorage2D(ad->frameBufferTextures[4], 1, GL_RGBA8, s.w, s.h);
+		glTextureStorage2D(ad->frameBufferTextures[4], 1, GL_RGBA8, wSettings->currentRes.w, wSettings->currentRes.h);
+		glNamedFramebufferTexture(ad->frameBuffers[3], GL_COLOR_ATTACHMENT0, ad->frameBufferTextures[4], 0);
+
+
+
+
 		GLenum result = glCheckNamedFramebufferStatus(ad->frameBuffers[0], GL_FRAMEBUFFER);
 		GLenum result2 = glCheckNamedFramebufferStatus(ad->frameBuffers[1], GL_FRAMEBUFFER);
 		GLenum result3 = glCheckNamedFramebufferStatus(ad->frameBuffers[2], GL_FRAMEBUFFER);
@@ -3731,6 +4015,24 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		addEntity(&ad->entityList, &b);
 	}
+
+	// make sure the meshs around the player are loaded at startup
+	if(second) {
+		// Vec2i pPos = coordToMesh(ad->activeCam.pos);
+		Vec2i pPos = coordToMesh(ad->player->pos);
+		// for(int i = 0; i < 2; i++) {
+			for(int y = -1; y < 2; y++) {
+				for(int x = -1; x < 2; x++) {
+					Vec2i coord = pPos - vec2i(x,y);
+
+					VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
+					makeMesh(m, ad->voxelHash, ad->voxelHashSize);
+				}
+			}
+
+			// threadQueueComplete(globalThreadQueue);
+		// }
+	}	
 
 	// @update entities
 	for(int i = 0; i < ad->entityList.size; i++) {
@@ -4157,23 +4459,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->activeCam = getCamData(ad->cameraEntity->pos, ad->cameraEntity->rot, ad->cameraEntity->camOff);
 	}
 
-	// make sure the meshs around the player are loaded at startup
-	if(second) {
-		Vec2i pPos = coordToMesh(ad->activeCam.pos);
-		for(int i = 0; i < 2; i++) {
-			for(int y = -1; y < 2; y++) {
-				for(int x = -1; x < 2; x++) {
-					Vec2i coord = pPos - vec2i(x,y);
-
-					VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
-					makeMesh(m, ad->voxelHash, ad->voxelHashSize);
-				}
-			}
-
-			threadQueueComplete(globalThreadQueue);
-		}
-	}
-
 	// selecting blocks and modifying them
 	if(ad->playerMode) {
 		ad->blockSelected = false;
@@ -4265,7 +4550,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			else if(intersectionFace == 5) faceDir = vec3(0,0,1);
 			ad->selectedBlockFaceDir = faceDir;
 
-			if(ad->playerMode) {
+			if(ad->playerMode && fpsMode) {
 				VoxelMesh* vm = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordToMesh(intersectionBox));
 
 				uchar* block = getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, intersectionBox);
@@ -4440,10 +4725,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-
+	// draw cubemap
 	bindShader(SHADER_CUBEMAP);
 	glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
-	glBindTextures(0, 1, &ad->cubemapTextureId);
+	glBindTextures(0, 1, &ad->cubemapTextureId[ad->cubeMapDrawIndex]);
 	glBindSamplers(0, 1, ad->samplers);
 
 	Vec3 skyBoxRot;
@@ -4471,7 +4756,72 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-	#if 1
+	// static float worldTimer = 0;
+	// worldTimer += ad->dt;
+
+	// if(worldTimer >= 1) {
+	// 	worldTimer = 0;
+
+	// 	int radius = VIEW_DISTANCE/VOXEL_X;
+
+	// 	for(int y = -radius; y < radius; y++) {
+	// 		for(int x = -radius; x < radius; x++) {
+	// 			Vec2i coord = vec2i(y, x);
+	// 			// Vec2i coord = vec2i(0,0);	
+	// 			VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
+	// 			m->upToDate = false;
+	// 			m->meshUploaded = false;
+	// 			m->generated = false;
+	// 		}
+	// 	}
+	// }
+
+	// bool worldLoaded = false;
+	// while(worldLoaded == false) {
+	// 	int radius = VIEW_DISTANCE/VOXEL_X;
+
+	// 	worldLoaded = true;
+
+	// 	for(int y = -radius; y < radius; y++) {
+	// 		for(int x = -radius; x < radius; x++) {
+	// 			Vec2i coord = vec2i(y, x);
+	// 			VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
+
+	// 			if(!m->meshUploaded) {
+	// 				makeMesh(m, ad->voxelHash, ad->voxelHashSize);
+
+	// 				worldLoaded = false;
+	// 			}
+	// 		}
+	// 	}
+	// }
+
+	if(ad->reloadWorld) {	
+		ad->reloadWorld = false;
+
+		if(threadQueueFinished(threadQueue)) {
+			int radius = VIEW_DISTANCE/VOXEL_X;
+
+			Vec3 pp = ad->activeCam.pos;
+			Vec2i worldPos = coordToMesh(pp);
+
+			for(int y = worldPos.y-radius; y < worldPos.y+radius; y++) {
+				for(int x = worldPos.x-radius; x < worldPos.x+radius; x++) {
+					Vec2i coord = vec2i(x, y);
+					VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
+					m->upToDate = false;
+					m->meshUploaded = false;
+					m->generated = false;
+
+					makeMesh(m, ad->voxelHash, ad->voxelHashSize);
+				}
+			}
+			// return;
+		} 
+	}
+
+
+	#if 0
 	// @worldgen
 	if(reload) {
 		int radius = VIEW_DISTANCE/VOXEL_X;
@@ -4481,8 +4831,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 				Vec2i coord = vec2i(y, x);
 				// Vec2i coord = vec2i(0,0);	
 				VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
-				m->upToDate = false;
-				m->meshUploaded = false;
+				// m->upToDate = false;
+				// m->meshUploaded = false;
 				// m->generated = false;
 			}
 		}
@@ -4797,7 +5147,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// emitter.particleListSize = 100000;
 		emitter.particleListSize = 100000;
 		emitter.particleList = getPArray(Particle, emitter.particleListSize);
-		// emitter.spawnRate = 0.00001f;
+		// emitter.spawnRate = 0.0001f;
 		// emitter.spawnRate = 0.001f;
 		emitter.spawnRate = 0.005f;
 		// emitter.spawnRate = 0.0001f;
@@ -5032,37 +5382,78 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
+	if(input->keysPressed[VK_F5]) ad->showHud = !ad->showHud;
+
+	if(ad->showHud) {
+		int fontSize = 20;
+		int pi = 0;
+		// Vec4 c = vec4(1.0f,0.2f,0.0f,1);
+		Vec4 c = vec4(1.0f,0.4f,0.0f,1);
+		Vec4 c2 = vec4(0,0,0,1);
+		Font* font = getFont(FONT_CONSOLAS, fontSize);
+		float shadow = 1;
+		// float shadow = 0;
+		float xo = 6;
+		int ali = 2;
+
+		Vec2i tp = ad->wSettings.currentRes - vec2i(xo, 0);
+		#define PVEC3(v) v.x, v.y, v.z
+		#define PVEC2(v) v.x, v.y
+		dcText({fillString("Pos  : (%f,%f,%f)", PVEC3(ad->activeCam.pos)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow});
+		dcText({fillString("Look : (%f,%f,%f)", PVEC3(ad->activeCam.look)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow});
+		dcText({fillString("Up   : (%f,%f,%f)", PVEC3(ad->activeCam.up)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow});
+		dcText({fillString("Right: (%f,%f,%f)", PVEC3(ad->activeCam.right)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow});
+		dcText({fillString("Rot  : (%f,%f)", 	PVEC2(player->rot)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow});
+		dcText({fillString("Vec  : (%f,%f,%f)", PVEC3(player->vel)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow});
+		dcText({fillString("Acc  : (%f,%f,%f)", PVEC3(player->acc)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow});
+		dcText({fillString("Draws: (%i)", 		drawCounter), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow});
+		dcText({fillString("Quads: (%i)", 		triangleCount), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow});
+
+		dcText({fillString("Threads: (%i, %i)",	threadQueue->completionCount, threadQueue->completionGoal), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow});
 
 
 
+		static Gui gui;
+		static bool setupGui = true;
+		if(setupGui) {
+			gui.init(vec2(0,0), getFont(FONT_CONSOLAS, 20), 250);
+			setupGui = false;
+		}
+		gui.update(input->mousePos, input->mouseButtonPressed[0], input->mouseButtonDown[0]);
 
-	int fontSize = 20;
-	int pi = 0;
-	// Vec4 c = vec4(1.0f,0.2f,0.0f,1);
-	Vec4 c = vec4(1.0f,0.2f,0.0f,1);
-	Vec4 c2 = vec4(0,0,0,1);
-	// Font* font = getFont(FONT_LIBERATION_MONO, fontSize);
-	// Font* font = getFont(FONT_SOURCESANS_PRO, fontSize);
-	Font* font = getFont(FONT_CONSOLAS, fontSize);
-	float shadow = 1;
-	// float shadow = 0;
-	float xo = 6;
+		gui.label("World");
+		gui.currentPos.y -= 10;
 
-	#define PVEC3(v) v.x, v.y, v.z
-	#define PVEC2(v) v.x, v.y
-	dcText({fillString("Pos  : (%f,%f,%f)", PVEC3(ad->activeCam.pos)), font, vec2(xo,-fontSize*pi++), c, 0, 2, shadow, vec4(0,0,0,1)});
-	dcText({fillString("Look : (%f,%f,%f)", PVEC3(ad->activeCam.look)), font, vec2(xo,-fontSize*pi++), c, 0, 2, shadow, vec4(0,0,0,1)});
-	dcText({fillString("Up   : (%f,%f,%f)", PVEC3(ad->activeCam.up)), font, vec2(xo,-fontSize*pi++), c, 0, 2, shadow, vec4(0,0,0,1)});
-	dcText({fillString("Right: (%f,%f,%f)", PVEC3(ad->activeCam.right)), font, vec2(xo,-fontSize*pi++), c, 0, 2, shadow, vec4(0,0,0,1)});
-	dcText({fillString("Rot  : (%f,%f)", 	PVEC2(player->rot)), font, vec2(xo,-fontSize*pi++), c, 0, 2, shadow, vec4(0,0,0,1)});
-	dcText({fillString("Vec  : (%f,%f,%f)", PVEC3(player->vel)), font, vec2(xo,-fontSize*pi++), c, 0, 2, shadow, vec4(0,0,0,1)});
-	dcText({fillString("Acc  : (%f,%f,%f)", PVEC3(player->acc)), font, vec2(xo,-fontSize*pi++), c, 0, 2, shadow, vec4(0,0,0,1)});
-	dcText({fillString("Draws: (%i)", 		drawCounter), font, vec2(xo,-fontSize*pi++), c, 0, 2, shadow, vec4(0,0,0,1)});
-	dcText({fillString("Quads: (%i)", 		triangleCount), font, vec2(xo,-fontSize*pi++), c, 0, 2, shadow, vec4(0,0,0,1)});
+		if(gui.button("Compile")) shellExecute("C:\\Projects\\Hmm\\code\\buildWin32.bat");
+		if(gui.button("Reload World") || input->keysPressed[VK_TAB]) ad->reloadWorld = true;
+		
+		gui.columns(vec2(0,0)); gui.label("CubeMap"); gui.slider(&ad->cubeMapDrawIndex, 0, ad->cubeMapCount);
 
-	// dcText({fillString("Quads: (%i %i)", (int)input->mouseButtonDown[0], (int)input->mouseButtonDown[1]), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
-	// if(input->keysDown[VK_W])
-	// dcText({fillString("W", (int)input->mouseButtonDown[1]), &ad->font, vec2(0,-fontSize*pi++), c, 0, 2, 1, vec4(0,0,0,1)});
+		gui.columns(vec2(0,0)); gui.label("RefAlpha"); gui.slider(&reflectionAlpha, 0, 1);
+		gui.columns(vec2(0,0)); gui.label("Light"); gui.slider(&globalLumen, 0, 255);
+		gui.columns(0,0,0); gui.label("MinMax"); gui.slider(&WORLD_MIN, 0, 255); gui.slider(&WORLD_MAX, 0, 255);
+		gui.columns(vec2(0,0)); gui.label("WaterLevel"); 
+			if(gui.slider(&waterLevelValue, 0, 0.2f)) WATER_LEVEL_HEIGHT = lerp(waterLevelValue, WORLD_MIN, WORLD_MAX);
+
+		gui.columns(vec2(0,0)); gui.label("WFreq"); gui.slider(&worldFreq, 0.0001f, 0.02f);
+		gui.columns(vec2(0,0)); gui.label("WDepth"); gui.slider(&worldDepth, 1, 10);
+		gui.columns(vec2(0,0)); gui.label("MFreq"); gui.slider(&modFreq, 0.001f, 0.1f);
+		gui.columns(vec2(0,0)); gui.label("MDepth"); gui.slider(&modDepth, 1, 10);
+		gui.columns(vec2(0,0)); gui.label("MOffset"); gui.slider(&modOffset, 0, 1);
+		gui.columns(vec2(0,0)); gui.label("PowCurve"); gui.slider(&worldPowCurve, 1, 6);
+		gui.columns(0,0,0,0); gui.slider(heightLevels+0,0,1); gui.slider(heightLevels+1,0,1);
+							  gui.slider(heightLevels+2,0,1); gui.slider(heightLevels+3,0,1);
+
+		gui.label("Settings");
+		gui.currentPos.y -= 10;
+
+		gui.columns(vec2(0,0)); gui.label("FoV"); gui.slider(&ad->fieldOfView, 1, 180);
+		gui.columns(vec2(0,0)); gui.label("MSAA"); gui.slider(&ad->msaaSamples, 1, 8);
+		gui.switcher("Use Native Res", &ad->useNativeRes);
+		gui.columns(0,0,0); gui.label("FboRes"); gui.slider(&ad->fboRes.x, 150, ad->curRes.x); gui.slider(&ad->fboRes.y, 150, ad->curRes.y);
+		gui.columns(0,0,0); gui.label("NFPlane"); gui.slider(&ad->nearPlane, 0.01, 2); gui.slider(&ad->farPlane, 1000, 5000);
+	}
+
 
 	// @menu
 	if(ad->playerMode) {
@@ -5156,8 +5547,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-
-
 	// ortho(rectCenDim(cam->x,cam->y, cam->z, cam->z/ad->aspectRatio));
 	// bindShader(SHADER_QUAD);
 	// drawRect(rectCenDim(0, 0, 0.01f, 100), rect(0,0,1,1), vec4(0.4f,1,0.4f,1), ad->textures[0]);
@@ -5172,10 +5561,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glDisable(GL_DEPTH_TEST);
 	bindShader(SHADER_QUAD);
 
-	glBindFramebuffer (GL_FRAMEBUFFER, ad->frameBuffers[1]);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-	glBindFramebuffer (GL_FRAMEBUFFER, ad->frameBuffers[0]);
-
 	glBlitNamedFramebuffer(ad->frameBuffers[0], ad->frameBuffers[1],
 		0,0, ad->curRes.x, ad->curRes.y,
 		0,0, ad->curRes.x, ad->curRes.y,
@@ -5184,15 +5569,20 @@ extern "C" APPMAINFUNCTION(appMain) {
 		                   // GL_NEAREST);
 		GL_LINEAR);
 
-	glBindFramebuffer (GL_FRAMEBUFFER, 0);
 	glDisable(GL_DEPTH_TEST);
-
-	glViewport(0,0, wSettings->currentRes.x, wSettings->currentRes.y);
 	bindShader(SHADER_QUAD);
-	if(USE_SRGB) glEnable(GL_FRAMEBUFFER_SRGB);
+	glBindFramebuffer (GL_FRAMEBUFFER, ad->frameBuffers[3]);
+	glViewport(0,0, wSettings->currentRes.x, wSettings->currentRes.y);
 	drawRect(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0), rect(0,1,1,0), vec4(1), ad->frameBufferTextures[0]);
 
-	glBindFramebuffer (GL_FRAMEBUFFER, 0);	
+	// glViewport(0,0, ad->curRes.w, ad->curRes.h);
+	// glViewport(0,0, wSettings->currentRes.x, wSettings->currentRes.y);
+	// drawRect(rect(0, -ad->curRes.h, ad->curRes.w, 0), rect(0,1,1,0), vec4(1), ad->frameBufferTextures[0]);
+	// drawRect(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0), rect(0,1,1,0), vec4(1), ad->frameBufferTextures[0]);
+
+	// glViewport(0,0, wSettings->currentRes.x, wSettings->currentRes.y);
+
+
 
 	char* drawListIndex2 = (char*)globalCommandList2d->data;
 	for(int i = 0; i < globalCommandList2d->count; i++) {
@@ -5214,7 +5604,39 @@ extern "C" APPMAINFUNCTION(appMain) {
 			} break;
 		}
 	}
+
+	// Texture* st2 = getTexture(TEXTURE_WHITE);
+	// float g = 0.5f;
+	// Vec4 co = vec4(g,g,g,1);
+	// // glEnable(GL_FRAMEBUFFER_SRGB);
+	// // drawRect(rectCenDim(vec2(screenCenter.x, -screenCenter.y)/2, vec2(500,500)), rect(0,0,1,1), vec4(0,0,0,1), st2->id);
+
+	// // drawRect(rectCenDim(vec2(700,-700), vec2(2000,2000)), rect(0,0,1,1), vec4(1,1,1,1), st2->id);
+	// // drawRect(rectCenDim(vec2(700,-700), vec2(2000,2000)), rect(0,0,1,1), vec4(0.5f,0.5f,0.5f,1), st2->id);
+	// // drawRect(rectCenDim(vec2(700,-700), vec2(2000,2000)), rect(0,0,1,1), vec4(pow(0.5f,2.2f),pow(0.5f,2.2f),pow(0.5f,2.2f),1), st2->id);
+
+
+	// drawRect(rectCenDim(vec2(800-350,-500), vec2(100,1000)), rect(0,0,1,1), vec4(0,1,0,1), st2->id);
+	// drawRect(rectCenDim(vec2(800-150,-500), vec2(100,1000)), rect(0,0,1,1), vec4(1,1,0,1), st2->id);
+	// drawRect(rectCenDim(vec2(800,-500), vec2(100,1000)), rect(0,0,1,1), vec4(1,0,1,1), st2->id);
+	// drawRect(rectCenDim(vec2(800+150,-500), vec2(100,1000)), rect(0,0,1,1), vec4(0,1,1,1), st2->id);
+
+	// drawRect(rectCenDim(vec2(800,-500), vec2(1000,100)), rect(0,0,1,1), vec4(1,0,0,0.5f), st2->id);
+	// drawRect(rectCenDim(vec2(800,-450), vec2(1000,100)), rect(0,0,1,1), vec4(1,0,0,1), st2->id);
+	// // drawRect(rectCenDim(vec2(800,-500), vec2(1000,100)), rect(0,0,1,1), vec4(1,0,0,powf(0.5f, 1/2.2f)), st2->id);
+	// glEnable(GL_DEPTH_TEST);
+
+
+
+	if(USE_SRGB) glEnable(GL_FRAMEBUFFER_SRGB);
+	glBindFramebuffer (GL_FRAMEBUFFER, 0);
+	bindShader(SHADER_QUAD);
+	glBindSamplers(0, 1, ad->samplers);
+
+	drawRect(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0), rect(0,1,1,0), vec4(1), ad->frameBufferTextures[4]);
 	if(USE_SRGB) glDisable(GL_FRAMEBUFFER_SRGB);
+
+
 
 	#if 0
 	stbvox_mesh_maker mm;
@@ -5348,17 +5770,23 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
+
+
+
 	if(USE_SRGB) glEnable(GL_FRAMEBUFFER_SRGB);
-	#if 0
+	#if 1
 	bindShader(SHADER_QUAD);
 
 	// Vec2 size = vec2(800, 800/ad->aspectRatio);
 	// Vec2 size = vec2(ad->curRes);
 	// Rect tb = rectCenDim(vec2(ad->curRes.x - size.x*0.5f, -size.y*0.5f), size);
 	// Texture* st = &ad->textures[TEXTURE_TEST];
-	Texture* st = getTexture(TEXTURE_TEST);
-	Vec2i screenCenter = ad->wSettings.currentRes;
-	drawRect(rectCenDim(vec2(screenCenter.x, -screenCenter.y)/2, vec2(st->dim)), rect(0,0,1,1), vec4(1,1,1,1), st->id);
+	// Texture* st = getTexture(TEXTURE_TEST);
+	// Vec2i screenCenter = ad->wSettings.currentRes;
+	// drawRect(rectCenDim(vec2(screenCenter.x, -screenCenter.y)/2, vec2(st->dim)), rect(0,0,1,1), vec4(1,1,1,1), st->id);
+
+
+	// glDisable(GL_FRAMEBUFFER_SRGB);
 
 	// Vec2 size = vec2(800, 800/ad->aspectRatio);
 	// // Vec2 size = vec2(ad->curRes);
@@ -5367,7 +5795,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// drawRect(tb, rect(0,0,1,1), vec4(1,1,1,1), ad->frameBufferTextures[1]);
 	#endif
 	if(USE_SRGB) glDisable(GL_FRAMEBUFFER_SRGB);
-
 
 
 	if(second) {

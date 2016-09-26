@@ -25,7 +25,7 @@ enum Keycode {
 
 struct Input {
 	bool firstFrame;
-	int mousePosX, mousePosY;
+	Vec2i mousePos;
 	int mouseDeltaX, mouseDeltaY;
 	int mouseWheel;
 	bool mouseButtonPressed[8];
@@ -353,8 +353,8 @@ void updateInput(Input* input, bool* isRunning, HWND windowHandle) {
     POINT point;    
     GetCursorPos(&point);
     ScreenToClient(windowHandle, &point);
-    input->mousePosX = point.x;
-    input->mousePosY = point.y;
+    input->mousePos.x = point.x;
+    input->mousePos.y = point.y;
 
     input->firstFrame = false;
 }
@@ -541,6 +541,10 @@ __int64 getTimestamp() {
 //     // printf("%s \n", totalCommand);
 //     system(totalCommand);
 // }
+
+void shellExecute(char* command) {
+	system(command);
+}
 
 // MetaPlatformFunction();
 void sleep(int milliseconds) {

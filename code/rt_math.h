@@ -134,7 +134,11 @@ inline bool pointIsLeftOfLine(float a[2], float b[2], float c[2]) {
 	return ((b[0] - a[0])*(c[1] - a[1]) - (b[1] - a[1])*(c[0] - a[0])) > 0;
 }
 
-inline int round(int i) {
+// inline int round(int i) {
+// 	return (int)floor(i + 0.5f);
+// }
+
+inline int roundInt(float i) {
 	return (int)floor(i + 0.5f);
 }
 
@@ -1861,12 +1865,22 @@ inline Vec4 operator+(Vec4 a, Vec4 b) {
 	return a;
 }
 
+inline Vec4 operator+=(Vec4 & a, Vec4 b) {
+	a = a + b;
+	return a;
+}
+
 inline Vec4 operator-(Vec4 a, Vec4 b) {
 	a.x -= b.x;
 	a.y -= b.y;
 	a.z -= b.z;
 	a.w -= b.w;
 	return a;
+}
+
+inline bool operator==(Vec4 a, Vec4 b) {
+	bool result = (a.x == b.x && a.y == b.y && a.z == b.z && a.w == b.w);
+	return result;
 }
 
 //
@@ -2526,4 +2540,12 @@ int blueNoise(Rect region, float radius, Vec2** noiseSamples, int numOfSamples =
 	for(int i = 0; i < sampleCount; ++i) samples[i] += region.min;
 
 	return sampleCount;
+}
+
+Vec4 colorSRGB(Vec4 color) {
+	color.r = powf(color.r, 2.2f);
+	color.g = powf(color.g, 2.2f);
+	color.b = powf(color.b, 2.2f);
+	// color.a = powf(color.a, 2.2f);
+	return color;
 }

@@ -48,11 +48,12 @@ bool doNextThreadJob(ThreadQueue* queue) {
     uint newReadIndex = (currentReadIndex + 1) % arrayCount(queue->jobs);
 
     if(currentReadIndex != queue->writeIndex) {
-        LONG oldValue = InterlockedCompareExchange(&queue->readIndex, newReadIndex, currentReadIndex);
+        LONG oldValue = InterlockedCompareExchange((LONG volatile*)&queue->readIndex, newReadIndex, currentReadIndex);
         if(newReadIndex == queue->readIndex) {
             ThreadJob job = queue->jobs[currentReadIndex];
             job.function(job.data);
-            InterlockedIncrement(&queue->completionCount);
+            InterlockedIncrement((LONG volatile*)&queue->completionCount);
+            // printf("COUNT: %i \n", queue->completionCount);
         }
     } else {
         shouldSleep = true;
@@ -65,7 +66,7 @@ DWORD WINAPI threadProcess(LPVOID data) {
     ThreadQueue* queue = (ThreadQueue*)data;
     for(;;) {
         if(doNextThreadJob(queue)) {
-            WaitForSingleObject(queue->semaphore, INFINITE);
+            WaitForSingleObjectEx(queue->semaphore, INFINITE, FALSE);
         }
     }
 
@@ -77,7 +78,8 @@ void threadInit(ThreadQueue* queue, int numOfThreads) {
     queue->completionCount = 0;
     queue->writeIndex = 0;
     queue->readIndex = 0;
-    queue->semaphore = CreateSemaphore(0, 0, 255, "Semaphore");
+    // queue->semaphore = CreateSemaphore(0, 0, 255, "Semaphore");
+    queue->semaphore = CreateSemaphoreEx(0, 0, 255, "Semaphore", 0, SEMAPHORE_ALL_ACCESS);
 
     int id = GetCurrentThreadId();
     queue->threadIds[0] = id;
@@ -100,19 +102,28 @@ void threadInit(ThreadQueue* queue, int numOfThreads) {
     }
 }
 
+#include <intrin.h>
 bool threadQueueAdd(ThreadQueue* queue, void (*function)(void*), void* data, bool skipIfFull = false) {
     int newWriteIndex = (queue->writeIndex + 1) % arrayCount(queue->jobs);
-    if(skipIfFull) {
-    	if(newWriteIndex == queue->readIndex) return false;
-    } else {
+    // if(skipIfFull) {
+    	// if(newWriteIndex == queue->readIndex) return false;
+    // } else {
 	    assert(newWriteIndex != queue->readIndex);
-    }
+    // }
     ThreadJob* job = queue->jobs + queue->writeIndex;
     job->function = function;
     job->data = data;
+
     InterlockedIncrement(&queue->completionGoal);
+    // printf("GOAL: %i \n", queue->completionCount);
+
     _ReadWriteBarrier(); // doesn't work on 32 bit?
     InterlockedExchange(&queue->writeIndex, newWriteIndex);
+
+    // queue->completionGoal++;
+    // _WriteBarrier();
+    // queue->writeIndex = newWriteIndex;
+
     ReleaseSemaphore(queue->semaphore, 1, 0);
 
     return true;
@@ -124,12 +135,27 @@ bool threadQueueFull(ThreadQueue* queue) {
     return result;
 }
 
+bool threadQueueFinished(ThreadQueue* queue) {
+	// bool result = queue->readIndex == queue->writeIndex;
+	// bool result = queue->completionCount == queue->completionGoal;
+	bool result = queue->completionCount >= queue->completionGoal;
+	return result;
+}
+
 void threadQueueComplete(ThreadQueue* queue) {
-    while(queue->completionCount != queue->completionGoal) {
-        doNextThreadJob(queue);
+    // while(queue->completionCount != queue->completionGoal) {
+    //     // doNextThreadJob(queue);
+    // }
+
+    while(threadQueueFinished(queue) == false) {
+        // doNextThreadJob(queue);
     }
+
     InterlockedExchange(&queue->completionGoal, 0);
     InterlockedExchange(&queue->completionCount, 0);
+
+    // queue->completionGoal = 0;
+    // queue->completionCount = 0;
 }
 
 int threadQueueOpenJobs(ThreadQueue* queue) {

@@ -1890,6 +1890,7 @@ static const char *stbvox_fragment_program =
       // rlerp is lerp but with t on the left, like god intended
       #if defined(STBVOX_ICONFIG_GLSL)
          "#define rlerp(t,x,y) mix(x,y,t)\n"
+         "#define rsmooth(t,x,y) smoothstep(x,y,t)\n"
       #elif defined(STBVOX_CONFIG_HLSL)
          "#define rlerp(t,x,y) lerp(x,y,t)\n"
       #else
@@ -2069,8 +2070,11 @@ static const char *stbvox_fragment_program =
       "   vec4 final_color = vec4(lit_color.xyz, fragment_alpha);\n"
       #endif
       "   if(final_color.a <= alphaTest) discard;\n"
-      "   final_color.a = lit_color.a;\n"
       
+      #ifdef STBVOX_CONFIG_FOG_SMOOTHSTEP
+      "   final_color.a = lit_color.a;\n"
+      #endif 
+
       "   outcolor = final_color;\n"
       // "   outcolor = vec4(final_color.xyz, 1);\n"
       "}\n"
@@ -2095,18 +2099,43 @@ static const char *stbvox_fragment_program =
       //"   f = rlerp(f, -2,1);\n"
       "   f = clamp(f, 0.0, 1.0);\n" 
       "   f = 3.0*f*f - 2.0*f*f*f;\n" // smoothstep
-      // "   f = f*f;\n"  // fade in more smoothly
+      "   f = f*f;\n"  // fade in more smoothly
 
-      "   f = f*f;\n"
+      // "float fogAlpha = fragment_alpha;\n"
+      // "fogAlpha = rlerp(f, fragment_alpha, 0);\n"
 
-      "float fogAlpha = fragment_alpha;\n"
-      "if(f >= fragment_alpha) fogAlpha = f;\n"
+      // "float colorRange = 0;\n"
+
+      // f : 0 -> 0.5f, lerp(0..1, fragment_alpha, 1)
+      // f : 0.5f -> 1, lerp(0..1, fragment_alpha, 0)
+
+      // f : 0 -> 0.5f, lerp(0..1, color, ambientColor)
+
+		"float fogAlpha, colorRange;\n"
+		"float off = 0.99f;\n"
+		"if(f <= off) {\n"
+		"	float nf = f*1/off;\n"
+		"	fogAlpha = rlerp(nf, fragment_alpha, 1);\n"
+		"	colorRange = nf;\n"
+		"} else {\n"
+		"	fogAlpha = rlerp((f-off) * 1/(1-off), 1, 0);\n"
+		"	colorRange = 1;\n"
+		"}\n"
+
+      // "float fogAlpha = fragment_alpha;\n"
+      // "if(f >= 1.0f) fogAlpha = 0;\n"
+      // "float colorRange = f;\n"
+
+      // "float fogAlpha = fragment_alpha;\n"
+      // "fogAlpha = rlerp(f, fragment_alpha, 0);\n"
+      // "float colorRange = 0;\n"
 
       #ifdef STBVOX_CONFIG_PREMULTIPLIED_ALPHA
       "   return rlerp(f, color.xyz, ambient[3].xyz*fragment_alpha);\n"
       #else
       // "   return rlerp(f, color.xyz, ambient[3].xyz);\n"
-      "   return vec4(rlerp(f, color.xyz, ambient[3].xyz), fogAlpha);\n"
+      // "   return vec4(rlerp(f, color.xyz, ambient[3].xyz), fogAlpha);\n"
+      "   return vec4(rlerp(colorRange, color.xyz, ambient[3].xyz), fogAlpha);\n"
       #endif
       "}\n"
    #endif
