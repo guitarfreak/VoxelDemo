@@ -59,6 +59,8 @@ inline void strClear(char* string) {
 
 int intDigits(int n) {
 	int count = 0;
+	if(n == 0) return 1;
+
 	while(n > 0) {
 		n /= 10;
 		count++;
@@ -70,6 +72,11 @@ int intDigits(int n) {
 inline char * intToStr(char * buffer, int var) {
 	int digits = intDigits(var);
 	buffer[digits--] = '\0';
+	if(var == 0) {
+		buffer[0] = '0';
+		return buffer;
+	}
+
 	while(var > 0) {
 		buffer[digits--] = (char)((var % 10) + '0');
 		var /= 10;

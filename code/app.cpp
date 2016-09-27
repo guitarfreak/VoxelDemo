@@ -70,6 +70,18 @@
 - put in spaces for fillString
 - save mouse position at startup and place the mouse there when the app closes
 
+gui stuff: 
+- colors
+- text
+- numbers
+
+additionally:
+- 2d drawing
+- 3d drawing
+- vector representation
+- sound 
+- entities
+
 //-------------------------------------
 //               BUGS
 //-------------------------------------
@@ -603,41 +615,21 @@ void loadFunctions() {
 #undef GLOP
 }
 
+enum CommandState {
+	STATE_SCISSOR = 0,
+	STATE_SIZE,
+};
+
 enum DrawListCommand {
-	Draw_Command_Viewport_Type,
-	Draw_Command_Clear_Type,
 	Draw_Command_Enable_Type,
 	Draw_Command_Disable_Type,
-	Draw_Command_FrontFace_Type,
-	Draw_Command_BindFramebuffer_Type,
-	Draw_Command_BindBuffer_Type,
-	Draw_Command_BlendFunc,
-// Draw_Command_DepthFunc,
-// Draw_Command_ClearDepth,
-	Draw_Command_ClearColor,
-// Draw_Command_GetUniformLocation,
-	Draw_Command_ProgramUniform,
-// Draw_Command_glEnableVertexAttribArray,
-// Draw_Command_glVertexAttribIPointer,
-// Draw_Command_glBindTextures,
-// Draw_Command_glBindSamplers,
-// Draw_Command_bindShader,
-// Draw_Command_glDrawArrays,
-// Draw_Command_glError,
-// Draw_Command_,
-// Draw_Command_,
-// Draw_Command_,
-// Draw_Command_,
-// Draw_Command_,
-// Draw_Command_,
-// Draw_Command_,
-// Draw_Command_,
 
 	Draw_Command_Cube_Type,
 	Draw_Command_Line_Type,
 	Draw_Command_Quad_Type,
 	Draw_Command_Rect_Type,
 	Draw_Command_Text_Type,
+	Draw_Command_Scissor_Type,
 	Draw_Command_PolygonMode_Type,
 	Draw_Command_LineWidth_Type,
 	Draw_Command_Cull_Type,
@@ -696,6 +688,10 @@ struct Draw_Command_Text {
 	Vec4 shadowColor;
 };
 
+struct Draw_Command_Scissor {
+	Rect rect;
+};
+
 enum Polygon_Mode {
 	POLYGON_MODE_FILL = 0,
 	POLYGON_MODE_LINE,
@@ -712,6 +708,14 @@ struct Draw_Command_LineWidth {
 
 struct Draw_Command_Cull {
 	bool b;
+};
+
+struct Draw_Command_Enable {
+	int state;
+};
+
+struct Draw_Command_Disable {
+	int state;
 };
 
 
@@ -737,6 +741,9 @@ struct Draw_Command_Cull {
 	makeDrawCommandFunction(Cull, 0);
 	makeDrawCommandFunction(Rect, 1);
 	makeDrawCommandFunction(Text, 1);
+	makeDrawCommandFunction(Scissor, 1);
+	makeDrawCommandFunction(Enable, 1);
+	makeDrawCommandFunction(Disable, 1);
 
 #define dcCase(name, var, index) \
 	Draw_Command_##name var = *((Draw_Command_##name*)index); \
@@ -1532,8 +1539,7 @@ Font* getFont(int fontId, int height) {
 		}
 
 		Texture tex;
-		if(USE_SRGB) tex = loadTexture(fontBitmap, size.w, size.h, 1, GL_SRGB8_ALPHA8, GL_RGBA, GL_UNSIGNED_BYTE);
-		else tex = loadTexture(fontBitmap, size.w, size.h, 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+		tex = loadTexture(fontBitmap, size.w, size.h, 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
 		font.tex = tex;
 
 		globalGraphicsState->fonts[fontId] = font;
@@ -2772,6 +2778,7 @@ Camera getCamData(Vec3 pos, Vec3 rot, Vec3 offset = vec3(0,0,0), Vec3 gUp = vec3
 
 struct AppData {
 	bool showHud;
+	bool updateFrameBuffers;
 
 	uint cubemapTextureId[16];
 	uint cubemapSamplerId;
@@ -3195,15 +3202,24 @@ struct Gui {
 	Vec4 panelColor;
 	Vec4 switchColorOn;
 	Vec4 switchColorOff;
+	Vec4 sliderColor;
 	float sliderSize;
 	Vec2 offsets;
 	Vec2 border;
+	Vec2i screenRes;
 
 	Vec2 mousePos;
 	bool mouseClick;
 	bool mouseDown;
 	Vec2 startPos;
 	float panelWidth;
+	float fontHeight;
+	float fontOffset;
+	float sectionOffset;
+	float fontHeightOffset;
+	float sectionIndent;
+	float scrollBarWidth;
+	float scrollBarSliderSize;
 
 	Vec2 currentPos;
 	Vec2 currentDim;
@@ -3215,44 +3231,103 @@ struct Gui {
 	float columnSize;
 	int columnIndex;
 
+	Rect scissorStack[8];
+	int scissorStackSize;
+
+	float scrollStack[8];
+	int scrollStackIndex;
+	float scrollStartY;
+	float scrollEndY;
+
 	void init(Vec2 sPos, Font* f, float width) {
 		*this = {};
 
 		font = f;
 		textColor = vec4(0.9f, 0.9f, 0.9f, 1);
 		regionColor = vec4(0.2f,0.2f,0.2f,0.3f);
-		hoverColorAdd = vec4(0.1f,0.1f,0.1f,0);
-		panelColor = vec4(0.3f,0,0.3f,0.7f);
+		hoverColorAdd = vec4(0.2f,0.2f,0.2f,0);
+		panelColor = vec4(0.3f,0,0.3f,0.90f);
 		switchColorOn = vec4(0.0f,0.3f,0.0f,0);
 		switchColorOff = vec4(0.3f,0.0f,0.0f,0);
-		sliderSize = 1;
-		offsets = vec2(1,1);
+		sliderColor = vec4(0.5f,0.5f,0.5f,0.6f);
+		sliderSize = 4;
+		offsets = vec2(2,2);
 		border = vec2(4,-4);
+
 		panelWidth = width;
+		fontHeight = font->height;
+		fontHeightOffset = 1.0f;
+		fontOffset = 0.15f;
+		sectionOffset = 1.15f;
+		sectionIndent = 0.08f;
+		scrollBarWidth = 20;
+		scrollBarSliderSize = 30;
 
 		startPos = sPos + border;
 	}
 
-	void update(Vec2i mPos, bool click, bool down) {
+	Rect scissorPush(Rect newRect) {
+		if(scissorStackSize == 0) {
+			scissorStack[scissorStackSize++] = newRect;
+			dcScissor({scissorRect(newRect)});
+
+			return newRect;
+		}
+
+		Rect currentRect = scissorStack[scissorStackSize-1];
+		Rect intersection;
+		rectGetIntersection(&intersection, newRect, currentRect);
+
+		dcScissor({scissorRect(intersection)});
+
+		scissorStack[scissorStackSize++] = intersection;
+		return intersection;
+	}
+
+	void scissorPop() {
+		scissorStackSize--;
+		scissorStackSize = clampMin(scissorStackSize, 0);
+		if(scissorStackSize > 0) dcScissor({scissorRect(scissorStack[scissorStackSize-1])});
+	}
+
+	Rect scissorRect(Rect r) {
+		Rect scissorRect = {r.min.x, r.min.y+screenRes.h, r.max.x, r.max.y+screenRes.h};
+		return scissorRect;
+	}
+
+	void start(Vec2i mPos, bool click, bool down, Vec2i res) {
 		mousePos = vec2(mPos.x, -mPos.y);
 		mouseClick = click;
 		mouseDown = down;
+		screenRes = res;
+		scrollStackIndex = 0;
 
 		currentPos = startPos + vec2(0,currentDim.h);
+
+		dcEnable({STATE_SCISSOR});
 
 		// draw background
 		if(lastPos != vec2(0,0)) {
 			Rect background = rectULDim(startPos - border, vec2(panelWidth+border.x*2, -(lastPos.y-startPos.y)+lastDim.h - border.y*2));
+			scissorPush(background);
 			dcRect({background, rect(0,0,1,1), panelColor, getTexture(TEXTURE_WHITE)->id});
 		}
 	}
 
-	void post() {
+	void end() {
+		scissorPop();
+		dcDisable({STATE_SCISSOR});
 	}
 
+	void post() {
+
+	}
+
+	float getDefaultHeight(){return fontHeight*fontHeightOffset;};
+	Vec2 getDefaultPos(){return vec2(startPos.x, currentPos.y - (currentDim.h+offsets.h));};
 	void advancePosY() 	{currentPos.y -= currentDim.h+offsets.h;};
 	void defaultX() 	{currentPos.x = startPos.x;};
-	void defaultHeight(){currentDim.h = font->height*1.2f;};
+	void defaultHeight(){currentDim.h = getDefaultHeight();};
 	void defaultWidth() {currentDim.w = panelWidth;};
 
 	void defaultValues() {
@@ -3271,8 +3346,7 @@ struct Gui {
 				defaultWidth();
 				currentPos.x += lastDim.w + offsets.w;
 			}
-			currentDim.w -= (columnSize-1)*offsets.w;
-			currentDim.w *= columnArray[columnIndex];
+			currentDim.w = columnArray[columnIndex];
 
 			columnIndex++;
 			if(columnIndex == columnSize) columnMode = false;
@@ -3284,55 +3358,160 @@ struct Gui {
 		lastDim = currentDim;
 	}
 
-	void columns(float* c, int size) {
+	void div(float* c, int size) {
+		int elementCount = 0;
 		float sum = 0;
 		int dynamicElementsCount = 0;
 		for(int i = 0; i < size; i++) {
-			sum += c[i];
 			if(c[i] == 0) dynamicElementsCount++;
+			else if(c[i] <= 1) {
+				sum += panelWidth*c[i];
+				c[i] = panelWidth*c[i];
+			}
+			else sum += c[i];
+
+			elementCount++;
 		}
 		if(dynamicElementsCount) {
-			float val = (1-sum)/dynamicElementsCount;
+			float val = (panelWidth-sum)/dynamicElementsCount;
 			for(int i = 0; i < size; i++) {
-				sum += c[i];
 				if(c[i] == 0) c[i] = val;
 			}
 		}
 
-		for(int i = 0; i < size; i++) columnArray[i] = c[i];
+		for(int i = 0; i < size; i++) {
+			columnArray[i] = c[i] - (((elementCount-1)*offsets.w) / elementCount);
+		}
 
 		columnSize = size;
 		columnMode = true;
 		columnIndex = 0;
 	}
-	void columns(Vec2 v) {columns(v.e, 2);};
-	void columns(Vec3 v) {columns(v.e, 3);};
-	void columns(Vec4 v) {columns(v.e, 4);};
-	void columns(float a, float b) {columns(vec2(a,b));};
-	void columns(float a, float b, float c) {columns(vec3(a,b,c));};
-	void columns(float a, float b, float c, float d) {columns(vec4(a,b,c,d));};
+	void div(Vec2 v) {div(v.e, 2);};
+	void div(Vec3 v) {div(v.e, 3);};
+	void div(Vec4 v) {div(v.e, 4);};
+	void div(float a, float b) {div(vec2(a,b));};
+	void div(float a, float b, float c) {div(vec3(a,b,c));};
+	void div(float a, float b, float c, float d) {div(vec4(a,b,c,d));};
 
 	Rect getCurrentRegion() {
 		Rect result = rectULDim(currentPos, currentDim);
 		return result;
 	}
 
-	void label(char* text) {
+	void drawText(char* text, int align = 1) {
+		Rect region = getCurrentRegion();
+		scissorPush(region);
+
+		Vec2 textPos = rectGetCen(region) + vec2(0,fontHeight*fontOffset);
+		if(align == 0) textPos.x -= rectGetDim(region).w*0.5f;
+		else if(align == 2) textPos.x += rectGetDim(region).w*0.5f;
+
+		dcText({text, font, textPos, textColor, align, 1, 1});		
+
+		scissorPop();
+	}
+
+	void drawRect(Rect r, Vec4 color) {
+		dcRect({r, rect(0,0,1,1), color, getTexture(TEXTURE_WHITE)->id});
+	}
+
+	void label(char* text, int align = 1) {
 		pre();
 
-		Rect region = getCurrentRegion();
-		bool mouseOver = pointInRect(mousePos, region);
-
-		dcText({text, font, rectGetCen(region), textColor, 1, 1, 1});
+		drawText(text, align);
 
 		post();
+	}
+
+	bool beginSection(char* text, bool* b) {
+		float saveFontHeight = fontHeight;
+		fontHeight *= sectionOffset;
+		div(vec2(getDefaultHeight()+offsets.x,0)); switcher("", b); label(text);
+		fontHeight = saveFontHeight;
+
+		float indent = panelWidth*sectionIndent;
+		startPos.x += indent*0.5f;
+		panelWidth -= indent;
+
+		return *b;
+	}
+
+	void endSection() {
+		panelWidth = panelWidth*(1/(1-sectionIndent));
+		startPos.x -= panelWidth*sectionIndent*0.5f;
+	}
+
+	bool scrollBar(float* value, Rect region, float diff) {
+		Vec2 sliderRange = vec2(0, 1);
+
+		bool mouseOver = pointInRect(mousePos, region) && pointInRect(mousePos, scissorStack[scissorStackSize-1]);
+
+		Vec4 oc = {};
+		bool active = mouseOver && mouseClick;
+		if(mouseOver) oc = hoverColorAdd;
+
+		drawRect(region, regionColor); //background
+
+		Rect regCen = rectGetCenDim(region);
+
+		float sliderWidth = regCen.dim.h - diff;
+		sliderWidth = clampMin(sliderWidth, scrollBarSliderSize);
+
+		float calc = *value;
+		if(mouseOver && mouseDown) {
+			calc = mapRange(mousePos.y, region.min.y+sliderWidth*0.5f, region.max.y-sliderWidth*0.5f, sliderRange.y, sliderRange.x);
+
+			*value = calc;
+			*value = clamp(*value, sliderRange.x, sliderRange.y);
+		}
+
+		float sliderX = mapRange(calc, sliderRange.y, sliderRange.x, region.min.y+sliderWidth*0.5f, region.max.y-sliderWidth*0.5f);
+
+		sliderX = clamp(sliderX, region.min.y+sliderWidth*0.5f, region.max.y-sliderWidth*0.5f);
+		drawRect(rectCenDim(vec2(regCen.cen.x, sliderX), vec2(regCen.dim.x, sliderWidth)), sliderColor + oc); // vert line
+
+		post();
+		return active;
+	}
+
+	// scroll sections don't nest right now
+	void beginScroll(int scrollHeight, float* scrollAmount) {
+		scrollEndY = currentPos.y - scrollHeight - offsets.h;
+
+		Rect r = rectULDim(getDefaultPos(), vec2(panelWidth, scrollHeight));
+
+		scissorPush(r);
+
+		panelWidth -= scrollBarWidth;
+
+		float offset = scrollStack[scrollStackIndex] - rectGetDim(r).h;
+
+		float diff = (scrollStack[scrollStackIndex] - rectGetDim(r).h);
+		if(diff > 0) {
+			currentPos.y += *scrollAmount * diff;
+
+			r.min.x += panelWidth + offsets.x;
+			scrollBar(scrollAmount, r, diff);
+		}
+	
+		scrollStartY = currentPos.y;
+	};
+
+	void endScroll() {
+		panelWidth += scrollBarWidth;
+		scissorPop();
+
+		scrollStack[scrollStackIndex++] = -((currentPos.y) - scrollStartY);
+
+		currentPos.y = scrollEndY;
 	}
 
 	bool switcher(char* text, bool* value) {
 		pre();
 
 		Rect region = getCurrentRegion();
-		bool mouseOver = pointInRect(mousePos, region);
+		bool mouseOver = pointInRect(mousePos, region) && pointInRect(mousePos, scissorStack[scissorStackSize-1]);
 
 		Vec4 oc = {};
 		bool active = mouseOver && mouseClick;
@@ -3346,8 +3525,8 @@ struct Gui {
 		if((*value)) finalColor += switchColorOn;
 		else finalColor += switchColorOff;
 
-		dcRect({region, rect(0,0,1,1), finalColor, getTexture(TEXTURE_WHITE)->id});
-		dcText({text, font, rectGetCen(region), textColor, 1, 1, 1});
+		drawRect(region, finalColor);
+		drawText(text);
 
 		post();
 		return active;
@@ -3357,14 +3536,14 @@ struct Gui {
 		pre();
 
 		Rect region = getCurrentRegion();
-		bool mouseOver = pointInRect(mousePos, region);
+		bool mouseOver = pointInRect(mousePos, region) && pointInRect(mousePos, scissorStack[scissorStackSize-1]);
 
 		Vec4 oc = {};
 		bool active = mouseOver && mouseClick;
 		if(active) oc = hoverColorAdd*2;
 		else if(mouseOver) oc = hoverColorAdd;
-		dcRect({region, rect(0,0,1,1), regionColor + oc, getTexture(TEXTURE_WHITE)->id});
-		dcText({text, font, rectGetCen(region), textColor, 1, 1, 1});
+		drawRect(region, regionColor + oc);
+		drawText(text);
 
 		post();
 		return active;
@@ -3374,37 +3553,49 @@ struct Gui {
 		pre();
 
 		Vec2 sliderRange = vec2(min, max);
-		char* text = "";
 
 		Rect region = getCurrentRegion();
-		bool mouseOver = pointInRect(mousePos, region);
+		bool mouseOver = pointInRect(mousePos, region) && pointInRect(mousePos, scissorStack[scissorStackSize-1]);
 
 		Vec4 oc = {};
 		bool active = mouseOver && mouseClick;
-		if(active) oc = hoverColorAdd*2;
-		else if(mouseOver) oc = hoverColorAdd;
+		if(mouseOver) oc = hoverColorAdd;
 
-		dcRect({region, rect(0,0,1,1), regionColor + oc, getTexture(TEXTURE_WHITE)->id}); // background
+		drawRect(region, regionColor); //background
 
 		Rect regCen = rectGetCenDim(region);
 
-		float calc = typeFloat ? *((float*)value) : *((int*)value);
-		if(mouseOver && mouseDown) {
-			calc = mapRange(mousePos.x, region.min.x, region.max.x, sliderRange.x, sliderRange.y);
-
-			if(typeFloat) *((float*)value) = calc;
-			else *((int*)value) = roundInt(calc);
+		float sliderWidth;
+		if(!typeFloat) {
+			sliderWidth = 1;
+			sliderWidth *= regCen.dim.x * 1/(float)((int)roundInt(max)-(int)roundInt(min) +1);
+			sliderWidth = clampMin(sliderWidth, sliderSize);
+		} else {
+			sliderWidth = sliderSize;
 		}
 
-		float sliderX = mapRange(calc, sliderRange.x, sliderRange.y, region.min.x, region.max.x);
+		float calc = typeFloat ? *((float*)value) : *((int*)value);
+		if(mouseOver && mouseDown) {
+			calc = mapRange(mousePos.x, region.min.x+sliderWidth*0.5f, region.max.x-sliderWidth*0.5f, sliderRange.x, sliderRange.y);
 
-		dcRect({rectCenDim(vec2(sliderX, regCen.cen.y), vec2(sliderSize, regCen.dim.y)), rect(0,0,1,1), vec4(1,1,1,1), getTexture(TEXTURE_WHITE)->id}); // vert line
+			if(typeFloat) {
+				*((float*)value) = calc;
+				*((float*)value) = clamp(*((float*)value), min, max);
+			} else {
+				*((int*)value) = roundInt(calc);
+				*((int*)value) = clamp(*((int*)value), (int)roundInt(min), (int)roundInt(max));
+			}
+		}
 
-		char* string;
-		if(typeFloat) string = fillString("%f", *((float*)value));
-		else string = fillString("%i", *((int*)value));
+		char* text;
+		if(typeFloat) text = fillString("%f", *((float*)value));
+		else text = fillString("%i", *((int*)value));
+		drawText(text);
 
-		dcText({string, font, rectGetCen(region), textColor, 1, 1, 1});
+		float sliderX = mapRange(calc, sliderRange.x, sliderRange.y, region.min.x+sliderWidth*0.5f, region.max.x-sliderWidth*0.5f);
+
+		sliderX = clamp(sliderX, region.min.x+sliderWidth*0.5f, region.max.x-sliderWidth*0.5f);
+		drawRect(rectCenDim(vec2(sliderX, regCen.cen.y), vec2(sliderWidth, regCen.dim.y)), sliderColor + oc); // vert line
 
 		post();
 		return active;
@@ -3793,7 +3984,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		return; // window operations only work after first frame?
 	}
 
-	bool updateFrameBuffers = false;
+	// ad->updateFrameBuffers = false;
 
 	if(second) {
 		setWindowProperties(windowHandle, wSettings->res.w, wSettings->res.h, -1920, 0);
@@ -3801,7 +3992,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		setWindowStyle(windowHandle, wSettings->style);
 		setWindowMode(windowHandle, wSettings, WINDOW_MODE_FULLBORDERLESS);
 
-		updateFrameBuffers = true;
+		ad->updateFrameBuffers = true;
 	}
 
 	if(reload) {
@@ -3843,7 +4034,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		else mode = WINDOW_MODE_FULLBORDERLESS;
 		setWindowMode(windowHandle, wSettings, mode);
 
-		updateFrameBuffers = true;
+		ad->updateFrameBuffers = true;
 	}
 
 	if(input->keysPressed[VK_F2]) {
@@ -3875,10 +4066,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		setWindowMode(windowHandle, wSettings, WINDOW_MODE_FULLBORDERLESS);
 
-		updateFrameBuffers = true;
+		ad->updateFrameBuffers = true;
 	}
 
-	if(updateFrameBuffers) {
+	if(ad->updateFrameBuffers) {
+		ad->updateFrameBuffers = false;
 		ad->aspectRatio = wSettings->aspectRatio;
 		
 		ad->fboRes.x = ad->fboRes.y*ad->aspectRatio;
@@ -5385,7 +5577,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	if(input->keysPressed[VK_F5]) ad->showHud = !ad->showHud;
 
 	if(ad->showHud) {
-		int fontSize = 20;
+		int fontSize = 18;
 		int pi = 0;
 		// Vec4 c = vec4(1.0f,0.2f,0.0f,1);
 		Vec4 c = vec4(1.0f,0.4f,0.0f,1);
@@ -5416,42 +5608,71 @@ extern "C" APPMAINFUNCTION(appMain) {
 		static Gui gui;
 		static bool setupGui = true;
 		if(setupGui) {
-			gui.init(vec2(0,0), getFont(FONT_CONSOLAS, 20), 250);
+			gui.init(vec2(0,1), getFont(FONT_CONSOLAS, fontSize), 300);
 			setupGui = false;
 		}
-		gui.update(input->mousePos, input->mouseButtonPressed[0], input->mouseButtonDown[0]);
+		gui.start(input->mousePos, input->mouseButtonPressed[0], input->mouseButtonDown[0], wSettings->currentRes);
 
-		gui.label("World");
-		gui.currentPos.y -= 10;
+		static bool sectionWorld = false;
+		if(gui.beginSection("World", &sectionWorld)) { 
+			if(gui.button("Compile")) shellExecute("C:\\Projects\\Hmm\\code\\buildWin32.bat");
+			if(gui.button("Reload World") || input->keysPressed[VK_TAB]) ad->reloadWorld = true;
+			
+			gui.div(vec2(0,0)); gui.label("CubeMap", 0); gui.slider(&ad->cubeMapDrawIndex, 0, ad->cubeMapCount);
 
-		if(gui.button("Compile")) shellExecute("C:\\Projects\\Hmm\\code\\buildWin32.bat");
-		if(gui.button("Reload World") || input->keysPressed[VK_TAB]) ad->reloadWorld = true;
-		
-		gui.columns(vec2(0,0)); gui.label("CubeMap"); gui.slider(&ad->cubeMapDrawIndex, 0, ad->cubeMapCount);
+			gui.div(vec2(0,0)); gui.label("RefAlpha", 0); gui.slider(&reflectionAlpha, 0, 1);
+			gui.div(vec2(0,0)); gui.label("Light", 0); gui.slider(&globalLumen, 0, 255);
+			gui.div(0,0,0); gui.label("MinMax", 0); gui.slider(&WORLD_MIN, 0, 255); gui.slider(&WORLD_MAX, 0, 255);
+			gui.div(vec2(0,0)); gui.label("WaterLevel", 0); 
+				if(gui.slider(&waterLevelValue, 0, 0.2f)) WATER_LEVEL_HEIGHT = lerp(waterLevelValue, WORLD_MIN, WORLD_MAX);
 
-		gui.columns(vec2(0,0)); gui.label("RefAlpha"); gui.slider(&reflectionAlpha, 0, 1);
-		gui.columns(vec2(0,0)); gui.label("Light"); gui.slider(&globalLumen, 0, 255);
-		gui.columns(0,0,0); gui.label("MinMax"); gui.slider(&WORLD_MIN, 0, 255); gui.slider(&WORLD_MAX, 0, 255);
-		gui.columns(vec2(0,0)); gui.label("WaterLevel"); 
-			if(gui.slider(&waterLevelValue, 0, 0.2f)) WATER_LEVEL_HEIGHT = lerp(waterLevelValue, WORLD_MIN, WORLD_MAX);
+			gui.div(vec2(0,0)); gui.label("WFreq", 0); gui.slider(&worldFreq, 0.0001f, 0.02f);
+			gui.div(vec2(0,0)); gui.label("WDepth", 0); gui.slider(&worldDepth, 1, 10);
+			gui.div(vec2(0,0)); gui.label("MFreq", 0); gui.slider(&modFreq, 0.001f, 0.1f);
+			gui.div(vec2(0,0)); gui.label("MDepth", 0); gui.slider(&modDepth, 1, 10);
+			gui.div(vec2(0,0)); gui.label("MOffset", 0); gui.slider(&modOffset, 0, 1);
+			gui.div(vec2(0,0)); gui.label("PowCurve", 0); gui.slider(&worldPowCurve, 1, 6);
+			gui.div(0,0,0,0); gui.slider(heightLevels+0,0,1); gui.slider(heightLevels+1,0,1);
+								  gui.slider(heightLevels+2,0,1); gui.slider(heightLevels+3,0,1);
+		} gui.endSection();
 
-		gui.columns(vec2(0,0)); gui.label("WFreq"); gui.slider(&worldFreq, 0.0001f, 0.02f);
-		gui.columns(vec2(0,0)); gui.label("WDepth"); gui.slider(&worldDepth, 1, 10);
-		gui.columns(vec2(0,0)); gui.label("MFreq"); gui.slider(&modFreq, 0.001f, 0.1f);
-		gui.columns(vec2(0,0)); gui.label("MDepth"); gui.slider(&modDepth, 1, 10);
-		gui.columns(vec2(0,0)); gui.label("MOffset"); gui.slider(&modOffset, 0, 1);
-		gui.columns(vec2(0,0)); gui.label("PowCurve"); gui.slider(&worldPowCurve, 1, 6);
-		gui.columns(0,0,0,0); gui.slider(heightLevels+0,0,1); gui.slider(heightLevels+1,0,1);
-							  gui.slider(heightLevels+2,0,1); gui.slider(heightLevels+3,0,1);
+		static bool sectionSettings = false;
+		if(gui.beginSection("Settings", &sectionSettings)) {
+			gui.div(vec2(0,0)); gui.label("FoV", 0); gui.slider(&ad->fieldOfView, 1, 180);
+			gui.div(vec2(0,0)); gui.label("MSAA", 0); gui.slider(&ad->msaaSamples, 1, 8);
+			gui.div(vec2(0,0)); gui.switcher("Native Res", &ad->useNativeRes); if(gui.button("Up Buffers")) ad->updateFrameBuffers = true;
+			gui.div(0,0,0); gui.label("FboRes", 0); gui.slider(&ad->fboRes.x, 150, ad->curRes.x); gui.slider(&ad->fboRes.y, 150, ad->curRes.y);
+			gui.div(0,0,0); gui.label("NFPlane", 0); gui.slider(&ad->nearPlane, 0.01, 2); gui.slider(&ad->farPlane, 1000, 5000);
+		} gui.endSection();
 
-		gui.label("Settings");
-		gui.currentPos.y -= 10;
 
-		gui.columns(vec2(0,0)); gui.label("FoV"); gui.slider(&ad->fieldOfView, 1, 180);
-		gui.columns(vec2(0,0)); gui.label("MSAA"); gui.slider(&ad->msaaSamples, 1, 8);
-		gui.switcher("Use Native Res", &ad->useNativeRes);
-		gui.columns(0,0,0); gui.label("FboRes"); gui.slider(&ad->fboRes.x, 150, ad->curRes.x); gui.slider(&ad->fboRes.y, 150, ad->curRes.y);
-		gui.columns(0,0,0); gui.label("NFPlane"); gui.slider(&ad->nearPlane, 0.01, 2); gui.slider(&ad->farPlane, 1000, 5000);
+		// static int scrollHeight = 200;
+		// static int scrollElements = 13;
+		// static float scrollVal = 0;
+
+		// gui.div(vec2(0,0)); gui.slider(&scrollHeight, 0, 500); gui.slider(&scrollElements, 0, 20);
+
+		// gui.beginScroll(scrollHeight, &scrollVal); {
+		// 	for(int i = 0; i < scrollElements; i++) {
+		// 		gui.button(fillString("Element: %i.", i));
+		// 	}
+		// } gui.endScroll();
+
+		// gui.button("sdfsdf");
+
+		// static float hue = 0;
+		// static float sat = 0;
+		// static float light = 0;
+		// gui.div(0,0,0,0); gui.label("Color"); gui.slider(&hue, 0,360); gui.slider(&sat,0,1); gui.slider(&light,0,1);
+
+		// static Vec4 rColor = vec4(1,1,1,1);
+		// hslToRgb(rColor.e, hue, sat, light);
+
+		gui.end();
+
+		// dcRect({rectCenDim(400,-400,200,200), rect(0,0,1,1), rColor, getTexture(TEXTURE_WHITE)->id});
+
+
 	}
 
 
@@ -5584,6 +5805,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
+
 	char* drawListIndex2 = (char*)globalCommandList2d->data;
 	for(int i = 0; i < globalCommandList2d->count; i++) {
 		int command = *((int*)drawListIndex2);
@@ -5598,6 +5820,33 @@ extern "C" APPMAINFUNCTION(appMain) {
 			case Draw_Command_Text_Type: {
 				dcCase(Text, dc, drawListIndex2);
 				drawText(dc.text, dc.font, dc.pos, dc.color, dc.vAlign, dc.hAlign, dc.shadow, dc.shadowColor);
+			} break;
+
+			case Draw_Command_Scissor_Type: {
+				dcCase(Scissor, dc, drawListIndex2);
+				Rect r = dc.rect;
+				Vec2 dim = rectGetDim(r);
+				glScissor(r.min.x, r.min.y, dim.x, dim.y);
+			} break;
+
+			case Draw_Command_Enable_Type: {
+				dcCase(Enable, dc, drawListIndex2);
+				int label = 0;
+				switch(dc.state) {
+					case STATE_SCISSOR: label = GL_SCISSOR_TEST;
+					default: {};
+				}
+				glEnable(label);
+			} break;
+
+			case Draw_Command_Disable_Type: {
+				dcCase(Disable, dc, drawListIndex2);
+				int label = 0;
+				switch(dc.state) {
+					case STATE_SCISSOR: label = GL_SCISSOR_TEST;
+					default: {};
+				}
+				glDisable(label);
 			} break;
 
 			default: {
@@ -5774,16 +6023,18 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 	if(USE_SRGB) glEnable(GL_FRAMEBUFFER_SRGB);
-	#if 1
+	#if 0
 	bindShader(SHADER_QUAD);
 
 	// Vec2 size = vec2(800, 800/ad->aspectRatio);
-	// Vec2 size = vec2(ad->curRes);
-	// Rect tb = rectCenDim(vec2(ad->curRes.x - size.x*0.5f, -size.y*0.5f), size);
-	// Texture* st = &ad->textures[TEXTURE_TEST];
+	Vec2 size = vec2(ad->curRes);
+	Rect tb = rectCenDim(vec2(ad->curRes.x - size.x*0.5f, -size.y*0.5f), size);
 	// Texture* st = getTexture(TEXTURE_TEST);
-	// Vec2i screenCenter = ad->wSettings.currentRes;
-	// drawRect(rectCenDim(vec2(screenCenter.x, -screenCenter.y)/2, vec2(st->dim)), rect(0,0,1,1), vec4(1,1,1,1), st->id);
+	// Texture* st = getTexture(TEXTURE_TEST);
+
+	Texture* st = &getFont(FONT_CONSOLAS, 20)->tex;
+	Vec2i screenCenter = ad->wSettings.currentRes;
+	drawRect(rectCenDim(vec2(screenCenter.x, -screenCenter.y)/2, vec2(st->dim)), rect(0,0,1,1), vec4(1,1,1,1), st->id);
 
 
 	// glDisable(GL_FRAMEBUFFER_SRGB);

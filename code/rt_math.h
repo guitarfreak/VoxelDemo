@@ -72,7 +72,8 @@ inline int maxReturnIndex(float a, float b, float c) {
 	return index;
 }
 
-inline float clampMin(float min, float a) {
+// inline float clampMin(float min, float a) {
+inline float clampMin(float a, float min) {
 	return a < min ? min : a;
 }
 
@@ -81,12 +82,12 @@ inline float clampMax(float a, float max) {
 }
 
 inline float clamp(float n, float min, float max) {
-	float result = clampMax(clampMin(min, n), max);
+	float result = clampMax(clampMin(n, min), max);
 	return result;
 };
 
 inline void clamp(float* n, float min, float max) {
-	*n = clampMax(clampMin(min, *n), max);
+	*n = clampMax(clampMin(*n, min), max);
 };
 
 inline bool valueBetween(float v, float min, float max) {
@@ -1404,10 +1405,10 @@ inline Vec2 calculateVelocity(Vec2 oldVelocity, Vec2 acceleration, float time) {
 	return oldVelocity;
 }
 
-inline Vec2 clampMin(Vec2 dim, Vec2 v) {
+inline Vec2 clampMin(Vec2 v, Vec2 dim) {
 	Vec2 result;
-	result.x = clampMin(dim.x, v.x);
-	result.y = clampMin(dim.y, v.y);
+	result.x = clampMin(v.x, dim.x);
+	result.y = clampMin(v.y, dim.y);
 
 	return result;
 }	
@@ -2219,8 +2220,7 @@ inline bool rectIntersection(Rect r1, Rect r2) {
 
 bool rectGetIntersection(Rect * intersectionRect, Rect r1, Rect r2) {
 	bool hasIntersection = rectIntersection(r1, r2);
-	if (hasIntersection)
-	{
+	if (hasIntersection) {
 		intersectionRect->min.x = max(r1.min.x, r2.min.x);
 		intersectionRect->max.x = min(r1.max.x, r2.max.x);
 		intersectionRect->max.y = min(r1.max.y, r2.max.y);
