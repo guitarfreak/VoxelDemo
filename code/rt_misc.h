@@ -105,14 +105,15 @@ char * floatToStr(char * buffer, float f, int precision = 0)
 	return buffer;
 }
 
-inline void strInsert(char* string, int index, char ch) {
-	int stringLength = strLen(string);
-	memCpy(string+index+1, string+index, stringLength-index+1);
-	string[index] = ch;
-}
-
 void strCpyBackwards(char* dest, char* str, int size) {
 	for(int i = size-1; i >= 0; i--) dest[i] = str[i];
+}
+
+inline void strInsert(char* string, int index, char ch) {
+	int stringLength = strLen(string);
+	// memCpy(string+index+1, string+index, stringLength-index+1);
+	strCpyBackwards(string+index+1, string+index, stringLength-index+1);
+	string[index] = ch;
 }
 
 void strInsert(char* destination, int index, char* str) {

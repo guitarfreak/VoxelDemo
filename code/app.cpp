@@ -69,8 +69,10 @@
 - fix srgbv
 - put in spaces for fillString
 - save mouse position at startup and place the mouse there when the app closes
+- simplex noise instead of perlin noise
 
 gui stuff: 
+- alpha
 - colors
 - text
 - numbers
@@ -1142,15 +1144,25 @@ const char* vertexShaderCubeMap = GLSL (
 	  vec3(  1.0, -1.0,  1.0 )
 	);
 
-	out gl_PerVertex { vec4 gl_Position; };
+	out gl_PerVertex { vec4 gl_Position; float gl_ClipDistance[]; };
 
 	uniform mat4x4 view;
 	uniform mat4x4 proj;
 
 	smooth out vec3 pos;
 
+	uniform bool clipPlane = false;
+	uniform vec4 cPlane;
+
 	void main() {
 		pos = cube[gl_VertexID];
+
+		if(clipPlane) {
+			gl_ClipDistance[0] = dot(cPlane, vec4(pos,1));
+			// pos.z *= -1;
+			// pos.y *= -1;
+		}
+
 		gl_Position = proj*view*vec4(pos,1);
 	}
 );
@@ -1162,8 +1174,14 @@ const char* fragmentShaderCubeMap = GLSL (
 
 	out vec4 color;
 
+	uniform bool clipPlane = false;
+
 	void main() {
-		color = texture(s, vec4(pos, 0));
+		vec3 clipPos = pos;
+		if(clipPlane) clipPos.y *= -1;
+		color = texture(s, vec4(clipPos, 0));
+
+		// color = texture(s, vec4(pos, 0));
 	}
 );
 
@@ -1319,6 +1337,8 @@ ShaderUniformType particleShaderUniformType[] = {
 enum CubemapUniforms {
 	CUBEMAP_UNIFORM_VIEW = 0,
 	CUBEMAP_UNIFORM_PROJ,
+	CUBEMAP_UNIFORM_CLIPPLANE,
+	CUBEMAP_UNIFORM_CPLANE1,
 
 	CUBEMAP_UNIFORM_SIZE,
 };
@@ -1326,6 +1346,8 @@ enum CubemapUniforms {
 ShaderUniformType cubemapShaderUniformType[] = {
 	{UNIFORM_TYPE_MAT4, "view"},
 	{UNIFORM_TYPE_MAT4, "proj"},
+	{UNIFORM_TYPE_INT, "clipPlane"},
+	{UNIFORM_TYPE_VEC4, "cPlane"},
 };
 
 MakeShaderInfo makeShaderInfo[] = {
@@ -1393,6 +1415,7 @@ enum FontId {
 	FONT_LIBERATION_MONO = 0,
 	FONT_SOURCESANS_PRO,
 	FONT_CONSOLAS,
+	FONT_ARIAL,
 	FONT_SIZE,
 };
 
@@ -1400,6 +1423,7 @@ char* fontPaths[] = {
 	"..\\data\\LiberationMono-Bold.ttf",
 	"..\\data\\SourceSansPro-Regular.ttf",
 	"..\\data\\consola.ttf",
+	"..\\data\\arial.ttf",
 };
 
 struct Font {
@@ -1633,9 +1657,7 @@ uint createShader(const char* vertexShaderString, const char* fragmentShaderStri
 	uint shaderId;
 	glCreateProgramPipelines(1, &shaderId);
 	glUseProgramStages(shaderId, GL_VERTEX_SHADER_BIT, *vId);
-// GLenum glError = glGetError(); printf("GLError: %i\n", glError);
 	glUseProgramStages(shaderId, GL_FRAGMENT_SHADER_BIT, *fId);
-// glError = glGetError(); printf("GLError: %i\n", glError);
 
 	return shaderId;
 }
@@ -1689,6 +1711,28 @@ void drawText(char* text, Font* font, Vec2 pos, Vec4 color, int vAlign = 0, int 
 		}
 		drawRect(r, rect(q.s0,q.t0,q.s1,q.t1), color, font->tex.id);
 	}
+}
+
+float getTextPos(char* text, int index, Font* font) {
+	float result = 0;
+	Vec2 pos = vec2(0,0);
+
+	// no support for new line
+	int length = strLen(text);
+	for(int i = 0; i < length+1; i++) {
+		char t = text[i];
+
+		if(i == index) {
+			result = pos.x;
+			break;
+		}
+
+		stbtt_aligned_quad q;
+		stbtt_GetBakedQuad(font->cData, font->tex.dim.w, font->tex.dim.h, t-font->glyphStart, &pos.x, &pos.y, &q, 1);
+		Rect r = rect(q.x0, q.y0, q.x1, q.y1);
+	}
+
+	return result;
 }
 
 void drawCube(Vec3 trans, Vec3 scale, Vec4 color, float degrees, Vec3 rot) {
@@ -2139,7 +2183,8 @@ VoxelMesh* getVoxelMesh(VoxelNode** voxelHash, int voxelHashSize, Vec2i coord) {
 // int startX = 37800;
 // int startY = 48000;
 
-float reflectionAlpha = 0.75f;
+// float reflectionAlpha = 0.75f;
+float reflectionAlpha = 0.5f;
 float waterAlpha = 0.75f;
 int globalLumen = 210;
 
@@ -3194,6 +3239,16 @@ struct CmdList {
 };
 
 
+struct GuiInput {
+	Vec2 mousePos;
+	bool mouseClick, mouseDown;
+	bool escape, enter, space, backSpace, del;
+	bool left, right, up, down;
+	bool shift;
+	char* charList;
+	int charListSize;
+};
+
 struct Gui {
 	Font* font;
 	Vec4 textColor;
@@ -3203,14 +3258,15 @@ struct Gui {
 	Vec4 switchColorOn;
 	Vec4 switchColorOff;
 	Vec4 sliderColor;
+	Vec4 sliderHoverColorAdd;
+	Vec4 cursorColor;
 	float sliderSize;
 	Vec2 offsets;
 	Vec2 border;
 	Vec2i screenRes;
 
-	Vec2 mousePos;
-	bool mouseClick;
-	bool mouseDown;
+	GuiInput input;
+
 	Vec2 startPos;
 	float panelWidth;
 	float fontHeight;
@@ -3220,6 +3276,10 @@ struct Gui {
 	float sectionIndent;
 	float scrollBarWidth;
 	float scrollBarSliderSize;
+	float cursorWidth;
+
+	int currentId;
+	int activeId;
 
 	Vec2 currentPos;
 	Vec2 currentDim;
@@ -3239,17 +3299,30 @@ struct Gui {
 	float scrollStartY;
 	float scrollEndY;
 
+	// char* originalText;
+	void* originalPointer;
+	int textBoxIndex;
+	char textBoxText[50];
+	int textBoxTextSize;
+	int textBoxTextCapacity;
+
+	int selectionStart, selectionEnd;
+
+
 	void init(Vec2 sPos, Font* f, float width) {
 		*this = {};
 
 		font = f;
-		textColor = vec4(0.9f, 0.9f, 0.9f, 1);
-		regionColor = vec4(0.2f,0.2f,0.2f,0.3f);
-		hoverColorAdd = vec4(0.2f,0.2f,0.2f,0);
-		panelColor = vec4(0.3f,0,0.3f,0.90f);
-		switchColorOn = vec4(0.0f,0.3f,0.0f,0);
-		switchColorOff = vec4(0.3f,0.0f,0.0f,0);
-		sliderColor = vec4(0.5f,0.5f,0.5f,0.6f);
+		textColor 			= vec4(0.9f, 0.9f, 0.9f, 1);
+		regionColor 		= vec4(0.2f,0.2f,0.2f,0.3f);
+		hoverColorAdd 		= vec4(0.2f,0.2f,0.2f,0);
+		panelColor 			= vec4(0.3f,0,0.3f,0.90f);
+		switchColorOn 		= vec4(0.0f,0.3f,0.0f,0);
+		switchColorOff 		= vec4(0.3f,0.0f,0.0f,0);
+		sliderHoverColorAdd = vec4(0,0,0,0.15f);
+		sliderColor 		= vec4(1,1,1,0.2f);
+		cursorColor 		= vec4(1,1,1,1);
+
 		sliderSize = 4;
 		offsets = vec2(2,2);
 		border = vec2(4,-4);
@@ -3262,6 +3335,7 @@ struct Gui {
 		sectionIndent = 0.08f;
 		scrollBarWidth = 20;
 		scrollBarSliderSize = 30;
+		cursorWidth = 1;
 
 		startPos = sPos + border;
 	}
@@ -3295,15 +3369,17 @@ struct Gui {
 		return scissorRect;
 	}
 
-	void start(Vec2i mPos, bool click, bool down, Vec2i res) {
-		mousePos = vec2(mPos.x, -mPos.y);
-		mouseClick = click;
-		mouseDown = down;
+	// void start(Vec2i mPos, bool click, bool down, bool escape, bool enter, GuiInput guiInput, Vec2i res) {
+	void start(GuiInput guiInput, Vec2i res) {
+		input = guiInput;
+		input.mousePos.y *= -1;
 		screenRes = res;
+		currentId = 0;
 		scrollStackIndex = 0;
+		// if(activeId == 0) textBoxIndex = 0;
 
-		currentPos = startPos + vec2(0,currentDim.h);
 
+		currentPos = startPos + vec2(0,getDefaultYOffset());
 		dcEnable({STATE_SCISSOR});
 
 		// draw background
@@ -3319,13 +3395,10 @@ struct Gui {
 		dcDisable({STATE_SCISSOR});
 	}
 
-	void post() {
-
-	}
-
 	float getDefaultHeight(){return fontHeight*fontHeightOffset;};
-	Vec2 getDefaultPos(){return vec2(startPos.x, currentPos.y - (currentDim.h+offsets.h));};
-	void advancePosY() 	{currentPos.y -= currentDim.h+offsets.h;};
+	float getDefaultYOffset(){return currentDim.h+offsets.h;};
+	Vec2 getDefaultPos(){return vec2(startPos.x, currentPos.y - getDefaultYOffset());};
+	void advancePosY() 	{currentPos.y -= getDefaultYOffset();};
 	void defaultX() 	{currentPos.x = startPos.x;};
 	void defaultHeight(){currentDim.h = getDefaultHeight();};
 	void defaultWidth() {currentDim.w = panelWidth;};
@@ -3337,7 +3410,16 @@ struct Gui {
 		defaultWidth();
 	}
 
+	void setLastPosition() {
+		lastPos = currentPos;
+		lastDim = currentDim;
+	}
+
+	void incrementId() {currentId++;};
+
 	void pre() {
+		incrementId();
+
 		if(columnMode) {
 			if(columnIndex == 0) {
 				defaultValues();
@@ -3354,9 +3436,11 @@ struct Gui {
 			defaultValues();
 		}
 
-		lastPos = currentPos;
-		lastDim = currentDim;
+		setLastPosition();
 	}
+
+	// no usage yet
+	void post() {}
 
 	void div(float* c, int size) {
 		int elementCount = 0;
@@ -3412,15 +3496,15 @@ struct Gui {
 		scissorPop();
 	}
 
-	void drawRect(Rect r, Vec4 color) {
+	void drawRect(Rect r, Vec4 color, bool scissor = false) {
+		if(scissor) scissorPush(getCurrentRegion());
 		dcRect({r, rect(0,0,1,1), color, getTexture(TEXTURE_WHITE)->id});
+		if(scissor) scissorPop();
 	}
 
 	void label(char* text, int align = 1) {
 		pre();
-
 		drawText(text, align);
-
 		post();
 	}
 
@@ -3442,57 +3526,27 @@ struct Gui {
 		startPos.x -= panelWidth*sectionIndent*0.5f;
 	}
 
-	bool scrollBar(float* value, Rect region, float diff) {
-		Vec2 sliderRange = vec2(0, 1);
-
-		bool mouseOver = pointInRect(mousePos, region) && pointInRect(mousePos, scissorStack[scissorStackSize-1]);
-
-		Vec4 oc = {};
-		bool active = mouseOver && mouseClick;
-		if(mouseOver) oc = hoverColorAdd;
-
-		drawRect(region, regionColor); //background
-
-		Rect regCen = rectGetCenDim(region);
-
-		float sliderWidth = regCen.dim.h - diff;
-		sliderWidth = clampMin(sliderWidth, scrollBarSliderSize);
-
-		float calc = *value;
-		if(mouseOver && mouseDown) {
-			calc = mapRange(mousePos.y, region.min.y+sliderWidth*0.5f, region.max.y-sliderWidth*0.5f, sliderRange.y, sliderRange.x);
-
-			*value = calc;
-			*value = clamp(*value, sliderRange.x, sliderRange.y);
-		}
-
-		float sliderX = mapRange(calc, sliderRange.y, sliderRange.x, region.min.y+sliderWidth*0.5f, region.max.y-sliderWidth*0.5f);
-
-		sliderX = clamp(sliderX, region.min.y+sliderWidth*0.5f, region.max.y-sliderWidth*0.5f);
-		drawRect(rectCenDim(vec2(regCen.cen.x, sliderX), vec2(regCen.dim.x, sliderWidth)), sliderColor + oc); // vert line
-
-		post();
-		return active;
-	}
-
-	// scroll sections don't nest right now
+	// scroll sections don't nest
 	void beginScroll(int scrollHeight, float* scrollAmount) {
 		scrollEndY = currentPos.y - scrollHeight - offsets.h;
 
 		Rect r = rectULDim(getDefaultPos(), vec2(panelWidth, scrollHeight));
 
 		scissorPush(r);
-
 		panelWidth -= scrollBarWidth;
-
-		float offset = scrollStack[scrollStackIndex] - rectGetDim(r).h;
 
 		float diff = (scrollStack[scrollStackIndex] - rectGetDim(r).h);
 		if(diff > 0) {
 			currentPos.y += *scrollAmount * diff;
-
 			r.min.x += panelWidth + offsets.x;
-			scrollBar(scrollAmount, r, diff);
+
+			Rect regCen = rectGetCenDim(r);
+			float sliderHeight = regCen.dim.h - diff;
+			sliderHeight = clampMin(sliderHeight, scrollBarSliderSize);
+
+			slider(scrollAmount, 0, 1, true, r, sliderHeight);
+
+			currentPos.y += getDefaultYOffset();
 		}
 	
 		scrollStartY = currentPos.y;
@@ -3500,30 +3554,66 @@ struct Gui {
 
 	void endScroll() {
 		panelWidth += scrollBarWidth;
-		scissorPop();
 
+		scissorPop();
 		scrollStack[scrollStackIndex++] = -((currentPos.y) - scrollStartY);
 
 		currentPos.y = scrollEndY;
+
+		setLastPosition();
 	}
 
-	bool switcher(char* text, bool* value) {
+	bool getMouseOver(Vec2 mousePos, Rect region) {
+		bool mouseOver = pointInRect(mousePos, region) && pointInRect(mousePos, scissorStack[scissorStackSize-1]);
+		return mouseOver;
+	}
+
+	bool getActive() {
+		bool active = (activeId == currentId);
+		return active;
+	}
+
+	bool setActive(bool mouseOver, int releaseType = 0) {
+		if(activeId == 0 && (mouseOver && input.mouseClick)) activeId = currentId;
+		else if(activeId == currentId) {
+			if( releaseType == 0 || 
+				(releaseType == 1 && !input.mouseDown)) // || 
+				// (releaseType == 2 && (input.escape || input.enter))) 
+				activeId = 0;
+		}
+
+		bool active = getActive();
+		return active;
+	}
+
+	Vec4 getColorAdd(bool active, bool mouseOver, int type = 0) {
+		if(type == 2) {
+			Vec4 color = active || (mouseOver && activeId == 0) ? hoverColorAdd : vec4(0,0,0,0);
+			return color;
+		}
+
+		Vec4 colorAdd = type == 0 ? hoverColorAdd : sliderHoverColorAdd;
+		Vec4 color;
+		if(active) color = colorAdd*2;
+		else if(mouseOver && activeId == 0) color = colorAdd;
+		else color = {};
+
+		return color;
+	}
+
+	bool button(char* text, int switcher = 0) {
 		pre();
 
 		Rect region = getCurrentRegion();
-		bool mouseOver = pointInRect(mousePos, region) && pointInRect(mousePos, scissorStack[scissorStackSize-1]);
+		bool mouseOver = getMouseOver(input.mousePos, region);
+		bool active = setActive(mouseOver);
+		Vec4 colorAdd = getColorAdd(active, mouseOver);
 
-		Vec4 oc = {};
-		bool active = mouseOver && mouseClick;
-		if(active) {
-			oc = hoverColorAdd*2;
-			*value = !(*value);
+		Vec4 finalColor = regionColor + colorAdd;
+		if(switcher) {
+			if(switcher == 2) finalColor += switchColorOn;
+			else finalColor += switchColorOff;
 		}
-		else if(mouseOver) oc = hoverColorAdd;
-
-		Vec4 finalColor = regionColor + oc;
-		if((*value)) finalColor += switchColorOn;
-		else finalColor += switchColorOff;
 
 		drawRect(region, finalColor);
 		drawText(text);
@@ -3532,34 +3622,26 @@ struct Gui {
 		return active;
 	}
 
-	bool button(char* text) {
-		pre();
+	bool switcher(char* text, bool* value) {
+		bool active = false;
+		if(button(text, (int)(*value) + 1)) {
+			*value = !(*value);
+			active = true;
+		}
 
-		Rect region = getCurrentRegion();
-		bool mouseOver = pointInRect(mousePos, region) && pointInRect(mousePos, scissorStack[scissorStackSize-1]);
-
-		Vec4 oc = {};
-		bool active = mouseOver && mouseClick;
-		if(active) oc = hoverColorAdd*2;
-		else if(mouseOver) oc = hoverColorAdd;
-		drawRect(region, regionColor + oc);
-		drawText(text);
-
-		post();
 		return active;
 	}
 
-	bool slider(void* value, float min, float max, bool typeFloat = true) {
+	bool slider(void* value, float min, float max, bool typeFloat = true, Rect reg = rect(0,0,0,0), float sliderS = 0) {
 		pre();
 
+		bool verticalSlider = sliderS == 0 ? false : true;
 		Vec2 sliderRange = vec2(min, max);
 
-		Rect region = getCurrentRegion();
-		bool mouseOver = pointInRect(mousePos, region) && pointInRect(mousePos, scissorStack[scissorStackSize-1]);
-
-		Vec4 oc = {};
-		bool active = mouseOver && mouseClick;
-		if(mouseOver) oc = hoverColorAdd;
+		Rect region = reg == rect(0,0,0,0) ? getCurrentRegion() : reg;
+		bool mouseOver = getMouseOver(input.mousePos, region);
+		bool active = setActive(mouseOver, 1);
+		Vec4 colorAdd = getColorAdd(active, mouseOver, 1);
 
 		drawRect(region, regionColor); //background
 
@@ -3571,12 +3653,13 @@ struct Gui {
 			sliderWidth *= regCen.dim.x * 1/(float)((int)roundInt(max)-(int)roundInt(min) +1);
 			sliderWidth = clampMin(sliderWidth, sliderSize);
 		} else {
-			sliderWidth = sliderSize;
+			sliderWidth = sliderS == 0 ? sliderSize : sliderS;
 		}
 
 		float calc = typeFloat ? *((float*)value) : *((int*)value);
-		if(mouseOver && mouseDown) {
-			calc = mapRange(mousePos.x, region.min.x+sliderWidth*0.5f, region.max.x-sliderWidth*0.5f, sliderRange.x, sliderRange.y);
+		if(active) {
+			if(verticalSlider) calc = mapRange(input.mousePos.y, region.min.y+sliderWidth*0.5f, region.max.y-sliderWidth*0.5f, sliderRange.y, sliderRange.x);
+			else calc = mapRange(input.mousePos.x, region.min.x+sliderWidth*0.5f, region.max.x-sliderWidth*0.5f, sliderRange.x, sliderRange.y);
 
 			if(typeFloat) {
 				*((float*)value) = calc;
@@ -3587,22 +3670,155 @@ struct Gui {
 			}
 		}
 
-		char* text;
-		if(typeFloat) text = fillString("%f", *((float*)value));
-		else text = fillString("%i", *((int*)value));
-		drawText(text);
+		if(!verticalSlider) {
+			char* text;
+			if(typeFloat) text = fillString("%f", *((float*)value));
+			else text = fillString("%i", *((int*)value));
+			drawText(text);
+		}
 
-		float sliderX = mapRange(calc, sliderRange.x, sliderRange.y, region.min.x+sliderWidth*0.5f, region.max.x-sliderWidth*0.5f);
+		float sliderX;
+		if(verticalSlider) sliderX = mapRange(calc, sliderRange.y, sliderRange.x, region.min.y+sliderWidth*0.5f, region.max.y-sliderWidth*0.5f);
+		else if(typeFloat) sliderX = mapRange(calc, sliderRange.x, sliderRange.y, region.min.x+sliderWidth*0.5f, region.max.x-sliderWidth*0.5f);
+		else sliderX = mapRange(roundInt(calc), sliderRange.x, sliderRange.y, region.min.x+sliderWidth*0.5f, region.max.x-sliderWidth*0.5f);
 
-		sliderX = clamp(sliderX, region.min.x+sliderWidth*0.5f, region.max.x-sliderWidth*0.5f);
-		drawRect(rectCenDim(vec2(sliderX, regCen.cen.y), vec2(sliderWidth, regCen.dim.y)), sliderColor + oc); // vert line
+		if(verticalSlider) sliderX = clamp(sliderX, region.min.y+sliderWidth*0.5f, region.max.y-sliderWidth*0.5f);
+		else sliderX = clamp(sliderX, region.min.x+sliderWidth*0.5f, region.max.x-sliderWidth*0.5f);
+
+		if(verticalSlider) drawRect(rectCenDim(vec2(regCen.cen.x, sliderX), vec2(regCen.dim.x, sliderWidth)), sliderColor + colorAdd); // hori line
+		else drawRect(rectCenDim(vec2(sliderX, regCen.cen.y), vec2(sliderWidth, regCen.dim.y)), sliderColor + colorAdd); // vert line
+
+		post();
+		return active;
+	}
+	
+	bool slider(int* value, float min, float max) {
+		return slider(value, min, max, false);
+	}
+
+	bool textBox(void* value, int type, int textSize, int textCapacity) {
+		pre();
+
+		bool activeBefore = getActive();
+
+		Rect region = getCurrentRegion();
+		bool mouseOver = getMouseOver(input.mousePos, region);
+		bool active = setActive(mouseOver, 2);
+		Vec4 colorAdd = getColorAdd(active, mouseOver, 2);
+
+		if(!activeBefore && active) {
+			int textLength;
+			if(type == 0) {
+				textLength = textSize == 0 ? strLen((char*)value) : textSize;
+				strCpy(textBoxText, (char*)value, textLength);
+			} else if(type == 1) {
+				intToStr(textBoxText, *((int*)value));
+				textLength = strLen(textBoxText);
+			} else {
+				floatToStr(textBoxText, *((float*)value));
+				textLength = strLen(textBoxText);
+			}
+
+			originalPointer = value;
+			textBoxIndex = textLength;
+			textBoxTextSize = textLength;
+			textBoxTextCapacity = textCapacity;
+		}
+
+		drawRect(region, regionColor + colorAdd);
+
+		if(active) {
+			if(input.left) textBoxIndex--;
+			if(input.right) textBoxIndex++;
+			clampInt(&textBoxIndex, 0, textBoxTextSize);
+
+			for(int i = 0; i < input.charListSize; i++) {
+				if(textBoxTextSize >= textBoxTextCapacity) break;
+				char c = input.charList[i];
+				if(type == 1 && (c < '0' || c > '9')) break;
+				if(type == 2 && ((c < '0' || c > '9') && c != '.')) break; 
+
+				strInsert(textBoxText, textBoxIndex, input.charList[i]);
+				textBoxTextSize++;
+				textBoxIndex++;
+			}
+
+			if(input.backSpace && textBoxIndex > 0) {
+				strRemove(textBoxText, textBoxIndex, textBoxTextSize);
+				textBoxTextSize--;
+				textBoxIndex--;
+			}
+			
+			if(input.del && textBoxIndex < textBoxTextSize) {
+				strRemove(textBoxText, textBoxIndex+1, textBoxTextSize);
+				textBoxTextSize--;
+			}
+
+			Rect regCen = rectGetCenDim(region);
+			Vec2 textStart = regCen.cen - vec2(regCen.dim.w*0.5f,0);
+			Vec2 cursorPos = textStart + vec2(getTextPos(textBoxText, textBoxIndex, font), 0);
+			Rect cursorRect = rectCenDim(cursorPos, vec2(cursorWidth,font->height));
+
+			drawText(textBoxText, 0);
+			drawRect(cursorRect, cursorColor, true);
+
+			if(input.enter) {
+				if(type == 0) strCpy((char*)originalPointer, textBoxText, textBoxTextSize);
+				else if(type == 1) *((int*)originalPointer) = strToInt(textBoxText);
+				else *((float*)originalPointer) = strToFloat(textBoxText);
+
+				activeId = 0;
+			}
+
+			if(input.mouseClick && !getMouseOver(input.mousePos, region)) activeId = 0;
+
+			if(input.escape) activeId = 0;
+
+			// if(selectionStart == selectionEnd) {
+			// 	selectionStart = selectionEnd = textBoxIndex;
+			// }
+
+			// if(input.shift) {
+				// if(input.left) selectionStart--;
+				// if(input.right) selectionEnd++;
+			// }
+
+			// if(selectionStart != selectionEnd) {
+			// 	Vec2 selectionStartPos = textStart + vec2(getTextPos(textBoxText, selectionStart, font), 0);
+			// 	Vec2 selectionEndPos = textStart + vec2(getTextPos(textBoxText, selectionEnd, font), 0);
+			// 	float selectionWidth = selectionEndPos.x - selectionStartPos.x;
+
+			// 	Vec2 center = selectionStartPos+selectionWidth*0.5;
+			// 	Rect selectionRect = rectCenDim(selectionStartPos + vec2(selectionWidth*0.5f,0), vec2(selectionWidth,font->height));
+			// 	drawRect(selectionRect, vec4(0,1,1,0.5f));
+			// }
+		} else {
+			if(type == 0) drawText((char*)value, 0);
+			else { 
+				char* buffer = getTString(50); // unfortunate
+				strClear(buffer);
+				if(type == 1) {
+					intToStr(buffer, *((int*)value));
+					drawText(buffer, 0);
+				} else {
+					floatToStr(buffer, *((float*)value));
+					drawText(buffer, 0);
+				}
+			}
+		}
 
 		post();
 		return active;
 	}
 
-	bool slider(int* value, float min, float max) {
-		return slider(value, min, max, false);
+	bool textBoxChar(char* text, int textSize = 0, int textCapacity = 0) {
+		return textBox(text, 0, textSize, textCapacity);
+	}
+	bool textBoxInt(int* number) {
+		return textBox(number, 1, 0, arrayCount(textBoxText));
+	}
+	bool textBoxFloat(float* number) {
+		return textBox(number, 2, 0, arrayCount(textBoxText));
 	}
 };
 
@@ -3804,11 +4020,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glCreateTextures(GL_TEXTURE_CUBE_MAP_ARRAY, arrayCount(ad->cubemapTextureId), &ad->cubemapTextureId[0]);
 
 		char* texturePaths[] = {
-			 						"..\\data\\skybox\\sb1.png",
-								// "..\\data\\skybox\\sb2.png", 
-								// "..\\data\\skybox\\sb3.jpg", 
-								// "..\\data\\skybox\\sb4.png", 
-								// "..\\data\\skybox\\xoGVD3X.jpg", 
+			 					"..\\data\\skybox\\sb1.png",
+								"..\\data\\skybox\\sb2.png", 
+								"..\\data\\skybox\\sb3.jpg", 
+								"..\\data\\skybox\\sb4.png", 
+								"..\\data\\skybox\\xoGVD3X.jpg", 
 								};
 
 		ad->cubeMapCount = arrayCount(texturePaths);
@@ -4932,16 +5148,16 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	Mat4 viewMat; viewMatrix(&viewMat, skyBoxCam.pos, -skyBoxCam.look, skyBoxCam.up, skyBoxCam.right);
 	Mat4 projMat; projMatrix(&projMat, degreeToRadian(ad->fieldOfView), ad->aspectRatio, 0.001f, 2);
-
 	pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_VIEW, viewMat.e);
 	pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_PROJ, projMat.e);
+
+	pushUniform(SHADER_CUBEMAP, 2, CUBEMAP_UNIFORM_CLIPPLANE, false);
 
 	glDepthMask(false);
 	glFrontFace(GL_CCW);
 	glDrawArrays(GL_TRIANGLES, 0, 6*6);
 	glFrontFace(GL_CW);
 	glDepthMask(true);
-
 	glDisable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 
 
@@ -5213,6 +5429,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CPLANE1, 0,0,1,-WATER_LEVEL_HEIGHT);
 		pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CPLANE2, 0,0,-1,WATER_LEVEL_HEIGHT);
 
+		pushUniform(SHADER_VOXEL, 1, VOXEL_UNIFORM_ALPHATEST, 0.5f);
+
 		for(int i = 0; i < sortListSize; i++) {
 			VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
 			drawVoxelMesh(m, 1);
@@ -5244,9 +5462,37 @@ extern "C" APPMAINFUNCTION(appMain) {
 			GL_NEAREST);
 
 		glEnable(GL_CLIP_DISTANCE0);
-		glEnable(GL_CLIP_DISTANCE1);
+		// glEnable(GL_CLIP_DISTANCE1);
 		glEnable(GL_DEPTH_TEST);
 		glFrontFace(GL_CCW);
+
+			// draw cubemap reflection
+			bindShader(SHADER_CUBEMAP);
+			glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+			glBindTextures(0, 1, &ad->cubemapTextureId[ad->cubeMapDrawIndex]);
+			glBindSamplers(0, 1, ad->samplers);
+
+			Vec3 skyBoxRot;
+			if(ad->playerMode) skyBoxRot = ad->player->rot;
+			else skyBoxRot = ad->cameraEntity->rot;
+			skyBoxRot.x += M_PI;
+
+			Camera skyBoxCam = getCamData(vec3(0,0,0), skyBoxRot, vec3(0,0,0), vec3(0,1,0), vec3(0,0,1));
+
+			Mat4 viewMat; viewMatrix(&viewMat, skyBoxCam.pos, -skyBoxCam.look, skyBoxCam.up, skyBoxCam.right);
+			Mat4 projMat; projMatrix(&projMat, degreeToRadian(ad->fieldOfView), ad->aspectRatio, 0.001f, 2);
+			pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_VIEW, viewMat.e);
+			pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_PROJ, projMat.e);
+
+			pushUniform(SHADER_CUBEMAP, 2, CUBEMAP_UNIFORM_CLIPPLANE, true);
+			pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_CPLANE1, 0,0,-1,WATER_LEVEL_HEIGHT);
+
+			glDepthMask(false);
+			// glFrontFace(GL_CCW);
+			glDrawArrays(GL_TRIANGLES, 0, 6*6);
+			// glFrontFace(GL_CW);
+			glDepthMask(true);
+			glDisable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 
 		setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, fogColor, vec3(0,0,WATER_LEVEL_HEIGHT*2 + 0.01f), vec3(1,1,-1));
 		pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CLIPPLANE, true);
@@ -5263,12 +5509,44 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		glFrontFace(GL_CW);
 		glDisable(GL_CLIP_DISTANCE0);
-		glDisable(GL_CLIP_DISTANCE1);
+		// glDisable(GL_CLIP_DISTANCE1);
 		glDisable(GL_STENCIL_TEST);
 	}
 
 	// draw reflection texture	
 	{ 
+		// 	// glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		// 	// glBlendFunc(GL_SRC_COLOR, GL_ONE);
+		// 	// glBlendFunc(GL_SRC_COLOR, GL_ONE_MINUS_SRC_ALPHA);
+		// 	// glBlendFunc(GL_DST_COLOR, GL_ZERO);
+		// 	// glBlendFunc(GL_SRC_COLOR, GL_ONE);
+
+		// 	// glBlendFunc(GL_DST_COLOR, GL_ZERO);
+		// 	// glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
+		// 	// glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
+
+		// 	// glBlendFunc(GL_ONE, GL_DST_COLOR);
+		// 	// glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
+		// 	// glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
+
+		// 	// GL_DST_COLOR, GL_ZERO
+
+		// 	// void glBlendFuncSeparate(	GLenum srcRGB,
+		// 	//  	GLenum dstRGB,
+		// 	//  	GLenum srcAlpha,
+		// 	//  	GLenum dstAlpha);
+
+		// // glBlendFuncSeparate(GL_ONE_MINUS_DST_COLOR, GL_ZERO, GL_ONE, GL_ONE);
+		// // glBlendFuncSeparate(GL_ONE_MINUS_DST_COLOR, GL_ZERO, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		// glBlendFuncSeparate(GL_ONE_MINUS_DST_COLOR, GL_ZEROd, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+
+		// 	glBlendEquation(GL_FUNC_ADD);
+		// 	// glBlendEquation(GL_FUNC_SUBTRACT);
+		// 	// glBlendEquation(GL_FUNC_REVERSE_SUBTRACT);
+		// 	// glBlendEquation(GL_MIN);
+		// 	// glBlendEquation(GL_MAX);
+
 		glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[0]);
 		glDisable(GL_DEPTH_TEST);
 
@@ -5276,6 +5554,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 		drawRect(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0), rect(0,1,1,0), vec4(1,1,1,reflectionAlpha), ad->frameBufferTextures[1]);
 
 		glEnable(GL_DEPTH_TEST);
+
+		// 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		// 	glBlendEquation(GL_FUNC_ADD);
 	}
 
 	// draw water
@@ -5288,6 +5569,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 			drawVoxelMesh(m, 1);
 		}
 	}
+
+
 
 	// Vec3 off = vec3(0.5f, 0.5f, 0.5f);
 	// Vec3 s = vec3(1.01f, 1.01f, 1.01f);
@@ -5574,6 +5857,23 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
+		// dcRect({rectCenDim(400,-400,200,200), rect(0,0,1,1), rColor, getTexture(TEXTURE_WHITE)->id});
+	// dcRect({rectCenDim(});
+	// dcRect({rectCenDim(});
+
+		// dcText({fillString("Pos  : (%f,%f,%f)", PVEC3(ad->activeCam.pos)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow});
+
+	// Vec2 tPos = vec2(900,-300);
+	// char* text = "This is a Test String!";
+	// // Font* f = getFont(FONT_ARIAL);
+	// Font* f = getFont(FONT_ARIAL, 40);
+	// dcText({text, f, tPos, vec4(1,1,0,1), 0, 2, 1});
+	// // dcRect({rectCenDim(tPos-vec2(0,10), vec2(1,20)), rect(0,0,1,1), vec4(1,0,0,1), getTexture(TEXTURE_WHITE)->id});
+
+	// float xOff = getTextPos(text, 5, f);
+	// dcRect({rectCenDim(tPos + vec2(xOff,-20), vec2(1,40)), rect(0,0,1,1), vec4(1,0,0,1), getTexture(TEXTURE_WHITE)->id});
+
+
 	if(input->keysPressed[VK_F5]) ad->showHud = !ad->showHud;
 
 	if(ad->showHud) {
@@ -5609,9 +5909,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 		static bool setupGui = true;
 		if(setupGui) {
 			gui.init(vec2(0,1), getFont(FONT_CONSOLAS, fontSize), 300);
+			// gui.init(vec2(1300,1), getFont(FONT_CONSOLAS, fontSize), 300);
 			setupGui = false;
 		}
-		gui.start(input->mousePos, input->mouseButtonPressed[0], input->mouseButtonDown[0], wSettings->currentRes);
+		GuiInput gInput = { vec2(input->mousePos), input->mouseButtonPressed[0], input->mouseButtonDown[0], 
+							input->keysPressed[VK_ESCAPE], input->keysPressed[VK_RETURN], input->keysPressed[VK_SPACE], input->keysPressed[VK_BACK], input->keysPressed[VK_DELETE], 
+							input->keysPressed[VK_LEFT], input->keysPressed[VK_RIGHT], input->keysPressed[VK_UP], input->keysPressed[VK_DOWN], 
+							input->mShift, input->inputCharacters, input->inputCharacterCount};
+		gui.start(gInput, wSettings->currentRes);
+
 
 		static bool sectionWorld = false;
 		if(gui.beginSection("World", &sectionWorld)) { 
@@ -5645,28 +5951,47 @@ extern "C" APPMAINFUNCTION(appMain) {
 			gui.div(0,0,0); gui.label("NFPlane", 0); gui.slider(&ad->nearPlane, 0.01, 2); gui.slider(&ad->farPlane, 1000, 5000);
 		} gui.endSection();
 
+		static bool sectionTest = false;
+		if(gui.beginSection("Test", &sectionTest)) {
+			static int scrollHeight = 200;
+			static int scrollElements = 13;
+			static float scrollVal = 0;
 
-		// static int scrollHeight = 200;
-		// static int scrollElements = 13;
-		// static float scrollVal = 0;
+			gui.div(vec2(0,0)); gui.slider(&scrollHeight, 0, 500); gui.slider(&scrollElements, 0, 20);
 
-		// gui.div(vec2(0,0)); gui.slider(&scrollHeight, 0, 500); gui.slider(&scrollElements, 0, 20);
+			gui.beginScroll(scrollHeight, &scrollVal); {
+				for(int i = 0; i < scrollElements; i++) {
+					gui.button(fillString("Element: %i.", i));
+				}
+			} gui.endScroll();
 
-		// gui.beginScroll(scrollHeight, &scrollVal); {
-		// 	for(int i = 0; i < scrollElements; i++) {
-		// 		gui.button(fillString("Element: %i.", i));
-		// 	}
-		// } gui.endScroll();
+			// static float hue = 0;
+			// static float sat = 0;
+			// static float light = 0;
+			// gui.div(0,0,0,0); gui.label("Color"); gui.slider(&hue, 0,360); gui.slider(&sat,0,1); gui.slider(&light,0,1);
 
-		// gui.button("sdfsdf");
+			// static Vec4 rColor = vec4(1,1,1,1);
+			// hslToRgb(rColor.e, hue, sat, light);
 
-		// static float hue = 0;
-		// static float sat = 0;
-		// static float light = 0;
-		// gui.div(0,0,0,0); gui.label("Color"); gui.slider(&hue, 0,360); gui.slider(&sat,0,1); gui.slider(&light,0,1);
+			static int textCapacity = 20;
+			static char* text = getPArray(char, textCapacity);
+			static bool DOIT = true;
+			if(DOIT) {
+				DOIT = false;
+				strClear(text);
+				strCpy(text, "Test String!");
+			}
+			gui.div(vec2(0,0)); gui.label("Text Box:", 0); gui.textBoxChar(text, 0, textCapacity);
 
-		// static Vec4 rColor = vec4(1,1,1,1);
-		// hslToRgb(rColor.e, hue, sat, light);
+			static int textNumber = 1234;
+			gui.div(vec2(0,0)); gui.label("Int Box:", 0); gui.textBoxInt(&textNumber);
+
+			static float textFloat = 123.456f;
+			gui.div(vec2(0,0)); gui.label("Float Box:", 0); gui.textBoxFloat(&textFloat);
+
+		} gui.endSection();
+
+
 
 		gui.end();
 

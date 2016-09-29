@@ -90,6 +90,27 @@ inline void clamp(float* n, float min, float max) {
 	*n = clampMax(clampMin(*n, min), max);
 };
 
+
+
+inline float clampIntMin(int a, int min) {
+	return a < min ? min : a;
+}
+
+inline float clampIntMax(int a, int max) {
+	return a > max ? max : a;
+}
+
+inline float clampInt(int n, int min, int max) {
+	float result = clampIntMax(clampIntMin(n, min), max);
+	return result;
+};
+
+inline void clampInt(int* n, int min, int max) {
+	*n = clampMax(clampIntMin(*n, min), max);
+};
+
+
+
 inline bool valueBetween(float v, float min, float max) {
 	bool result = (v >= min && v <= max);
 	return result;

@@ -33,13 +33,10 @@ struct Input {
 
 	bool keysDown[512];
 	bool keysPressed[512];
-	uint inputCharacters[32];
+	char inputCharacters[32];
 	int inputCharacterCount;
 
 	int keyCodes[KEYCODE_COUNT];
-
-	char charBuffer[8];
-
 	bool mShift, mCtrl, mAlt;
 
 	bool captureMouse;
@@ -304,7 +301,11 @@ void updateInput(Input* input, bool* isRunning, HWND windowHandle) {
             } break;
 
             case WM_CHAR: {
-                input->inputCharacters[input->inputCharacterCount] = uint(message.wParam);
+                // input->inputCharacters[input->inputCharacterCount] = (char)uint(message.wParam);
+            	uint charIndex = uint(message.wParam);
+            	if(charIndex < ' ' || charIndex > '~') break;
+            	char c = (char)charIndex;
+                input->inputCharacters[input->inputCharacterCount] = c;
                 input->inputCharacterCount++;
             } break;
 

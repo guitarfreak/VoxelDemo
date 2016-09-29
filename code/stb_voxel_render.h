@@ -2069,11 +2069,12 @@ static const char *stbvox_fragment_program =
       #else
       "   vec4 final_color = vec4(lit_color.xyz, fragment_alpha);\n"
       #endif
-      "   if(final_color.a <= alphaTest) discard;\n"
       
       #ifdef STBVOX_CONFIG_FOG_SMOOTHSTEP
       "   final_color.a = lit_color.a;\n"
       #endif 
+
+      "   if(final_color.a <= alphaTest) discard;\n"
 
       "   outcolor = final_color;\n"
       // "   outcolor = vec4(final_color.xyz, 1);\n"
