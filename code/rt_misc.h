@@ -61,7 +61,7 @@ int intDigits(int n) {
 	int count = 0;
 	if(n == 0) return 1;
 
-	while(n > 0) {
+	while(n != 0) {
 		n /= 10;
 		count++;
 	}
@@ -71,13 +71,21 @@ int intDigits(int n) {
 
 inline char * intToStr(char * buffer, int var) {
 	int digits = intDigits(var);
+	if(var < 0) digits++;
 	buffer[digits--] = '\0';
+
+	if(var < 0) {
+		buffer[0] = '-';
+		var *= -1;
+	}
+
 	if(var == 0) {
 		buffer[0] = '0';
 		return buffer;
 	}
 
-	while(var > 0) {
+
+	while(var != 0) {
 		buffer[digits--] = (char)((var % 10) + '0');
 		var /= 10;
 	}
@@ -203,8 +211,8 @@ bool strCompare(char* str, int size1, char* str2, int size2) {
 	return result;
 }
 
-int strFind(const char* str, char chr) {
-	int index = 0;
+int strFind(const char* str, char chr, int startIndex = 0) {
+	int index = startIndex;
 	int pos = -1;
 	while(str[index] != '\0') {
 		if(str[index] == chr) {
@@ -214,11 +222,11 @@ int strFind(const char* str, char chr) {
 		index++;
 	}
 
-	return pos;
+	return pos+1;
 }
 
-int strFindBackwards(char* str, char chr) {
-	int length = strLen(str);
+int strFindBackwards(char* str, char chr, int startIndex = -1) {
+	int length = startIndex == -1 ? strLen(str) : startIndex;
 
 	int pos = -1;
 	for(int i = length - 1; i >= 0; i--) {
@@ -228,7 +236,7 @@ int strFindBackwards(char* str, char chr) {
 		}
 	}
 
-	return pos;
+	return pos+1;
 }
 
 int strFind(char* source, char* str, int to = 0, int from = 0) {
@@ -258,6 +266,13 @@ int strFind(char* source, char* str, int to = 0, int from = 0) {
 
 	int result = -1;
 	if(found) result = pos;
+
+	return result;
+}
+
+int strFindRight(char* source, char* str, int searchDistance = 0) {
+	int result = strFind(source, str, searchDistance);
+	if(result != -1) result += strLen(str);
 
 	return result;
 }
@@ -292,13 +307,6 @@ int strFind(char* source, char* str, int to = 0, int from = 0) {
 
 // 	return result;
 // }
-
-int strFindRight(char* source, char* str, int searchDistance = 0) {
-	int result = strFind(source, str, searchDistance);
-	if(result != -1) result += strLen(str);
-
-	return result;
-}
 
 // void strAttach(char* destination, char* source) {
 	// int length = strLen(destination);

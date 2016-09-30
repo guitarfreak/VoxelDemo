@@ -74,8 +74,6 @@
 gui stuff: 
 - alpha
 - colors
-- text
-- numbers
 
 additionally:
 - 2d drawing
@@ -83,6 +81,9 @@ additionally:
 - vector representation
 - sound 
 - entities
+
+- id system
+- render gui into framebuffer for better alpha effect
 
 //-------------------------------------
 //               BUGS
@@ -164,7 +165,7 @@ DrawCommandList* globalCommandList2d;
 	GLOP(void, BindTextures, GLuint first, GLsizei count, const GLuint *textures) \
 	GLOP(void, BindProgramPipeline, GLuint pipeline) \
 	GLOP(void, DrawArraysInstancedBaseInstance, GLenum mode, GLint first, GLsizei count, GLsizei primcount, GLuint baseinstance) \
-	GLOP(GLuint, GetDebugMessageLog, GLuint counter‹, GLsizei bufSize, GLenum *source, GLenum *types, GLuint *ids, GLenum *severities, GLsizei *lengths, char *messageLog) \
+	GLOP(GLuint, GetDebugMessageLog, GLuint counter, GLsizei bufSize, GLenum *source, GLenum *types, GLuint *ids, GLenum *severities, GLsizei *lengths, char *messageLog) \
 	GLOP(void, TextureStorage3D, GLuint texture, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth) \
 	GLOP(void, TextureSubImage3D, GLuint texture, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, const void *pixels) \
 	GLOP(void, GenerateTextureMipmap, GLuint texture) \
@@ -201,8 +202,8 @@ DrawCommandList* globalCommandList2d;
 	GLOP(void, VertexAttribPointer, GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const GLvoid * pointer) \
 	GLOP(void, ProgramUniform3fv, GLuint program, GLint location, GLsizei count, const GLfloat *value) \
 	GLOP(GLint, GetAttribLocation, GLuint program, const GLchar *name) \
-	GLOP(void, GenSamplers, GLsizei n​, GLuint *samplers​) \
-	GLOP(void, BindSampler, GLuint unit, GLuint sampler​) \
+	GLOP(void, GenSamplers, GLsizei n, GLuint *samplers) \
+	GLOP(void, BindSampler, GLuint unit, GLuint sampler) \
 	GLOP(void, BindTextureUnit, GLuint unit, GLuint texture) \
 	GLOP(void, NamedBufferSubData, GLuint buffer, GLintptr offset, GLsizei size, const void *data) \
 	GLOP(void, NamedBufferSubDataEXT, GLuint buffer, GLintptr offset, GLsizei size, const void *data) \
@@ -606,7 +607,7 @@ typedef int wglSwapIntervalEXTFunction(int);
 wglSwapIntervalEXTFunction* wglSwapIntervalEXT;
 
 
-#define GLOP(returnType, name, ...) makeGLFunction(returnType, name, __VA_ARGS__)
+#define GLOP(returnType, name, ...) makeGLFunction(returnType, name, __VA_ARGS__) 
 	GL_FUNCTION_LIST
 #undef GLOP
 
@@ -3242,14 +3243,16 @@ struct CmdList {
 struct GuiInput {
 	Vec2 mousePos;
 	bool mouseClick, mouseDown;
-	bool escape, enter, space, backSpace, del;
+	bool escape, enter, space, backSpace, del, home, end;
 	bool left, right, up, down;
-	bool shift;
+	bool shift, ctrl;
 	char* charList;
 	int charListSize;
 };
 
 struct Gui {
+	bool lastMouseClick;
+
 	Font* font;
 	Vec4 textColor;
 	Vec4 regionColor;
@@ -3281,6 +3284,8 @@ struct Gui {
 	int currentId;
 	int activeId;
 
+	Vec2 lastMousePos;
+
 	Vec2 currentPos;
 	Vec2 currentDim;
 	Vec2 lastPos;
@@ -3299,15 +3304,12 @@ struct Gui {
 	float scrollStartY;
 	float scrollEndY;
 
-	// char* originalText;
 	void* originalPointer;
 	int textBoxIndex;
 	char textBoxText[50];
 	int textBoxTextSize;
 	int textBoxTextCapacity;
-
-	int selectionStart, selectionEnd;
-
+	int selectionAnchor;
 
 	void init(Vec2 sPos, Font* f, float width) {
 		*this = {};
@@ -3369,25 +3371,42 @@ struct Gui {
 		return scissorRect;
 	}
 
-	// void start(Vec2i mPos, bool click, bool down, bool escape, bool enter, GuiInput guiInput, Vec2i res) {
 	void start(GuiInput guiInput, Vec2i res) {
+		lastMousePos = input.mousePos;
+
 		input = guiInput;
 		input.mousePos.y *= -1;
 		screenRes = res;
 		currentId = 0;
 		scrollStackIndex = 0;
-		// if(activeId == 0) textBoxIndex = 0;
 
+			if(lastMouseClick && input.mouseDown && ((activeId == 0) || (activeId == 100000))) {
+				Rect background = rectULDim(startPos - border, vec2(panelWidth+border.x*2, -(lastPos.y-startPos.y)+lastDim.h - border.y*2));
+				bool overBackground = pointInRect(input.mousePos, background);
+				if(overBackground) activeId = 100000;
+			}
 
-		currentPos = startPos + vec2(0,getDefaultYOffset());
-		dcEnable({STATE_SCISSOR});
+			if(activeId == 100000) {
+				Vec2 mouseDelta = input.mousePos - lastMousePos;
+				if(input.shift) panelWidth += mouseDelta.x*2;
+				else startPos += mouseDelta;
+			}
+
+			if(!input.mouseDown && (activeId == 100000)) {
+				activeId = 0; 
+			}
+
+			lastMouseClick = input.mouseClick;
 
 		// draw background
 		if(lastPos != vec2(0,0)) {
 			Rect background = rectULDim(startPos - border, vec2(panelWidth+border.x*2, -(lastPos.y-startPos.y)+lastDim.h - border.y*2));
 			scissorPush(background);
-			dcRect({background, rect(0,0,1,1), panelColor, getTexture(TEXTURE_WHITE)->id});
+			dcRect({background, rect(0,0,1,1), panelColor, (int)getTexture(TEXTURE_WHITE)->id});
 		}
+
+		currentPos = startPos + vec2(0,getDefaultYOffset());
+		dcEnable({STATE_SCISSOR});
 	}
 
 	void end() {
@@ -3498,7 +3517,7 @@ struct Gui {
 
 	void drawRect(Rect r, Vec4 color, bool scissor = false) {
 		if(scissor) scissorPush(getCurrentRegion());
-		dcRect({r, rect(0,0,1,1), color, getTexture(TEXTURE_WHITE)->id});
+		dcRect({r, rect(0,0,1,1), color, (int)getTexture(TEXTURE_WHITE)->id});
 		if(scissor) scissorPop();
 	}
 
@@ -3723,41 +3742,105 @@ struct Gui {
 			textBoxIndex = textLength;
 			textBoxTextSize = textLength;
 			textBoxTextCapacity = textCapacity;
+
+			selectionAnchor = -1;
 		}
 
 		drawRect(region, regionColor + colorAdd);
 
 		if(active) {
+			int oldTextBoxIndex = textBoxIndex;
 			if(input.left) textBoxIndex--;
 			if(input.right) textBoxIndex++;
 			clampInt(&textBoxIndex, 0, textBoxTextSize);
 
+			if(input.ctrl) {
+				if(input.left) textBoxIndex = strFindBackwards(textBoxText, ' ', textBoxIndex);
+				else if(input.right) {
+					int foundIndex = strFind(textBoxText, ' ', textBoxIndex);
+					if(foundIndex == 0) textBoxIndex = textBoxTextSize;
+					else textBoxIndex = foundIndex - 1;
+				}
+			}
+			if(input.home) textBoxIndex = 0;
+			if(input.end) textBoxIndex = textBoxTextSize;
+
+			if(selectionAnchor == -1) {
+				if(input.shift && (oldTextBoxIndex != textBoxIndex)) selectionAnchor = oldTextBoxIndex;
+			} else {
+				if(input.shift) {
+					if(textBoxIndex == selectionAnchor) selectionAnchor = -1;
+				} else {
+					if(input.left || input.right || input.home || input.end) {
+						if(input.left) textBoxIndex = min(selectionAnchor, oldTextBoxIndex);
+						else if(input.right) textBoxIndex = max(selectionAnchor, oldTextBoxIndex);
+						selectionAnchor = -1;
+					}
+				}
+			}
+
 			for(int i = 0; i < input.charListSize; i++) {
 				if(textBoxTextSize >= textBoxTextCapacity) break;
 				char c = input.charList[i];
-				if(type == 1 && (c < '0' || c > '9')) break;
-				if(type == 2 && ((c < '0' || c > '9') && c != '.')) break; 
+				if(type == 1 && ((c < '0' || c > '9') && c != '-')) break;
+				if(type == 2 && ((c < '0' || c > '9') && c != '.' && c != '-')) break; 
+
+				if(selectionAnchor != -1) {
+					int index = min(selectionAnchor, textBoxIndex);
+					int size = max(selectionAnchor, textBoxIndex) - index;
+					strErase(textBoxText, index, size);
+					textBoxTextSize -= size;
+					textBoxIndex = index;
+					selectionAnchor = -1;
+				}
 
 				strInsert(textBoxText, textBoxIndex, input.charList[i]);
 				textBoxTextSize++;
 				textBoxIndex++;
 			}
 
-			if(input.backSpace && textBoxIndex > 0) {
-				strRemove(textBoxText, textBoxIndex, textBoxTextSize);
-				textBoxTextSize--;
-				textBoxIndex--;
-			}
-			
-			if(input.del && textBoxIndex < textBoxTextSize) {
-				strRemove(textBoxText, textBoxIndex+1, textBoxTextSize);
-				textBoxTextSize--;
+			if(selectionAnchor != -1) {
+				if(input.backSpace || input.del) {
+					// code duplication
+					int index = min(selectionAnchor, textBoxIndex);
+					int size = max(selectionAnchor, textBoxIndex) - index;
+					strErase(textBoxText, index, size);
+					textBoxTextSize -= size;
+					textBoxIndex = index;
+					selectionAnchor = -1;
+				}
+			} else {
+				if(input.backSpace && textBoxIndex > 0) {
+					strRemove(textBoxText, textBoxIndex, textBoxTextSize);
+					textBoxTextSize--;
+					textBoxIndex--;
+				}
+				
+				if(input.del && textBoxIndex < textBoxTextSize) {
+					strRemove(textBoxText, textBoxIndex+1, textBoxTextSize);
+					textBoxTextSize--;
+				}
 			}
 
 			Rect regCen = rectGetCenDim(region);
 			Vec2 textStart = regCen.cen - vec2(regCen.dim.w*0.5f,0);
 			Vec2 cursorPos = textStart + vec2(getTextPos(textBoxText, textBoxIndex, font), 0);
+			if(textBoxIndex == 0) cursorPos += vec2(1,0); // avoid scissoring cursor on far left
+
 			Rect cursorRect = rectCenDim(cursorPos, vec2(cursorWidth,font->height));
+
+				if(selectionAnchor != -1) {
+					int start = min(textBoxIndex, selectionAnchor);
+					int end = max(textBoxIndex, selectionAnchor);
+
+					Vec2 selectionStartPos = textStart + vec2(getTextPos(textBoxText, start, font), 0);
+					Vec2 selectionEndPos = textStart + vec2(getTextPos(textBoxText, end, font), 0);
+					float selectionWidth = selectionEndPos.x - selectionStartPos.x;
+
+					Vec2 center = selectionStartPos+selectionWidth*0.5;
+					Rect selectionRect = rectCenDim(selectionStartPos + vec2(selectionWidth*0.5f,0), vec2(selectionWidth,font->height));
+					drawRect(selectionRect, vec4(0,1,1,0.3f), true);
+				} 
 
 			drawText(textBoxText, 0);
 			drawRect(cursorRect, cursorColor, true);
@@ -3774,24 +3857,6 @@ struct Gui {
 
 			if(input.escape) activeId = 0;
 
-			// if(selectionStart == selectionEnd) {
-			// 	selectionStart = selectionEnd = textBoxIndex;
-			// }
-
-			// if(input.shift) {
-				// if(input.left) selectionStart--;
-				// if(input.right) selectionEnd++;
-			// }
-
-			// if(selectionStart != selectionEnd) {
-			// 	Vec2 selectionStartPos = textStart + vec2(getTextPos(textBoxText, selectionStart, font), 0);
-			// 	Vec2 selectionEndPos = textStart + vec2(getTextPos(textBoxText, selectionEnd, font), 0);
-			// 	float selectionWidth = selectionEndPos.x - selectionStartPos.x;
-
-			// 	Vec2 center = selectionStartPos+selectionWidth*0.5;
-			// 	Rect selectionRect = rectCenDim(selectionStartPos + vec2(selectionWidth*0.5f,0), vec2(selectionWidth,font->height));
-			// 	drawRect(selectionRect, vec4(0,1,1,0.5f));
-			// }
 		} else {
 			if(type == 0) drawText((char*)value, 0);
 			else { 
@@ -4003,9 +4068,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		initEntity(&freeCam, ET_Camera, vec3(35,35,32), startDir, vec3(0,0,0), vec3(0,0,0));
 		ad->cameraEntity = addEntity(&ad->entityList, &freeCam);
 
-
-
-		
 		uint vao = 0;
 		glCreateVertexArrays(1, &vao);
 		glBindVertexArray(vao);
@@ -4021,10 +4083,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		char* texturePaths[] = {
 			 					"..\\data\\skybox\\sb1.png",
-								"..\\data\\skybox\\sb2.png", 
-								"..\\data\\skybox\\sb3.jpg", 
-								"..\\data\\skybox\\sb4.png", 
-								"..\\data\\skybox\\xoGVD3X.jpg", 
+								// "..\\data\\skybox\\sb2.png", 
+								// "..\\data\\skybox\\sb3.jpg", 
+								// "..\\data\\skybox\\sb4.png", 
+								// "..\\data\\skybox\\xoGVD3X.jpg", 
 								};
 
 		ad->cubeMapCount = arrayCount(texturePaths);
@@ -5883,7 +5945,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		Vec4 c = vec4(1.0f,0.4f,0.0f,1);
 		Vec4 c2 = vec4(0,0,0,1);
 		Font* font = getFont(FONT_CONSOLAS, fontSize);
-		float shadow = 1;
+		int shadow = 1;
 		// float shadow = 0;
 		float xo = 6;
 		int ali = 2;
@@ -5909,13 +5971,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 		static bool setupGui = true;
 		if(setupGui) {
 			gui.init(vec2(0,1), getFont(FONT_CONSOLAS, fontSize), 300);
-			// gui.init(vec2(1300,1), getFont(FONT_CONSOLAS, fontSize), 300);
+			// gui.init(vec2(500,1), getFont(FONT_CONSOLAS, fontSize), 1000);
 			setupGui = false;
 		}
 		GuiInput gInput = { vec2(input->mousePos), input->mouseButtonPressed[0], input->mouseButtonDown[0], 
-							input->keysPressed[VK_ESCAPE], input->keysPressed[VK_RETURN], input->keysPressed[VK_SPACE], input->keysPressed[VK_BACK], input->keysPressed[VK_DELETE], 
+							input->keysPressed[VK_ESCAPE], input->keysPressed[VK_RETURN], input->keysPressed[VK_SPACE], input->keysPressed[VK_BACK], input->keysPressed[VK_DELETE], input->keysPressed[VK_HOME], input->keysPressed[VK_END], 
 							input->keysPressed[VK_LEFT], input->keysPressed[VK_RIGHT], input->keysPressed[VK_UP], input->keysPressed[VK_DOWN], 
-							input->mShift, input->inputCharacters, input->inputCharacterCount};
+							input->mShift, input->mCtrl, input->inputCharacters, input->inputCharacterCount};
 		gui.start(gInput, wSettings->currentRes);
 
 
@@ -5973,13 +6035,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 			// static Vec4 rColor = vec4(1,1,1,1);
 			// hslToRgb(rColor.e, hue, sat, light);
 
-			static int textCapacity = 20;
+			static int textCapacity = 50;
 			static char* text = getPArray(char, textCapacity);
 			static bool DOIT = true;
 			if(DOIT) {
 				DOIT = false;
 				strClear(text);
-				strCpy(text, "Test String!");
+				strCpy(text, "This is a really long sentence!");
 			}
 			gui.div(vec2(0,0)); gui.label("Text Box:", 0); gui.textBoxChar(text, 0, textCapacity);
 
@@ -6033,7 +6095,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			dcRect({rectCenDim(pos, iconSize*1.2f*iconOff), rect(0,0,1,1), vec4(0,0,0,0.85f), 1});
 
 			uint textureId = ad->voxelTextures[0];
-			dcRect({rectCenDim(pos, iconSize*iconOff), rect(0,0,1,1), color, textureId, texture1Faces[i+1][0]+1});
+			dcRect({rectCenDim(pos, iconSize*iconOff), rect(0,0,1,1), color, (int)textureId, texture1Faces[i+1][0]+1});
 		}
 	}
 

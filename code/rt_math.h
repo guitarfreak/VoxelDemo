@@ -283,7 +283,7 @@ void hueToRgb(float color[3], double h) {
 
 float colorGet(uint color, int i) {
 	if (i < 0 || i > 3) {
-		printf("colorGet wants to access element: %f", i);
+		printf("colorGet wants to access element: %f", (float)i);
 		return -1;
 	}
 	int colorChannel = color >> ((3 - i) * 8) & 255;
@@ -317,7 +317,7 @@ void colorAdd(uint &c1, uint c2) {
 
 int colorSet(uint &color, int i, float f) {
 	if (i < 0 || i > 3) {
-		printf("colorGet wants to access element: %f", i);
+		printf("colorGet wants to access element: %f", (float)i);
 		return -1;
 	}
 
