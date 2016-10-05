@@ -77,8 +77,16 @@ inline float clampMin(float a, float min) {
 	return a < min ? min : a;
 }
 
+inline void clampMin(float* a, float min) {
+	*a < min ? min : *a;
+}
+
 inline float clampMax(float a, float max) {
 	return a > max ? max : a;
+}
+
+inline void clampMax(float* a, float max) {
+	*a > max ? max : *a;
 }
 
 inline float clamp(float n, float min, float max) {
@@ -96,8 +104,16 @@ inline float clampIntMin(int a, int min) {
 	return a < min ? min : a;
 }
 
+inline void clampIntMin(int* a, int min) {
+	*a < min ? min : *a;
+}
+
 inline float clampIntMax(int a, int max) {
 	return a > max ? max : a;
+}
+
+inline void clampIntMax(int* a, int max) {
+	*a > max ? max : *a;
 }
 
 inline float clampInt(int n, int min, int max) {
@@ -1442,6 +1458,19 @@ inline Vec2 clampMax(Vec2 v, Vec2 dim) {
 	return result;
 }	
 
+Vec2 clamp(Vec2 v, Rect region) {
+	Vec2 result = v;
+	result.x = clamp(v.x, region.min.x, region.max.x);
+	result.y = clamp(v.y, region.min.y, region.max.y);
+
+	return result;
+}
+
+void clamp(Vec2* v, Rect region) {
+	v->x = clamp(v->x, region.min.x, region.max.x);
+	v->y = clamp(v->y, region.min.y, region.max.y);
+}
+
 inline Vec2 toVec2(Vec3 a) {
 	Vec2 result;
 	result.x = a.x;
@@ -1759,6 +1788,18 @@ int getBiggestAxis(Vec3 v, int smallerAxis[2] = 0) {
 	return biggestAxis;
 }
 
+Vec3 rgbToHsl(Vec3 rgbColor) {
+	Vec3 result = {};
+	rgbToHsl(result.e, rgbColor.x, rgbColor.y, rgbColor.z);
+	return result;
+}
+
+Vec3 hslToRgb(Vec3 hslColor) {
+	Vec3 result = {};
+	hslToRgb(result.e, hslColor.x, hslColor.y, hslColor.z);
+	return result;
+}
+
 //
 //
 //
@@ -1902,6 +1943,11 @@ inline Vec4 operator-(Vec4 a, Vec4 b) {
 
 inline bool operator==(Vec4 a, Vec4 b) {
 	bool result = (a.x == b.x && a.y == b.y && a.z == b.z && a.w == b.w);
+	return result;
+}
+
+inline bool operator!=(Vec4 a, Vec4 b) {
+	bool result = !(a == b);
 	return result;
 }
 
@@ -2283,6 +2329,15 @@ Rect rectExpand(Rect r, Rect rExpand) {
 Rect rectExpand(Rect r, Vec2 dim) {
 	r.min -= dim/2;
 	r.max += dim/2;
+
+	return r;
+}
+
+Rect rectExpand(Rect r, float left, float bottom, float right, float top) {
+	r.min.x += left;
+	r.min.y += bottom;
+	r.max.x += right;
+	r.max.y += top;
 
 	return r;
 }

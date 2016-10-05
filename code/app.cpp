@@ -70,6 +70,8 @@
 - put in spaces for fillString
 - save mouse position at startup and place the mouse there when the app closes
 - simplex noise instead of perlin noise
+- make thread push copy the thead specific data on push in a seperate buffer for all possible threadjobs
+- frametime timer and fps counter
 
 gui stuff: 
 - alpha
@@ -115,8 +117,7 @@ ThreadQueue* globalThreadQueue;
 struct GraphicsState;
 struct DrawCommandList;
 GraphicsState* globalGraphicsState;
-DrawCommandList* globalCommandList3d;
-DrawCommandList* globalCommandList2d;
+DrawCommandList* globalCommandList;
 
 // char* dataFolder = "...\\data\\";
 // #define GetFilePath(name) ...\\data\\##name
@@ -189,6 +190,7 @@ DrawCommandList* globalCommandList2d;
 	GLOP(void, UseProgram, GLuint program) \
 	GLOP(void, ActiveTexture, GLenum texture) \
 	GLOP(void, EnableVertexAttribArray, GLuint index) \
+	GLOP(void, DisableVertexAttribArray, GLuint index) \
 	GLOP(void, TexImage3DEXT,  GLenum	target, GLint	level, GLenum	internalformat, GLsizei	width, GLsizei	height, GLsizei	depth, GLint	border, GLenum	format, GLenum	type, const	GLvoid *pixels) \
 	GLOP(void, ActiveTextureARB, GLenum texture) \
 	GLOP(void, VertexAttribIPointer, GLuint index, GLint size, GLenum type, GLsizei stride, const GLvoid * pointer) \
@@ -227,6 +229,7 @@ DrawCommandList* globalCommandList2d;
 	GLOP(void, FramebufferTexture, GLenum target, GLenum attachment, GLuint texture, GLint level) \
 	GLOP(void, BlendFuncSeparate, GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha) \
 	GLOP(void, BlendEquation, GLenum mode) \
+	GLOP(void, BlendEquationSeparate, GLenum modeRGB, GLenum modeAlpha) \
 	GLOP(void, GetTextureSubImage, uint texture, int level, int xoffset, int yoffset, int zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, GLsizei bufSize, void *pixels) \
 	GLOP(GLubyte*, GetStringi, GLenum name, GLuint index) \
 	GLOP(void, DrawArraysInstanced, GLenum mode, GLint first, GLsizei count, GLsizei primcount) \
@@ -618,25 +621,31 @@ void loadFunctions() {
 #undef GLOP
 }
 
+
+
 enum CommandState {
-	STATE_SCISSOR = 0,
-	STATE_SIZE,
+	STATE_SCISSOR,
+	STATE_POLYGONMODE, 
+	STATE_LINEWIDTH,
+	STATE_CULL,
+};
+
+enum Polygon_Mode {
+	POLYGON_MODE_FILL = 0,
+	POLYGON_MODE_LINE,
+	POLYGON_MODE_POINT,
 };
 
 enum DrawListCommand {
+	Draw_Command_State_Type,
 	Draw_Command_Enable_Type,
 	Draw_Command_Disable_Type,
-
 	Draw_Command_Cube_Type,
 	Draw_Command_Line_Type,
 	Draw_Command_Quad_Type,
 	Draw_Command_Rect_Type,
 	Draw_Command_Text_Type,
 	Draw_Command_Scissor_Type,
-	Draw_Command_PolygonMode_Type,
-	Draw_Command_LineWidth_Type,
-	Draw_Command_Cull_Type,
-// Draw_Command_Rect_Type,
 };
 
 struct DrawCommandList {
@@ -653,6 +662,7 @@ void drawCommandListInit(DrawCommandList* cl, char* data, int maxBytes) {
 	cl->maxBytes = maxBytes;
 }
 
+#pragma pack(push)
 struct Draw_Command_Cube {
 	Vec3 trans;
 	Vec3 scale;
@@ -695,62 +705,112 @@ struct Draw_Command_Scissor {
 	Rect rect;
 };
 
-enum Polygon_Mode {
-	POLYGON_MODE_FILL = 0,
-	POLYGON_MODE_LINE,
-	POLYGON_MODE_POINT,
-};
-
-struct Draw_Command_PolygonMode {
-	int mode;
-};
-
-struct Draw_Command_LineWidth {
-	int width;
-};
-
-struct Draw_Command_Cull {
-	bool b;
-};
-
-struct Draw_Command_Enable {
+struct Draw_Command_Int {
 	int state;
 };
 
-struct Draw_Command_Disable {
+struct Draw_Command_State {
 	int state;
+	int value;
 };
+#pragma pack(pop)
 
 
+#define PUSH_DRAW_COMMAND(commandType, structType) \
+	if(!drawList) drawList = globalCommandList; \
+	char* list = (char*)drawList->data + drawList->bytes; \
+	*((int*)list) = Draw_Command_##commandType##_Type; \
+	list += sizeof(int); \
+	Draw_Command_##structType* command = (Draw_Command_##structType*)list; \
+	drawList->count++; \
+	drawList->bytes += sizeof(Draw_Command_##structType) + sizeof(int); \
+	assert(sizeof(Draw_Command_##structType) + drawList->bytes < drawList->maxBytes);
 
 
-#define makeDrawCommandFunction(name, list) \
-	void dc##name(Draw_Command_##name d, DrawCommandList* commandList = (DrawCommandList*)list) { \
-		if(list == 0) commandList = globalCommandList3d; \
-		else commandList = globalCommandList2d; \
-		int* cl = (int*)(((char*)commandList->data)+commandList->bytes); \
-		*(cl++) = Draw_Command_##name##_Type; \
-		assert(sizeof(Draw_Command_##name) + commandList->bytes < commandList->maxBytes); \
-		*((Draw_Command_##name*)(cl)) = d; \
-		commandList->count++; \
-		commandList->bytes += sizeof(Draw_Command_##name) + sizeof(int); \
-	} 
+void dcCube(Vec3 trans, Vec3 scale, Vec4 color, float degrees = 0, Vec3 rot = vec3(0,0,0), DrawCommandList* drawList = 0) {
+	PUSH_DRAW_COMMAND(Cube, Cube);
 
-	makeDrawCommandFunction(Cube, 0);
-	makeDrawCommandFunction(Line, 0);
-	makeDrawCommandFunction(Quad, 0);
-	makeDrawCommandFunction(PolygonMode, 0);
-	makeDrawCommandFunction(LineWidth, 0);
-	makeDrawCommandFunction(Cull, 0);
-	makeDrawCommandFunction(Rect, 1);
-	makeDrawCommandFunction(Text, 1);
-	makeDrawCommandFunction(Scissor, 1);
-	makeDrawCommandFunction(Enable, 1);
-	makeDrawCommandFunction(Disable, 1);
+	command->trans = trans;
+	command->scale = scale;
+	command->color = color;
+	command->degrees = degrees;
+	command->rot = rot;
+}
 
-#define dcCase(name, var, index) \
-	Draw_Command_##name var = *((Draw_Command_##name*)index); \
-	index += sizeof(Draw_Command_##name); \
+void dcLine(Vec3 p0, Vec3 p1, Vec4 color, DrawCommandList* drawList = 0) {
+	PUSH_DRAW_COMMAND(Line, Line);
+
+	command->p0 = p0;
+	command->p1 = p1;
+	command->color = color;
+}
+
+void dcQuad(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec4 color, DrawCommandList* drawList = 0) {
+	PUSH_DRAW_COMMAND(Quad, Quad);
+
+	command->p0 = p0;
+	command->p1 = p1;
+	command->p2 = p2;
+	command->p3 = p3;
+	command->color = color;
+}
+
+void dcRect(Rect r, Rect uv, Vec4 color, int texture = -1, int texZ = -1, DrawCommandList* drawList = 0) {
+	PUSH_DRAW_COMMAND(Rect, Rect);
+
+	command->r = r;
+	command->uv = uv;
+	command->color = color;
+	command->texture = texture;
+	command->texZ = texZ;
+}
+void dcRect(Rect r, Vec4 color, DrawCommandList* drawList = 0) {
+	PUSH_DRAW_COMMAND(Rect, Rect);
+
+	command->r = r;
+	command->uv = rect(0,0,1,1);
+	command->color = color;
+	command->texture = -1;
+	command->texZ = -1;
+}
+
+void dcText(char* text, Font* font, Vec2 pos, Vec4 color, int vAlign = 0, int hAlign = 0, int shadow = 0, Vec4 shadowColor = vec4(0,0,0,1), DrawCommandList* drawList = 0) {
+	PUSH_DRAW_COMMAND(Text, Text);
+
+	command->text = text;
+	command->font = font;
+	command->pos = pos;
+	command->color = color;
+	command->vAlign = vAlign;
+	command->hAlign = hAlign;
+	command->shadow = shadow;
+	command->shadowColor = shadowColor;
+}
+
+void dcScissor(Rect rect, DrawCommandList* drawList = 0) {
+	PUSH_DRAW_COMMAND(Scissor, Scissor);
+
+	command->rect = rect;
+}
+
+void dcState(int state, int value, DrawCommandList* drawList = 0) {
+	PUSH_DRAW_COMMAND(State, State);
+
+	command->state = state;
+	command->value = value;
+}
+
+void dcEnable(int state, DrawCommandList* drawList = 0) {
+	PUSH_DRAW_COMMAND(Enable, Int);
+
+	command->state = state;
+}
+
+void dcDisable(int state, DrawCommandList* drawList = 0) {
+	PUSH_DRAW_COMMAND(Disable, Int);
+
+	command->state = state;
+}
 
 
 
@@ -793,16 +853,13 @@ struct Draw_Command_Disable {
 
 
 const char* vertexShaderCube = GLSL (
-	// out gl_PerVertex { vec4 gl_Position; };
-	out gl_PerVertex { vec4 gl_Position; float gl_ClipDistance[]; };
+	out gl_PerVertex { vec4 gl_Position; };
 	out vec4 Color;
 	smooth out vec3 uv;
 
 	layout(location = 0) in vec3 attr_verts;
 	layout(location = 1) in vec2 attr_texUV;
 	layout(location = 2) in vec3 attr_normal;
-
-	uniform vec4 cPlane;
 
 	uniform mat4x4 model;
 	uniform mat4x4 view;
@@ -812,21 +869,9 @@ const char* vertexShaderCube = GLSL (
 
 	uniform vec3 vertices[24];
 	uniform vec2 setUV[24];
-
 	uniform vec4 setColor;
 
-	// const ivec2 quad_uv[] = ivec2[] (
-	// 	ivec2(  0.0,  0.0 ),
-	// 	ivec2(  0.0,  1.0 ),
-	// 	ivec2(  1.0,  1.0 ),
-	// 	ivec2(  1.0,  0.0 )
-	// );
-
 	void main() {
-		// ivec2 p = quad_uv[gl_VertexID];
-		// uv = vec3(setUV[p.x], setUV[2 + p.y], texZ);
-		// uv = vec3(setUV[p.x], setUV[2 + p.y], 0);
-
 		Color = setColor;
 
 		vec4 pos;
@@ -835,15 +880,10 @@ const char* vertexShaderCube = GLSL (
 			gl_Position = proj*view*pos;
 			uv = vec3(setUV[gl_VertexID],0);
 		} else {
-			// posModelView = view*model*pos;
-			// gl_Position = proj*posModelView;
-
 			pos = vec4(attr_verts, 1);
 			gl_Position = proj*view*model*pos;
 			uv = vec3(attr_texUV, 0);
 		}
-
-		gl_ClipDistance[0] = dot(cPlane, model*pos);
 	}
 );
 
@@ -860,9 +900,7 @@ const char* fragmentShaderCube = GLSL (
 	uniform float alpha = 0.5f;
 
 	void main() {
-		// color = texture(s, uv) * Color;
 		color = texture(s, uv.xy) * Color;
-		// color = Color;
 
 		if(alphaTest) {
 			if(color.a <= alpha) discard;
@@ -1769,16 +1807,21 @@ void drawCube(Vec3 trans, Vec3 scale, Vec4 color, float degrees, Vec3 rot) {
 }
 
 void drawLine(Vec3 p0, Vec3 p1, Vec4 color) {
-	Vec3 verts[] = {p0, p1};
+	glDisableVertexAttribArray(0);
+	glDisableVertexAttribArray(1);
+	glDisableVertexAttribArray(2);
 
-	uint tex[2] = {getTexture(TEXTURE_WHITE)->id, 0};
-	glBindTextures(0,2,tex);
+	glBindTextures(0,1,&getTexture(TEXTURE_WHITE)->id);
+
+	Vec3 verts[] = {p0, p1};
+	Vec2 quadUVs[] = {{0,0}, {0,1}};
+	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_UV, quadUVs[0].e, arrayCount(quadUVs));
 
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_VERTICES, verts[0].e, arrayCount(verts));
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, colorSRGB(color).e);
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODE, true);
 
-	// glDrawArrays(GL_LINES, 0, arrayCount(verts));
+	glDrawArrays(GL_LINES, 0, arrayCount(verts));
 }
 
 void drawQuad(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec4 color) {
@@ -1787,14 +1830,14 @@ void drawQuad(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec4 color) {
 	uint tex[2] = {getTexture(TEXTURE_WHITE)->id, 0};
 	glBindTextures(0,2,tex);
 
-	// Vec2 quadUVs[] = {{0,0}, {0,1}, {1,1}, {1,0}};
-	// pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_UV, quadUVs[0].e, arrayCount(quadUVs));
+	Vec2 quadUVs[] = {{0,0}, {0,1}, {1,1}, {1,0}};
+	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_UV, quadUVs[0].e, arrayCount(quadUVs));
 
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_VERTICES, verts[0].e, arrayCount(verts));
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, colorSRGB(color).e);
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODE, true);
 
-	// glDrawArrays(GL_QUADS, 0, arrayCount(verts));
+	glDrawArrays(GL_QUADS, 0, arrayCount(verts));
 }
 
 void drawQuad(Vec3 p, Vec3 normal, float size, Vec4 color) {
@@ -2783,6 +2826,99 @@ void drawVoxelMesh(VoxelMesh* m, int drawMode = 0) {
 	}
 }
 
+
+#define dcGetStructAndIncrement(structType) \
+	Draw_Command_##structType dc = *((Draw_Command_##structType*)drawListIndex); \
+	drawListIndex += sizeof(Draw_Command_##structType); \
+
+int stateSwitch(int state) {
+	switch(state) {
+		case STATE_CULL: return GL_CULL_FACE;
+		case STATE_SCISSOR: return GL_SCISSOR_TEST;
+	}
+	return 0;
+}
+
+void executeCommandList(DrawCommandList* list) {
+	char* drawListIndex = (char*)list->data;
+	for(int i = 0; i < list->count; i++) {
+		int command = *((int*)drawListIndex);
+		drawListIndex += sizeof(int);
+
+		switch(command) {
+			case Draw_Command_Cube_Type: {
+				dcGetStructAndIncrement(Cube);
+				drawCube(dc.trans, dc.scale, dc.color, dc.degrees, dc.rot);
+			} break;
+
+			case Draw_Command_Line_Type: {
+				dcGetStructAndIncrement(Line);
+				drawLine(dc.p0, dc.p1, dc.color);
+			} break;
+
+			case Draw_Command_Quad_Type: {
+				dcGetStructAndIncrement(Quad);
+				drawQuad(dc.p0, dc.p1, dc.p2, dc.p3, dc.color);
+			} break;
+
+			case Draw_Command_State_Type: {
+				dcGetStructAndIncrement(State);
+
+				switch(dc.state) {
+					case STATE_POLYGONMODE: {
+						int m;
+						switch(dc.value) {
+							case POLYGON_MODE_FILL: m = GL_FILL; break;
+							case POLYGON_MODE_LINE: m = GL_LINE; break;
+							case POLYGON_MODE_POINT: m = GL_POINT; break;
+						}
+						glPolygonMode(GL_FRONT_AND_BACK, m);
+					} break;
+
+					case STATE_LINEWIDTH: glLineWidth(dc.value); break;
+
+					default: {} break;
+				}
+			} break;
+
+			case Draw_Command_Enable_Type: {
+				dcGetStructAndIncrement(Int);
+
+				int m = stateSwitch(dc.state);
+				glEnable(m);
+			} break;			
+
+			case Draw_Command_Disable_Type: {
+				dcGetStructAndIncrement(Int);
+
+				int m = stateSwitch(dc.state);
+				glDisable(m);
+			} break;	
+
+			case Draw_Command_Rect_Type: {
+				dcGetStructAndIncrement(Rect);
+				int texture = dc.texture == -1 ? getTexture(TEXTURE_WHITE)->id : dc.texture;
+				drawRect(dc.r, dc.uv, dc.color, texture, dc.texZ-1);
+			} break;
+
+			case Draw_Command_Text_Type: {
+				dcGetStructAndIncrement(Text);
+				drawText(dc.text, dc.font, dc.pos, dc.color, dc.vAlign, dc.hAlign, dc.shadow, dc.shadowColor);
+			} break;
+
+			case Draw_Command_Scissor_Type: {
+				dcGetStructAndIncrement(Scissor);
+				Rect r = dc.rect;
+				Vec2 dim = rectGetDim(r);
+				glScissor(r.min.x, r.min.y, dim.x, dim.y);
+			} break;
+
+			default: {} break;
+		}
+	}
+}
+
+
 struct Bomb {
 	Vec3 pos;
 	Vec3 size;
@@ -2825,6 +2961,7 @@ Camera getCamData(Vec3 pos, Vec3 rot, Vec3 offset = vec3(0,0,0), Vec3 gUp = vec3
 struct AppData {
 	bool showHud;
 	bool updateFrameBuffers;
+	float guiAlpha;
 
 	uint cubemapTextureId[16];
 	uint cubemapSamplerId;
@@ -2836,11 +2973,15 @@ struct AppData {
 	WindowSettings wSettings;
 
 	GraphicsState graphicsState;
+	DrawCommandList commandListGui;
 	DrawCommandList commandList2d;
 	DrawCommandList commandList3d;
 
+	DrawCommandList commandList;
+
 	LONGLONG lastTimeStamp;
 	float dt;
+	float time;
 
 	bool* treeNoise;
 
@@ -3242,6 +3383,7 @@ struct CmdList {
 
 struct GuiInput {
 	Vec2 mousePos;
+	int mouseWheel;
 	bool mouseClick, mouseDown;
 	bool escape, enter, space, backSpace, del, home, end;
 	bool left, right, up, down;
@@ -3250,10 +3392,7 @@ struct GuiInput {
 	int charListSize;
 };
 
-struct Gui {
-	bool lastMouseClick;
-
-	Font* font;
+struct GuiSettings {
 	Vec4 textColor;
 	Vec4 regionColor;
 	Vec4 hoverColorAdd;
@@ -3263,16 +3402,14 @@ struct Gui {
 	Vec4 sliderColor;
 	Vec4 sliderHoverColorAdd;
 	Vec4 cursorColor;
+	Vec4 resizeButtonColor;
+	Vec4 sectionColor;
+	Vec4 selectionColor;
+
 	float sliderSize;
 	Vec2 offsets;
 	Vec2 border;
-	Vec2i screenRes;
-
-	GuiInput input;
-
-	Vec2 startPos;
-	float panelWidth;
-	float fontHeight;
+	Vec2i minSize;
 	float fontOffset;
 	float sectionOffset;
 	float fontHeightOffset;
@@ -3280,16 +3417,35 @@ struct Gui {
 	float scrollBarWidth;
 	float scrollBarSliderSize;
 	float cursorWidth;
+};
+
+struct Gui {
+	GuiSettings settings;
+
+	Vec2 cornerPos;
+	Vec2 panelStartDim;
+
+	GuiInput input;
+	Font* font;
+	Vec2i screenRes;
+
+	Vec2 startPos;
+	float panelWidth;
+	float fontHeight;
 
 	int currentId;
 	int activeId;
-
-	Vec2 lastMousePos;
+	int wantsToBeActiveId;
+	int hotId;
 
 	Vec2 currentPos;
 	Vec2 currentDim;
 	Vec2 lastPos;
 	Vec2 lastDim;
+	Vec2 lastMousePos;
+
+	float mainScrollAmount;
+	int mainScrollHeight;
 
 	bool columnMode;
 	float columnArray[8];
@@ -3299,10 +3455,12 @@ struct Gui {
 	Rect scissorStack[8];
 	int scissorStackSize;
 
-	float scrollStack[8];
-	int scrollStackIndex;
-	float scrollStartY;
-	float scrollEndY;
+	int scrollStackIndexX;
+	int scrollStackIndexY[4];
+	float scrollStack[4][4];
+	float scrollStartY[4];
+	float scrollEndY[4];
+	bool showScrollBar[4];
 
 	void* originalPointer;
 	int textBoxIndex;
@@ -3311,41 +3469,57 @@ struct Gui {
 	int textBoxTextCapacity;
 	int selectionAnchor;
 
-	void init(Vec2 sPos, Font* f, float width) {
+	bool secondMode;
+
+	void init(Rect panelRect) {
 		*this = {};
 
-		font = f;
-		textColor 			= vec4(0.9f, 0.9f, 0.9f, 1);
-		regionColor 		= vec4(0.2f,0.2f,0.2f,0.3f);
-		hoverColorAdd 		= vec4(0.2f,0.2f,0.2f,0);
-		panelColor 			= vec4(0.3f,0,0.3f,0.90f);
-		switchColorOn 		= vec4(0.0f,0.3f,0.0f,0);
-		switchColorOff 		= vec4(0.3f,0.0f,0.0f,0);
-		sliderHoverColorAdd = vec4(0,0,0,0.15f);
-		sliderColor 		= vec4(1,1,1,0.2f);
-		cursorColor 		= vec4(1,1,1,1);
+		Vec3 mainColor = vec3(280,0.7f,0.3f);
 
-		sliderSize = 4;
-		offsets = vec2(2,2);
-		border = vec2(4,-4);
+		settings.panelColor 		= vec4(hslToRgb(mainColor), 1);
+		settings.regionColor 		= vec4(hslToRgb(mainColor + vec3(0,0,-0.1f)), 1);
+		settings.sectionColor 		= vec4(hslToRgb(mainColor + vec3(45,0,0)), 1);
+		settings.resizeButtonColor 	= vec4(hslToRgb(mainColor + vec3(-45,-0.1f,0)), 1);
+		settings.selectionColor 	= vec4(hslToRgb(mainColor + vec3(-180,0,0)), 1);
 
-		panelWidth = width;
-		fontHeight = font->height;
-		fontHeightOffset = 1.0f;
-		fontOffset = 0.15f;
-		sectionOffset = 1.15f;
-		sectionIndent = 0.08f;
-		scrollBarWidth = 20;
-		scrollBarSliderSize = 30;
-		cursorWidth = 1;
+		settings.switchColorOn 		= vec4(0,0.3f,0,0);
+		settings.switchColorOff 	= vec4(0.3f,0,0,0);
 
-		startPos = sPos + border;
+		settings.textColor 			= vec4(0.9f, 0.9f, 0.9f, 1);
+		settings.hoverColorAdd 		= vec4(0.2f,0.2f,0.2f,0);
+		settings.sliderHoverColorAdd= settings.hoverColorAdd;
+		settings.sliderColor 		= vec4(0.6f,0.6f,0.6f,0.8f);
+		settings.cursorColor 		= vec4(1,1,1,1);
+
+		settings.sliderSize = 4;
+		settings.offsets = vec2(1,1);
+		settings.border = vec2(4,-4);
+		settings.minSize = vec2i(100,100);
+		settings.fontHeightOffset = 1.0f;
+		settings.fontOffset = 0.15f;
+		settings.sectionOffset = 1.15f;
+		settings.sectionIndent = 0.08f;
+		settings.scrollBarWidth = 20;
+		settings.scrollBarSliderSize = 30;
+		settings.cursorWidth = 1;
+
+		cornerPos = rectGetUL(panelRect);
+		panelStartDim = rectGetDim(panelRect);
+	}
+
+	void doScissor(Rect r) {
+		dcScissor(r);
+	}
+
+	void setScissor(bool m) {
+		if(m) dcEnable(STATE_SCISSOR);
+		else dcDisable(STATE_SCISSOR);
 	}
 
 	Rect scissorPush(Rect newRect) {
 		if(scissorStackSize == 0) {
 			scissorStack[scissorStackSize++] = newRect;
-			dcScissor({scissorRect(newRect)});
+			doScissor(scissorRect(newRect));
 
 			return newRect;
 		}
@@ -3354,7 +3528,7 @@ struct Gui {
 		Rect intersection;
 		rectGetIntersection(&intersection, newRect, currentRect);
 
-		dcScissor({scissorRect(intersection)});
+		doScissor(scissorRect(intersection));
 
 		scissorStack[scissorStackSize++] = intersection;
 		return intersection;
@@ -3363,7 +3537,7 @@ struct Gui {
 	void scissorPop() {
 		scissorStackSize--;
 		scissorStackSize = clampMin(scissorStackSize, 0);
-		if(scissorStackSize > 0) dcScissor({scissorRect(scissorStack[scissorStackSize-1])});
+		doScissor(scissorRect(scissorStack[scissorStackSize-1]));
 	}
 
 	Rect scissorRect(Rect r) {
@@ -3371,51 +3545,111 @@ struct Gui {
 		return scissorRect;
 	}
 
-	void start(GuiInput guiInput, Vec2i res) {
-		lastMousePos = input.mousePos;
+	void drawText(char* text, int align = 1) {
+		Rect region = getCurrentRegion();
+		scissorPush(region);
 
+		Vec2 textPos = rectGetCen(region) + vec2(0,fontHeight*settings.fontOffset);
+		if(align == 0) textPos.x -= rectGetDim(region).w*0.5f;
+		else if(align == 2) textPos.x += rectGetDim(region).w*0.5f;
+
+		dcText(text, font, textPos, settings.textColor, align, 1, 1);		
+
+		scissorPop();
+	}
+
+	void drawRect(Rect r, Vec4 color, bool scissor = false) {
+		if(scissor) scissorPush(getCurrentRegion());
+		dcRect(r, rect(0,0,1,1), color, (int)getTexture(TEXTURE_WHITE)->id);
+		if(scissor) scissorPop();
+	}
+
+	void start(GuiInput guiInput, Font* font, Vec2i res) {
+		this->font = font;
+		fontHeight = font->height;
+		lastMousePos = input.mousePos;
 		input = guiInput;
 		input.mousePos.y *= -1;
 		screenRes = res;
 		currentId = 0;
-		scrollStackIndex = 0;
+		scrollStackIndexX = 0;
+		for(int i = 0; i < 4; i++) scrollStackIndexY[i] = 0;
+		hotId = wantsToBeActiveId;
+		wantsToBeActiveId = 0;
 
-			if(lastMouseClick && input.mouseDown && ((activeId == 0) || (activeId == 100000))) {
-				Rect background = rectULDim(startPos - border, vec2(panelWidth+border.x*2, -(lastPos.y-startPos.y)+lastDim.h - border.y*2));
-				bool overBackground = pointInRect(input.mousePos, background);
-				if(overBackground) activeId = 100000;
+		Rect background = rectULDim(cornerPos, vec2(panelWidth+settings.border.x*2, -(lastPos.y-cornerPos.y)+lastDim.h - settings.border.y));
+
+		// drag window
+		{
+			Vec2 dragDelta = vec2(0,0);
+			Vec2 oldPos = cornerPos;
+			if(!input.ctrl && drag(background, &dragDelta)) {
+				cornerPos += dragDelta;
 			}
 
-			if(activeId == 100000) {
-				Vec2 mouseDelta = input.mousePos - lastMousePos;
-				if(input.shift) panelWidth += mouseDelta.x*2;
-				else startPos += mouseDelta;
-			}
-
-			if(!input.mouseDown && (activeId == 100000)) {
-				activeId = 0; 
-			}
-
-			lastMouseClick = input.mouseClick;
-
-		// draw background
-		if(lastPos != vec2(0,0)) {
-			Rect background = rectULDim(startPos - border, vec2(panelWidth+border.x*2, -(lastPos.y-startPos.y)+lastDim.h - border.y*2));
-			scissorPush(background);
-			dcRect({background, rect(0,0,1,1), panelColor, (int)getTexture(TEXTURE_WHITE)->id});
+			clamp(&cornerPos, rect(0, -res.y, res.x - rectGetDim(background).w+1, 0.5f));
+			background = rectAddOffset(background, cornerPos - oldPos);
 		}
 
-		currentPos = startPos + vec2(0,getDefaultYOffset());
-		dcEnable({STATE_SCISSOR});
+		// resize window
+		Rect resizeRegion;
+		{
+			resizeRegion = rect(rectGetDR(background)-vec2(settings.border.x*2,0), rectGetDR(background)+vec2(0,-settings.border.y*2));
+			Vec2 dragDelta = vec2(0,0);
+			int oldMainScrollHeight = panelStartDim.h;
+			float oldPanelWidth = panelStartDim.w;
+
+			if(!input.ctrl) {
+				if(drag(resizeRegion, &dragDelta)) {
+					panelStartDim.h += -dragDelta.y;
+					panelStartDim.w += dragDelta.x;
+				}
+			} else {
+				if(drag(background, &dragDelta)) {
+					panelStartDim.h += -dragDelta.y;
+					panelStartDim.w += dragDelta.x;
+				}
+			}
+
+			panelStartDim.h = clampMin(panelStartDim.h, settings.minSize.y);
+			panelStartDim.w = clampMin(panelStartDim.w, settings.minSize.x);
+
+			Vec2 dragAfterClamp = vec2(panelStartDim.w - oldPanelWidth, oldMainScrollHeight - panelStartDim.h);
+			if(showScrollBar[0] == false) dragAfterClamp.y = 0;
+			resizeRegion = rectAddOffset(resizeRegion, dragAfterClamp);
+			background = rectExpand(background, 0, dragAfterClamp.y, dragAfterClamp.x, 0);
+		}
+
+		setScissor(true);
+		scissorPush(background);
+
+		drawRect(background, settings.panelColor, false);
+		drawRect(resizeRegion, settings.resizeButtonColor, false);
+
+		startPos = cornerPos + settings.border;
+		currentPos = startPos + vec2(0, getDefaultYOffset());
+		
+		panelWidth = panelStartDim.w;
+		mainScrollHeight = panelStartDim.h;
+
+		// panel scrollbar
+		{
+			beginScroll(mainScrollHeight, &mainScrollAmount);
+		}
 	}
 
 	void end() {
+		// panel scrollbar
+		{
+			endScroll();
+		}
+
 		scissorPop();
-		dcDisable({STATE_SCISSOR});
+		setScissor(false);
 	}
 
-	float getDefaultHeight(){return fontHeight*fontHeightOffset;};
-	float getDefaultYOffset(){return currentDim.h+offsets.h;};
+	float getDefaultHeight(){return fontHeight*settings.fontHeightOffset;};
+	float getDefaultYOffset(){return currentDim.h+settings.offsets.h;};
 	Vec2 getDefaultPos(){return vec2(startPos.x, currentPos.y - getDefaultYOffset());};
 	void advancePosY() 	{currentPos.y -= getDefaultYOffset();};
 	void defaultX() 	{currentPos.x = startPos.x;};
@@ -3445,7 +3679,7 @@ struct Gui {
 			} else {
 				defaultHeight();
 				defaultWidth();
-				currentPos.x += lastDim.w + offsets.w;
+				currentPos.x += lastDim.w + settings.offsets.w;
 			}
 			currentDim.w = columnArray[columnIndex];
 
@@ -3483,7 +3717,7 @@ struct Gui {
 		}
 
 		for(int i = 0; i < size; i++) {
-			columnArray[i] = c[i] - (((elementCount-1)*offsets.w) / elementCount);
+			columnArray[i] = c[i] - (((elementCount-1)*settings.offsets.w) / elementCount);
 		}
 
 		columnSize = size;
@@ -3502,38 +3736,20 @@ struct Gui {
 		return result;
 	}
 
-	void drawText(char* text, int align = 1) {
-		Rect region = getCurrentRegion();
-		scissorPush(region);
-
-		Vec2 textPos = rectGetCen(region) + vec2(0,fontHeight*fontOffset);
-		if(align == 0) textPos.x -= rectGetDim(region).w*0.5f;
-		else if(align == 2) textPos.x += rectGetDim(region).w*0.5f;
-
-		dcText({text, font, textPos, textColor, align, 1, 1});		
-
-		scissorPop();
-	}
-
-	void drawRect(Rect r, Vec4 color, bool scissor = false) {
-		if(scissor) scissorPush(getCurrentRegion());
-		dcRect({r, rect(0,0,1,1), color, (int)getTexture(TEXTURE_WHITE)->id});
-		if(scissor) scissorPop();
-	}
-
-	void label(char* text, int align = 1) {
+	void label(char* text, int align = 1, Vec4 bgColor = vec4(0,0,0,0)) {
 		pre();
+		if(bgColor != vec4(0,0,0,0)) drawRect(getCurrentRegion(), bgColor, false);
 		drawText(text, align);
 		post();
 	}
 
 	bool beginSection(char* text, bool* b) {
 		float saveFontHeight = fontHeight;
-		fontHeight *= sectionOffset;
-		div(vec2(getDefaultHeight()+offsets.x,0)); switcher("", b); label(text);
+		fontHeight *= settings.sectionOffset;
+		div(vec2(getDefaultHeight()+settings.offsets.x,0)); switcher("", b); label(text, 1, settings.sectionColor);
 		fontHeight = saveFontHeight;
 
-		float indent = panelWidth*sectionIndent;
+		float indent = panelWidth*settings.sectionIndent;
 		startPos.x += indent*0.5f;
 		panelWidth -= indent;
 
@@ -3541,49 +3757,60 @@ struct Gui {
 	}
 
 	void endSection() {
-		panelWidth = panelWidth*(1/(1-sectionIndent));
-		startPos.x -= panelWidth*sectionIndent*0.5f;
+		panelWidth = panelWidth*(1/(1-settings.sectionIndent));
+		startPos.x -= panelWidth*settings.sectionIndent*0.5f;
 	}
 
-	// scroll sections don't nest
 	void beginScroll(int scrollHeight, float* scrollAmount) {
-		scrollEndY = currentPos.y - scrollHeight - offsets.h;
+		scrollEndY[scrollStackIndexX] = currentPos.y - scrollHeight - settings.offsets.h;
 
 		Rect r = rectULDim(getDefaultPos(), vec2(panelWidth, scrollHeight));
 
 		scissorPush(r);
-		panelWidth -= scrollBarWidth;
 
-		float diff = (scrollStack[scrollStackIndex] - rectGetDim(r).h);
+		float diff = (scrollStack[scrollStackIndexX][scrollStackIndexY[scrollStackIndexX]] - rectGetDim(r).h - settings.offsets.y);
 		if(diff > 0) {
+			panelWidth -= settings.scrollBarWidth;
+
 			currentPos.y += *scrollAmount * diff;
-			r.min.x += panelWidth + offsets.x;
+			r.min.x += panelWidth + settings.offsets.x;
 
 			Rect regCen = rectGetCenDim(r);
 			float sliderHeight = regCen.dim.h - diff;
-			sliderHeight = clampMin(sliderHeight, scrollBarSliderSize);
+			sliderHeight = clampMin(sliderHeight, settings.scrollBarSliderSize);
 
 			slider(scrollAmount, 0, 1, true, r, sliderHeight);
 
 			currentPos.y += getDefaultYOffset();
+		} else {
+			incrementId();
 		}
-	
-		scrollStartY = currentPos.y;
+
+		showScrollBar[scrollStackIndexX] = diff > 0 ? true : false;
+
+		scrollStartY[scrollStackIndexX] = currentPos.y;
+
+		scrollStackIndexX++;
 	};
 
 	void endScroll() {
-		panelWidth += scrollBarWidth;
+		scrollStackIndexX--;
 
 		scissorPop();
-		scrollStack[scrollStackIndex++] = -((currentPos.y) - scrollStartY);
 
-		currentPos.y = scrollEndY;
+		scrollStack[scrollStackIndexX][scrollStackIndexY[scrollStackIndexX]++] = -((currentPos.y) - scrollStartY[scrollStackIndexX]);
+
+		if(showScrollBar[scrollStackIndexX]) {
+			currentPos.y = scrollEndY[scrollStackIndexX];
+			panelWidth += settings.scrollBarWidth;
+		}
 
 		setLastPosition();
 	}
 
-	bool getMouseOver(Vec2 mousePos, Rect region) {
-		bool mouseOver = pointInRect(mousePos, region) && pointInRect(mousePos, scissorStack[scissorStackSize-1]);
+	bool getMouseOver(Vec2 mousePos, Rect region, bool noScissor = false) {
+		bool overScissorRegion = noScissor ? true : pointInRect(mousePos, scissorStack[scissorStackSize-1]);
+		bool mouseOver = pointInRect(mousePos, region) && overScissorRegion;
 		return mouseOver;
 	}
 
@@ -3592,14 +3819,25 @@ struct Gui {
 		return active;
 	}
 
+	bool getHot() {
+		bool hot = (hotId == currentId);
+		return hot;
+	}
+
 	bool setActive(bool mouseOver, int releaseType = 0) {
-		if(activeId == 0 && (mouseOver && input.mouseClick)) activeId = currentId;
+		if((hotId == currentId) && activeId == 0 && (mouseOver && input.mouseClick)) activeId = currentId;
 		else if(activeId == currentId) {
 			if( releaseType == 0 || 
-				(releaseType == 1 && !input.mouseDown)) // || 
-				// (releaseType == 2 && (input.escape || input.enter))) 
+				(releaseType == 1 && !input.mouseDown)) {
 				activeId = 0;
+				secondMode = false;
+			}
 		}
+
+		if(mouseOver) {
+			wantsToBeActiveId = max(wantsToBeActiveId, currentId);
+		} 
+
 
 		bool active = getActive();
 		return active;
@@ -3607,17 +3845,29 @@ struct Gui {
 
 	Vec4 getColorAdd(bool active, bool mouseOver, int type = 0) {
 		if(type == 2) {
-			Vec4 color = active || (mouseOver && activeId == 0) ? hoverColorAdd : vec4(0,0,0,0);
+			Vec4 color = active || (mouseOver && activeId == 0) ? settings.hoverColorAdd : vec4(0,0,0,0);
 			return color;
 		}
 
-		Vec4 colorAdd = type == 0 ? hoverColorAdd : sliderHoverColorAdd;
+		Vec4 colorAdd = type == 0 ? settings.hoverColorAdd : settings.sliderHoverColorAdd;
 		Vec4 color;
 		if(active) color = colorAdd*2;
 		else if(mouseOver && activeId == 0) color = colorAdd;
 		else color = {};
 
 		return color;
+	}
+
+	bool drag(Rect region, Vec2* dragDelta) {
+		incrementId();
+
+		bool mouseOver = getMouseOver(input.mousePos, region, true);
+		bool active = setActive(mouseOver, 1);
+
+		if(active) *dragDelta = input.mousePos - lastMousePos;
+
+		post();
+		return active;
 	}
 
 	bool button(char* text, int switcher = 0) {
@@ -3628,10 +3878,10 @@ struct Gui {
 		bool active = setActive(mouseOver);
 		Vec4 colorAdd = getColorAdd(active, mouseOver);
 
-		Vec4 finalColor = regionColor + colorAdd;
+		Vec4 finalColor = settings.regionColor + colorAdd;
 		if(switcher) {
-			if(switcher == 2) finalColor += switchColorOn;
-			else finalColor += switchColorOff;
+			if(switcher == 2) finalColor += settings.switchColorOn;
+			else finalColor += settings.switchColorOff;
 		}
 
 		drawRect(region, finalColor);
@@ -3657,12 +3907,21 @@ struct Gui {
 		bool verticalSlider = sliderS == 0 ? false : true;
 		Vec2 sliderRange = vec2(min, max);
 
+		bool activeBefore = getActive();
+
 		Rect region = reg == rect(0,0,0,0) ? getCurrentRegion() : reg;
 		bool mouseOver = getMouseOver(input.mousePos, region);
 		bool active = setActive(mouseOver, 1);
 		Vec4 colorAdd = getColorAdd(active, mouseOver, 1);
 
-		drawRect(region, regionColor); //background
+		if(secondMode) {
+			drawRect(region, vec4(1,0,0,1)); //background
+
+			post();
+			return active;
+		}
+
+		drawRect(region, settings.regionColor); //background
 
 		Rect regCen = rectGetCenDim(region);
 
@@ -3670,9 +3929,9 @@ struct Gui {
 		if(!typeFloat) {
 			sliderWidth = 1;
 			sliderWidth *= regCen.dim.x * 1/(float)((int)roundInt(max)-(int)roundInt(min) +1);
-			sliderWidth = clampMin(sliderWidth, sliderSize);
+			sliderWidth = clampMin(sliderWidth, settings.sliderSize);
 		} else {
-			sliderWidth = sliderS == 0 ? sliderSize : sliderS;
+			sliderWidth = sliderS == 0 ? settings.sliderSize : sliderS;
 		}
 
 		float calc = typeFloat ? *((float*)value) : *((int*)value);
@@ -3689,11 +3948,9 @@ struct Gui {
 			}
 		}
 
-		if(!verticalSlider) {
-			char* text;
-			if(typeFloat) text = fillString("%f", *((float*)value));
-			else text = fillString("%i", *((int*)value));
-			drawText(text);
+		if(getHot() && !typeFloat) {
+			*((int*)value) += input.mouseWheel;
+			*((int*)value) = clamp(*((int*)value), (int)roundInt(min), (int)roundInt(max));
 		}
 
 		float sliderX;
@@ -3704,8 +3961,15 @@ struct Gui {
 		if(verticalSlider) sliderX = clamp(sliderX, region.min.y+sliderWidth*0.5f, region.max.y-sliderWidth*0.5f);
 		else sliderX = clamp(sliderX, region.min.x+sliderWidth*0.5f, region.max.x-sliderWidth*0.5f);
 
-		if(verticalSlider) drawRect(rectCenDim(vec2(regCen.cen.x, sliderX), vec2(regCen.dim.x, sliderWidth)), sliderColor + colorAdd); // hori line
-		else drawRect(rectCenDim(vec2(sliderX, regCen.cen.y), vec2(sliderWidth, regCen.dim.y)), sliderColor + colorAdd); // vert line
+		if(verticalSlider) drawRect(rectCenDim(vec2(regCen.cen.x, sliderX), vec2(regCen.dim.x, sliderWidth)), settings.sliderColor + colorAdd); // hori line
+		else drawRect(rectCenDim(vec2(sliderX, regCen.cen.y), vec2(sliderWidth, regCen.dim.y)), settings.sliderColor + colorAdd); // vert line
+
+		if(!verticalSlider) {
+			char* text;
+			if(typeFloat) text = fillString("%f", *((float*)value));
+			else text = fillString("%i", *((int*)value));
+			drawText(text);
+		}
 
 		post();
 		return active;
@@ -3746,7 +4010,7 @@ struct Gui {
 			selectionAnchor = -1;
 		}
 
-		drawRect(region, regionColor + colorAdd);
+		drawRect(region, settings.regionColor + colorAdd);
 
 		if(active) {
 			int oldTextBoxIndex = textBoxIndex;
@@ -3827,23 +4091,23 @@ struct Gui {
 			Vec2 cursorPos = textStart + vec2(getTextPos(textBoxText, textBoxIndex, font), 0);
 			if(textBoxIndex == 0) cursorPos += vec2(1,0); // avoid scissoring cursor on far left
 
-			Rect cursorRect = rectCenDim(cursorPos, vec2(cursorWidth,font->height));
+			Rect cursorRect = rectCenDim(cursorPos, vec2(settings.cursorWidth,font->height));
 
-				if(selectionAnchor != -1) {
-					int start = min(textBoxIndex, selectionAnchor);
-					int end = max(textBoxIndex, selectionAnchor);
+			if(selectionAnchor != -1) {
+				int start = min(textBoxIndex, selectionAnchor);
+				int end = max(textBoxIndex, selectionAnchor);
 
-					Vec2 selectionStartPos = textStart + vec2(getTextPos(textBoxText, start, font), 0);
-					Vec2 selectionEndPos = textStart + vec2(getTextPos(textBoxText, end, font), 0);
-					float selectionWidth = selectionEndPos.x - selectionStartPos.x;
+				Vec2 selectionStartPos = textStart + vec2(getTextPos(textBoxText, start, font), 0);
+				Vec2 selectionEndPos = textStart + vec2(getTextPos(textBoxText, end, font), 0);
+				float selectionWidth = selectionEndPos.x - selectionStartPos.x;
 
-					Vec2 center = selectionStartPos+selectionWidth*0.5;
-					Rect selectionRect = rectCenDim(selectionStartPos + vec2(selectionWidth*0.5f,0), vec2(selectionWidth,font->height));
-					drawRect(selectionRect, vec4(0,1,1,0.3f), true);
-				} 
+				Vec2 center = selectionStartPos+selectionWidth*0.5;
+				Rect selectionRect = rectCenDim(selectionStartPos + vec2(selectionWidth*0.5f,0), vec2(selectionWidth,font->height));
+				drawRect(selectionRect, settings.selectionColor, true);
+			} 
 
 			drawText(textBoxText, 0);
-			drawRect(cursorRect, cursorColor, true);
+			drawRect(cursorRect, settings.cursorColor, true);
 
 			if(input.enter) {
 				if(type == 0) strCpy((char*)originalPointer, textBoxText, textBoxTextSize);
@@ -3887,6 +4151,33 @@ struct Gui {
 	}
 };
 
+// void guiCalcColors(Gui* gui) {
+// 	Vec3 cs[8] = {{280,0.7f,0.3f}};
+
+
+// 	Vec3 hslColor = rgbToHsl(gui->settings.panelColor.xyz);
+// 	gui->div(50,0,0,0); gui->label("Panel"); gui->slider(&hslColor.x, 0,360); gui->slider(&hslColor.y,0,1); gui->slider(&hslColor.z,0,1);
+// 	gui->settings.panelColor = vec4(hslToRgb(hslColor), 1);
+
+// 	static Vec3 c1 = {};
+// 	gui->div(50,0,0,0); gui->label("A"); gui->slider(&c1.x, 0,360); gui->slider(&c1.y,0,1); gui->slider(&c1.z,0,1);
+// 	gui->settings.regionColor = vec4(hslToRgb(hslColor + c1), 1);
+
+// 	// settings.sectionColor 		= vec4(hslToRgb(hslColor + vec3(45,0,0)), 1);
+// 	// settings.resizeButtonColor 	= vec4(hslToRgb(hslColor + vec3(-45,-0.1f,0)), 1);
+// 	// settings.selectionColor 		= vec4(hslToRgb(hslColor + vec3(-180,0,0)), 1);
+
+// 	// settings.switchColorOn 		= vec4(0,0.3f,0,0);
+// 	// settings.switchColorOff 		= vec4(0.3f,0,0,0);
+
+// 	// settings.textColor 			= vec4(0.9f, 0.9f, 0.9f, 1);
+// 	// settings.hoverColorAdd 		= vec4(0.2f,0.2f,0.2f,0);
+// 	// settings.sliderHoverColorAdd = settings.hoverColorAdd;
+// 	// settings.sliderColor 		= vec4(0.6f,0.6f,0.6f,0.8f);
+// 	// settings.cursorColor 		= vec4(1,1,1,1);
+// }
+
+
 
 extern "C" APPMAINFUNCTION(appMain) {
 	globalMemory = memoryBlock;
@@ -3898,11 +4189,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// globalThreadQueue = &ad->highQueue;
 	globalThreadQueue = threadQueue;
-
 	globalGraphicsState = &ad->graphicsState;
-
-	globalCommandList3d = &ad->commandList3d;
-	globalCommandList2d = &ad->commandList2d;
 
 	threadData = ad->threadData;
 
@@ -4008,6 +4295,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->farPlane = 3000;
 		ad->showHud = true;
 
+		ad->guiAlpha = 0.95f;
+
 		ad->voxelHashSize = sizeof(arrayCount(ad->voxelHash));
 		for(int i = 0; i < ad->voxelHashSize; i++) {
 			ad->voxelHash[i] = (VoxelNode*)getPMemory(sizeof(VoxelNode));
@@ -4082,11 +4371,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glCreateTextures(GL_TEXTURE_CUBE_MAP_ARRAY, arrayCount(ad->cubemapTextureId), &ad->cubemapTextureId[0]);
 
 		char* texturePaths[] = {
-			 					"..\\data\\skybox\\sb1.png",
+			 					// "..\\data\\skybox\\sb1.png",
 								// "..\\data\\skybox\\sb2.png", 
 								// "..\\data\\skybox\\sb3.jpg", 
 								// "..\\data\\skybox\\sb4.png", 
-								// "..\\data\\skybox\\xoGVD3X.jpg", 
+								"..\\data\\skybox\\xoGVD3X.jpg", 
 								};
 
 		ad->cubeMapCount = arrayCount(texturePaths);
@@ -4249,9 +4538,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 
 
-		glCreateFramebuffers(4, ad->frameBuffers);
+		glCreateFramebuffers(5, ad->frameBuffers);
 		glCreateRenderbuffers(2, ad->renderBuffers);
-		glCreateTextures(GL_TEXTURE_2D, 5, ad->frameBufferTextures);
+		glCreateTextures(GL_TEXTURE_2D, 6, ad->frameBufferTextures);
 		GLenum result = glCheckNamedFramebufferStatus(ad->frameBuffers[0], GL_FRAMEBUFFER);
 
 
@@ -4261,8 +4550,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		return; // window operations only work after first frame?
 	}
-
-	// ad->updateFrameBuffers = false;
 
 	if(second) {
 		setWindowProperties(windowHandle, wSettings->res.w, wSettings->res.h, -1920, 0);
@@ -4279,8 +4566,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// alloc drawcommandlist	
 	int clSize = kiloBytes(1000);
-	drawCommandListInit(globalCommandList3d, (char*)getTMemory(clSize), clSize);
-	drawCommandListInit(globalCommandList2d, (char*)getTMemory(clSize), clSize);
+	drawCommandListInit(&ad->commandListGui, (char*)getTMemory(clSize), clSize);
+	drawCommandListInit(&ad->commandList3d, (char*)getTMemory(clSize), clSize);
+	drawCommandListInit(&ad->commandList2d, (char*)getTMemory(clSize), clSize);
+	drawCommandListInit(&ad->commandList, (char*)getTMemory(clSize), clSize);
+	globalCommandList = &ad->commandList3d;
+
+
 
 	LARGE_INTEGER counter;
 	LARGE_INTEGER frequency;
@@ -4300,6 +4592,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->dt = clampMax(ad->dt, 1/(float)20);
 
 		ad->lastTimeStamp = timeStamp;
+
+		ad->time += ad->dt;
 	}
 	// printf("%f \n", ad->dt);
 	// ad->dt = 0.016f;
@@ -4396,6 +4690,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glTextureStorage2D(ad->frameBufferTextures[4], 1, GL_RGBA8, wSettings->currentRes.w, wSettings->currentRes.h);
 		glNamedFramebufferTexture(ad->frameBuffers[3], GL_COLOR_ATTACHMENT0, ad->frameBufferTextures[4], 0);
 
+
+		glDeleteTextures(1, &ad->frameBufferTextures[5]);
+		glCreateTextures(GL_TEXTURE_2D, 1, &ad->frameBufferTextures[5]);
+		glTextureStorage2D(ad->frameBufferTextures[5], 1, GL_RGBA8, wSettings->currentRes.w, wSettings->currentRes.h);
+		// glTextureStorage2D(ad->frameBufferTextures[5], 1, GL_SRGB8_ALPHA8, wSettings->currentRes.w, wSettings->currentRes.h);
+		glNamedFramebufferTexture(ad->frameBuffers[4], GL_COLOR_ATTACHMENT0, ad->frameBufferTextures[5], 0);
 
 
 
@@ -4500,7 +4800,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				}
 			}
 
-			// threadQueueComplete(globalThreadQueue);
+			threadQueueComplete(globalThreadQueue);
 		// }
 	}	
 
@@ -4913,7 +5213,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 					e->pos = nPos;
 
-					dcCube({e->pos, e->dim, vec4(1,0.5f,0,1), 0, vec3(0,0,0)});
+					dcCube(e->pos, e->dim, vec4(1,0.5f,0,1), 0, vec3(0,0,0));
 				}
 			} break;
 
@@ -5098,6 +5398,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 
+
+	// opengl init
+
 	glEnable(GL_DEBUG_OUTPUT);
 	glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
 
@@ -5138,7 +5441,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// for tech showcase
 	#ifdef STBVOX_CONFIG_LIGHTING_SIMPLE
-	skyColor = skyColor * vec3(0.3f);
+	skyColor = skyColor * vec3(0.3f);pushUniform
 	fogColor = fogColor * vec3(0.3f);
 	#endif 
 
@@ -5148,7 +5451,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+	glBindFramebuffer (GL_FRAMEBUFFER, ad->frameBuffers[4]);
+	glClearColor(0,0,0,0);
+	glClear(GL_COLOR_BUFFER_BIT);
+
 	glBindFramebuffer (GL_FRAMEBUFFER, ad->frameBuffers[1]);
+	glClearColor(0,0,0,0);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[0]);
@@ -5223,6 +5531,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glDisable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 
 
+	#if 1
 
 
 
@@ -5641,38 +5950,36 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// for(int i = 0; i < 10; i++) dcCube({vec3(0,i*10,0) + off, s, vec4(0,1,1,1), 0, vec3(1,2,3)});
 	// for(int i = 0; i < 10; i++) dcCube({vec3(0,0,i*10) + off, s, vec4(0,1,1,1), 0, vec3(1,2,3)});
 
-	dcLineWidth({3});
+	dcState(STATE_LINEWIDTH, 3);
 	if(!ad->playerMode) {
 		Camera cam = getCamData(ad->player->pos, ad->player->rot);
 		Vec3 pCamPos = player->pos + player->camOff;
 		float lineLength = 0.5f;
 
-		dcLine({pCamPos, pCamPos + cam.look*lineLength, vec4(1,0,0,1)});
-		dcLine({pCamPos, pCamPos + cam.up*lineLength, vec4(0,1,0,1)});
-		dcLine({pCamPos, pCamPos + cam.right*lineLength, vec4(0,0,1,1)});
+		dcLine(pCamPos, pCamPos + cam.look*lineLength, vec4(1,0,0,1));
+		dcLine(pCamPos, pCamPos + cam.up*lineLength, vec4(0,1,0,1));
+		dcLine(pCamPos, pCamPos + cam.right*lineLength, vec4(0,0,1,1));
 
-		dcPolygonMode({POLYGON_MODE_LINE});
-		dcCube({player->pos, player->dim, vec4(1,1,1,1), 0, vec3(0,0,0)});
-		dcPolygonMode({POLYGON_MODE_FILL});
-
+		dcState(STATE_POLYGONMODE, POLYGON_MODE_LINE);
+		dcCube(player->pos, player->dim, vec4(1,1,1,1), 0, vec3(0,0,0));
+		dcState(STATE_POLYGONMODE, POLYGON_MODE_FILL);
 	} else {
 		if(ad->blockSelected) {
-			dcCull({false});
+			dcDisable(STATE_CULL);
 			Vec3 vs[4];
 			getPointsFromQuadAndNormal(ad->selectedBlock + ad->selectedBlockFaceDir*0.5f*1.01f, ad->selectedBlockFaceDir, 1, vs);
-			dcQuad({vs[0], vs[1], vs[2], vs[3], vec4(1,1,1,0.025f)});
-			dcCull({true});
+			dcQuad(vs[0], vs[1], vs[2], vs[3], vec4(1,1,1,0.025f));
+			dcEnable(STATE_CULL);
 
-			dcPolygonMode({POLYGON_MODE_LINE});
-			dcCube({ad->selectedBlock, vec3(1.01f), vec4(0.9f), 0, vec3(0,0,0)});
-			dcPolygonMode({POLYGON_MODE_FILL});
+			dcState(STATE_POLYGONMODE, POLYGON_MODE_LINE);
+			dcCube(ad->selectedBlock, vec3(1.01f), vec4(0.9f), 0, vec3(0,0,0));
+			dcState(STATE_POLYGONMODE, POLYGON_MODE_FILL);
 		}
 	}
 
 
 
 	bindShader(SHADER_CUBE);
-
 
 	Vec3 ep = vec3(0,0,80);
 
@@ -5914,7 +6221,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, emitter.particleListCount);
 		glEnable(GL_CULL_FACE);
 
-
 	#endif 
 
 
@@ -5935,6 +6241,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// float xOff = getTextPos(text, 5, f);
 	// dcRect({rectCenDim(tPos + vec2(xOff,-20), vec2(1,40)), rect(0,0,1,1), vec4(1,0,0,1), getTexture(TEXTURE_WHITE)->id});
 
+	globalCommandList = &ad->commandList2d;
 
 	if(input->keysPressed[VK_F5]) ad->showHud = !ad->showHud;
 
@@ -5953,37 +6260,52 @@ extern "C" APPMAINFUNCTION(appMain) {
 		Vec2i tp = ad->wSettings.currentRes - vec2i(xo, 0);
 		#define PVEC3(v) v.x, v.y, v.z
 		#define PVEC2(v) v.x, v.y
-		dcText({fillString("Pos  : (%f,%f,%f)", PVEC3(ad->activeCam.pos)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow});
-		dcText({fillString("Look : (%f,%f,%f)", PVEC3(ad->activeCam.look)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow});
-		dcText({fillString("Up   : (%f,%f,%f)", PVEC3(ad->activeCam.up)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow});
-		dcText({fillString("Right: (%f,%f,%f)", PVEC3(ad->activeCam.right)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow});
-		dcText({fillString("Rot  : (%f,%f)", 	PVEC2(player->rot)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow});
-		dcText({fillString("Vec  : (%f,%f,%f)", PVEC3(player->vel)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow});
-		dcText({fillString("Acc  : (%f,%f,%f)", PVEC3(player->acc)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow});
-		dcText({fillString("Draws: (%i)", 		drawCounter), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow});
-		dcText({fillString("Quads: (%i)", 		triangleCount), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow});
+		dcText(fillString("Pos  : (%f,%f,%f)", PVEC3(ad->activeCam.pos)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow);
+		dcText(fillString("Look : (%f,%f,%f)", PVEC3(ad->activeCam.look)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow);
+		dcText(fillString("Up   : (%f,%f,%f)", PVEC3(ad->activeCam.up)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow);
+		dcText(fillString("Right: (%f,%f,%f)", PVEC3(ad->activeCam.right)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow);
+		dcText(fillString("Rot  : (%f,%f)", 	PVEC2(player->rot)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow);
+		dcText(fillString("Vec  : (%f,%f,%f)", PVEC3(player->vel)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow);
+		dcText(fillString("Acc  : (%f,%f,%f)", PVEC3(player->acc)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow);
+		dcText(fillString("Draws: (%i)", 		drawCounter), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow);
+		dcText(fillString("Quads: (%i)", 		triangleCount), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow);
 
-		dcText({fillString("Threads: (%i, %i)",	threadQueue->completionCount, threadQueue->completionGoal), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow});
+		dcText(fillString("Threads: (%i, %i)",	threadQueue->completionCount, threadQueue->completionGoal), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow);
 
 
+
+
+		globalCommandList = &ad->commandListGui;
+
+		bool initSections = true;
 
 		static Gui gui;
 		static bool setupGui = true;
 		if(setupGui) {
-			gui.init(vec2(0,1), getFont(FONT_CONSOLAS, fontSize), 300);
-			// gui.init(vec2(500,1), getFont(FONT_CONSOLAS, fontSize), 1000);
+			gui.init(rectCenDim(vec2(0,1), vec2(300,800)));
+			// gui.init(rectCenDim(vec2(1300,1), vec2(300,500)));
 			setupGui = false;
 		}
-		GuiInput gInput = { vec2(input->mousePos), input->mouseButtonPressed[0], input->mouseButtonDown[0], 
+		GuiInput gInput = { vec2(input->mousePos), input->mouseWheel, input->mouseButtonPressed[0], input->mouseButtonDown[0], 
 							input->keysPressed[VK_ESCAPE], input->keysPressed[VK_RETURN], input->keysPressed[VK_SPACE], input->keysPressed[VK_BACK], input->keysPressed[VK_DELETE], input->keysPressed[VK_HOME], input->keysPressed[VK_END], 
 							input->keysPressed[VK_LEFT], input->keysPressed[VK_RIGHT], input->keysPressed[VK_UP], input->keysPressed[VK_DOWN], 
-							input->mShift, input->mCtrl, input->inputCharacters, input->inputCharacterCount};
-		gui.start(gInput, wSettings->currentRes);
+							input->keysDown[VK_SHIFT], input->keysDown[VK_CONTROL], input->inputCharacters, input->inputCharacterCount};
+		gui.start(gInput, getFont(FONT_CONSOLAS, fontSize), wSettings->currentRes);
 
+		static bool sectionSettings = initSections;
+		if(gui.beginSection("Settings", &sectionSettings)) {
+			gui.div(vec2(0,0)); if(gui.button("Compile")) shellExecute("C:\\Projects\\Hmm\\code\\buildWin32.bat");
+								if(gui.button("Up Buffers")) ad->updateFrameBuffers = true;
+			gui.div(vec2(0,0)); gui.label("GuiAlpha", 0); gui.slider(&ad->guiAlpha, 0.1f, 1);
+			gui.div(vec2(0,0)); gui.label("FoV", 0); gui.slider(&ad->fieldOfView, 1, 180);
+			gui.div(vec2(0,0)); gui.label("MSAA", 0); gui.slider(&ad->msaaSamples, 1, 8);
+			gui.switcher("Native Res", &ad->useNativeRes);
+			gui.div(0,0,0); gui.label("FboRes", 0); gui.slider(&ad->fboRes.x, 150, ad->curRes.x); gui.slider(&ad->fboRes.y, 150, ad->curRes.y);
+			gui.div(0,0,0); gui.label("NFPlane", 0); gui.slider(&ad->nearPlane, 0.01, 2); gui.slider(&ad->farPlane, 1000, 5000);
+		} gui.endSection();
 
-		static bool sectionWorld = false;
+		static bool sectionWorld = initSections;
 		if(gui.beginSection("World", &sectionWorld)) { 
-			if(gui.button("Compile")) shellExecute("C:\\Projects\\Hmm\\code\\buildWin32.bat");
 			if(gui.button("Reload World") || input->keysPressed[VK_TAB]) ad->reloadWorld = true;
 			
 			gui.div(vec2(0,0)); gui.label("CubeMap", 0); gui.slider(&ad->cubeMapDrawIndex, 0, ad->cubeMapCount);
@@ -6004,36 +6326,18 @@ extern "C" APPMAINFUNCTION(appMain) {
 								  gui.slider(heightLevels+2,0,1); gui.slider(heightLevels+3,0,1);
 		} gui.endSection();
 
-		static bool sectionSettings = false;
-		if(gui.beginSection("Settings", &sectionSettings)) {
-			gui.div(vec2(0,0)); gui.label("FoV", 0); gui.slider(&ad->fieldOfView, 1, 180);
-			gui.div(vec2(0,0)); gui.label("MSAA", 0); gui.slider(&ad->msaaSamples, 1, 8);
-			gui.div(vec2(0,0)); gui.switcher("Native Res", &ad->useNativeRes); if(gui.button("Up Buffers")) ad->updateFrameBuffers = true;
-			gui.div(0,0,0); gui.label("FboRes", 0); gui.slider(&ad->fboRes.x, 150, ad->curRes.x); gui.slider(&ad->fboRes.y, 150, ad->curRes.y);
-			gui.div(0,0,0); gui.label("NFPlane", 0); gui.slider(&ad->nearPlane, 0.01, 2); gui.slider(&ad->farPlane, 1000, 5000);
-		} gui.endSection();
-
 		static bool sectionTest = false;
 		if(gui.beginSection("Test", &sectionTest)) {
 			static int scrollHeight = 200;
 			static int scrollElements = 13;
 			static float scrollVal = 0;
-
-			gui.div(vec2(0,0)); gui.slider(&scrollHeight, 0, 500); gui.slider(&scrollElements, 0, 20);
+			gui.div(vec2(0,0)); gui.slider(&scrollHeight, 0, 2000); gui.slider(&scrollElements, 0, 100);
 
 			gui.beginScroll(scrollHeight, &scrollVal); {
 				for(int i = 0; i < scrollElements; i++) {
 					gui.button(fillString("Element: %i.", i));
 				}
 			} gui.endScroll();
-
-			// static float hue = 0;
-			// static float sat = 0;
-			// static float light = 0;
-			// gui.div(0,0,0,0); gui.label("Color"); gui.slider(&hue, 0,360); gui.slider(&sat,0,1); gui.slider(&light,0,1);
-
-			// static Vec4 rColor = vec4(1,1,1,1);
-			// hslToRgb(rColor.e, hue, sat, light);
 
 			static int textCapacity = 50;
 			static char* text = getPArray(char, textCapacity);
@@ -6053,11 +6357,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		} gui.endSection();
 
-
-
 		gui.end();
 
-		// dcRect({rectCenDim(400,-400,200,200), rect(0,0,1,1), rColor, getTexture(TEXTURE_WHITE)->id});
+		globalCommandList = &ad->commandList2d;
+
 
 
 	}
@@ -6092,68 +6395,19 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			Vec2 pos = vec2(start + i*(iconSize.w + iconDist), -res.y*bottom);
 			// dcRect({rectCenDim(pos, iconSize*1.2f*iconOff), rect(0,0,1,1), vec4(vec3(0.1f),trans), 1});
-			dcRect({rectCenDim(pos, iconSize*1.2f*iconOff), rect(0,0,1,1), vec4(0,0,0,0.85f), 1});
+			dcRect(rectCenDim(pos, iconSize*1.2f*iconOff), rect(0,0,1,1), vec4(0,0,0,0.85f), 1);
 
 			uint textureId = ad->voxelTextures[0];
-			dcRect({rectCenDim(pos, iconSize*iconOff), rect(0,0,1,1), color, (int)textureId, texture1Faces[i+1][0]+1});
+			dcRect(rectCenDim(pos, iconSize*iconOff), rect(0,0,1,1), color, (int)textureId, texture1Faces[i+1][0]+1);
 		}
 	}
 
+	#endif 
 
 	bindShader(SHADER_CUBE);
 
-	char* drawListIndex = (char*)globalCommandList3d->data;
-	for(int i = 0; i < globalCommandList3d->count; i++) {
-		int command = *((int*)drawListIndex);
-		drawListIndex += sizeof(int);
 
-		switch(command) {
-			case Draw_Command_Cube_Type: {
-				dcCase(Cube, dc, drawListIndex);
-				drawCube(dc.trans, dc.scale, dc.color, dc.degrees, dc.rot);
-			} break;
-
-			case Draw_Command_Line_Type: {
-				dcCase(Line, dc, drawListIndex);
-				drawLine(dc.p0, dc.p1, dc.color);
-			} break;
-
-			case Draw_Command_Quad_Type: {
-				dcCase(Quad, dc, drawListIndex);
-				drawQuad(dc.p0, dc.p1, dc.p2, dc.p3, dc.color);
-			} break;
-
-			case Draw_Command_PolygonMode_Type: {
-				dcCase(PolygonMode, dc, drawListIndex);
-				int m;
-				switch(dc.mode) {
-					case POLYGON_MODE_FILL: m = GL_FILL; break;
-					case POLYGON_MODE_LINE: m = GL_LINE; break;
-					case POLYGON_MODE_POINT: m = GL_POINT; break;
-				}
-				glPolygonMode(GL_FRONT_AND_BACK, m);
-			} break;
-
-			case Draw_Command_LineWidth_Type: {
-				dcCase(LineWidth, dc, drawListIndex);
-				glLineWidth(dc.width);
-			} break;
-
-			case Draw_Command_Cull_Type: {
-				dcCase(Cull, dc, drawListIndex);
-				if(dc.b) glEnable(GL_CULL_FACE);
-				else glDisable(GL_CULL_FACE);
-			} break;
-
-			default: {
-
-			} break;
-		}
-	}
-
-
-
-
+	executeCommandList(&ad->commandList3d);
 
 	// ortho(rectCenDim(cam->x,cam->y, cam->z, cam->z/ad->aspectRatio));
 	// bindShader(SHADER_QUAD);
@@ -6183,84 +6437,25 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glViewport(0,0, wSettings->currentRes.x, wSettings->currentRes.y);
 	drawRect(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0), rect(0,1,1,0), vec4(1), ad->frameBufferTextures[0]);
 
-	// glViewport(0,0, ad->curRes.w, ad->curRes.h);
-	// glViewport(0,0, wSettings->currentRes.x, wSettings->currentRes.y);
-	// drawRect(rect(0, -ad->curRes.h, ad->curRes.w, 0), rect(0,1,1,0), vec4(1), ad->frameBufferTextures[0]);
-	// drawRect(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0), rect(0,1,1,0), vec4(1), ad->frameBufferTextures[0]);
-
-	// glViewport(0,0, wSettings->currentRes.x, wSettings->currentRes.y);
+	executeCommandList(&ad->commandList2d);
 
 
 
 
-	char* drawListIndex2 = (char*)globalCommandList2d->data;
-	for(int i = 0; i < globalCommandList2d->count; i++) {
-		int command = *((int*)drawListIndex2);
-		drawListIndex2 += sizeof(int);
 
-		switch(command) {
-			case Draw_Command_Rect_Type: {
-				dcCase(Rect, dc, drawListIndex2);
-				drawRect(dc.r, dc.uv, dc.color, dc.texture, dc.texZ-1);
-			} break;
+	glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glBlendEquationSeparate(GL_FUNC_ADD, GL_MAX);
 
-			case Draw_Command_Text_Type: {
-				dcCase(Text, dc, drawListIndex2);
-				drawText(dc.text, dc.font, dc.pos, dc.color, dc.vAlign, dc.hAlign, dc.shadow, dc.shadowColor);
-			} break;
+	glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[4]);
+	executeCommandList(&ad->commandListGui);
+	glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[3]);
 
-			case Draw_Command_Scissor_Type: {
-				dcCase(Scissor, dc, drawListIndex2);
-				Rect r = dc.rect;
-				Vec2 dim = rectGetDim(r);
-				glScissor(r.min.x, r.min.y, dim.x, dim.y);
-			} break;
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glBlendEquation(GL_FUNC_ADD);
 
-			case Draw_Command_Enable_Type: {
-				dcCase(Enable, dc, drawListIndex2);
-				int label = 0;
-				switch(dc.state) {
-					case STATE_SCISSOR: label = GL_SCISSOR_TEST;
-					default: {};
-				}
-				glEnable(label);
-			} break;
-
-			case Draw_Command_Disable_Type: {
-				dcCase(Disable, dc, drawListIndex2);
-				int label = 0;
-				switch(dc.state) {
-					case STATE_SCISSOR: label = GL_SCISSOR_TEST;
-					default: {};
-				}
-				glDisable(label);
-			} break;
-
-			default: {
-			} break;
-		}
-	}
-
-	// Texture* st2 = getTexture(TEXTURE_WHITE);
-	// float g = 0.5f;
-	// Vec4 co = vec4(g,g,g,1);
-	// // glEnable(GL_FRAMEBUFFER_SRGB);
-	// // drawRect(rectCenDim(vec2(screenCenter.x, -screenCenter.y)/2, vec2(500,500)), rect(0,0,1,1), vec4(0,0,0,1), st2->id);
-
-	// // drawRect(rectCenDim(vec2(700,-700), vec2(2000,2000)), rect(0,0,1,1), vec4(1,1,1,1), st2->id);
-	// // drawRect(rectCenDim(vec2(700,-700), vec2(2000,2000)), rect(0,0,1,1), vec4(0.5f,0.5f,0.5f,1), st2->id);
-	// // drawRect(rectCenDim(vec2(700,-700), vec2(2000,2000)), rect(0,0,1,1), vec4(pow(0.5f,2.2f),pow(0.5f,2.2f),pow(0.5f,2.2f),1), st2->id);
+	drawRect(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0), rect(0,1,1,0), vec4(1,1,1,ad->guiAlpha), ad->frameBufferTextures[5]);
 
 
-	// drawRect(rectCenDim(vec2(800-350,-500), vec2(100,1000)), rect(0,0,1,1), vec4(0,1,0,1), st2->id);
-	// drawRect(rectCenDim(vec2(800-150,-500), vec2(100,1000)), rect(0,0,1,1), vec4(1,1,0,1), st2->id);
-	// drawRect(rectCenDim(vec2(800,-500), vec2(100,1000)), rect(0,0,1,1), vec4(1,0,1,1), st2->id);
-	// drawRect(rectCenDim(vec2(800+150,-500), vec2(100,1000)), rect(0,0,1,1), vec4(0,1,1,1), st2->id);
-
-	// drawRect(rectCenDim(vec2(800,-500), vec2(1000,100)), rect(0,0,1,1), vec4(1,0,0,0.5f), st2->id);
-	// drawRect(rectCenDim(vec2(800,-450), vec2(1000,100)), rect(0,0,1,1), vec4(1,0,0,1), st2->id);
-	// // drawRect(rectCenDim(vec2(800,-500), vec2(1000,100)), rect(0,0,1,1), vec4(1,0,0,powf(0.5f, 1/2.2f)), st2->id);
-	// glEnable(GL_DEPTH_TEST);
 
 
 
@@ -6271,6 +6466,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	drawRect(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0), rect(0,1,1,0), vec4(1), ad->frameBufferTextures[4]);
 	if(USE_SRGB) glDisable(GL_FRAMEBUFFER_SRGB);
+
 
 
 
