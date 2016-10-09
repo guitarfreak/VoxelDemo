@@ -22,6 +22,8 @@ void assert(bool check) {
 
 #define arrayCount(array) (sizeof(array) / sizeof((array)[0]))
 #define addPointer(ptr, int) ptr = (char*)ptr + int
+#define memberSize(type, member) sizeof(((type *)0)->member)
+
 
 void memSet(void* dest, int value, int numOfBytes) {
 	char* destPointer = (char*)dest;
@@ -395,6 +397,22 @@ struct String {
 	void setEndZero() { data[size] = '\0'; }
 };
 
+int createFileAndOverwrite(char* fileName, int fileSize) {
+	FILE* file = fopen(fileName, "wb");
+	if(file == 0) return -1;
+
+	fileSize += 1;
+
+	char* tempBuffer = (char*)malloc(fileSize);
+	zeroMemory(tempBuffer, fileSize);
+	fwrite(tempBuffer, fileSize, 1, file);
+	free(tempBuffer);
+
+	fclose(file);
+
+	return 0;
+}
+
 int fileSize(char* fileName) {
 	FILE* file = fopen(fileName, "rb");
 
@@ -433,6 +451,23 @@ int readFileToBuffer(char* buffer, char* fileName) {
 	return size;
 }
 
+int readFileSectionToBuffer(char* buffer, char* fileName, int offsetInBytes, int sizeInBytes) {
+	FILE* file = fopen(fileName, "r+b");
+	if(file == 0) return -1;
+
+	fseek(file, 0, SEEK_END);
+	int size = ftell(file);
+	fseek(file, 0, SEEK_SET);
+
+	assert(offsetInBytes+sizeInBytes < size);
+
+	fseek(file, offsetInBytes, SEEK_SET);
+	fread(buffer, sizeInBytes, 1, file);
+
+	fclose(file);
+	return size;
+}
+
 void readFileToString(String* str, char* fileName) {
 	str->size = readFileToBuffer(str->data, fileName);
 	str->setEndZero();
@@ -450,6 +485,26 @@ int writeBufferToFile(char* buffer, char* fileName, int size = -1) {
 	} 
 
 	fwrite(buffer, size, 1, file);
+
+	fclose(file);
+	return size;
+}
+
+int writeBufferSectionToFile(char* buffer, char* fileName, int offsetInBytes, int sizeInBytes) {
+	FILE* file = fopen(fileName, "r+b");
+	if(!file) {
+		printf("Could not open file!\n");
+		return -1;
+	} 
+
+	fseek(file, 0, SEEK_END);
+	int size = ftell(file);
+	fseek(file, 0, SEEK_SET);
+
+	assert(offsetInBytes+sizeInBytes < size);
+
+	fseek(file, offsetInBytes, SEEK_SET);
+	fwrite(buffer, sizeInBytes, 1, file);
 
 	fclose(file);
 	return size;
@@ -675,3 +730,4 @@ bool flagCheck(uint flags, int flagType)
 	bool result = (flags | flagType) == flags;
 	return result;
 }
+

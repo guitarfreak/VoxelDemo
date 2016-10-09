@@ -26,24 +26,22 @@
 		a = b;							\
 		b = swap##type;
 
-inline float mapRange(float value, float min, float max, float rangeMin, float rangeMax) {
-	float off = min < 0 ? abs(min) : -abs(min);
-	float result = ((value+off)/((max+off)-(min+off))) * 
-				  (rangeMax-rangeMin) + rangeMin;
 
-	return result;
-};
-
-// 0 to 1
-float lerp(float percent, float min, float max) {
-	float result = mapRange(percent, 0, 1, min, max);
-	return result;
-}
 
 int mod(int a, int b) {
 	int result;
 	result = a % b;
 	if(result < 0) result += b;
+	return result;
+}
+
+float modFloat(float val, float d) {
+	// fmod seems to be wrong
+	float result = fmod(val, d);
+	if(result < 0 && abs(result) < d) {
+		result = d + result;
+	}
+
 	return result;
 }
 
@@ -72,6 +70,8 @@ inline int maxReturnIndex(float a, float b, float c) {
 	return index;
 }
 
+
+
 // inline float clampMin(float min, float a) {
 inline float clampMin(float a, float min) {
 	return a < min ? min : a;
@@ -98,8 +98,6 @@ inline void clamp(float* n, float min, float max) {
 	*n = clampMax(clampMin(*n, min), max);
 };
 
-
-
 inline float clampIntMin(int a, int min) {
 	return a < min ? min : a;
 }
@@ -125,6 +123,26 @@ inline void clampInt(int* n, int min, int max) {
 	*n = clampMax(clampIntMin(*n, min), max);
 };
 
+inline float mapRange(float value, float min, float max, float rangeMin, float rangeMax) {
+	float off = min < 0 ? abs(min) : -abs(min);
+	float result = ((value+off)/((max+off)-(min+off))) * 
+				  (rangeMax-rangeMin) + rangeMin;
+
+	return result;
+};
+
+inline float mapRangeClamp(float value, float min, float max, float rangeMin, float rangeMax) {
+	float result = mapRange(value, min, max, rangeMin, rangeMax);
+	result = clamp(result, rangeMin, rangeMax);
+
+	return result;
+};
+
+// 0 to 1
+float lerp(float percent, float min, float max) {
+	float result = mapRange(percent, 0, 1, min, max);
+	return result;
+}
 
 
 inline bool valueBetween(float v, float min, float max) {
@@ -232,7 +250,8 @@ void rgbToHsl(float color[3], double r, double g, double b) {
 	{
 		if (M == r)
 		{
-			color[0] = fmod(((g - b) / c), 6.0);
+			// color[0] = fmod(((g - b) / c), 6.0);
+			color[0] = modFloat(((g - b) / c), 6.0);
 		}
 		else if (M == g)
 		{
@@ -258,7 +277,8 @@ void hslToRgb(float color[3], double h, double s, double l) {
 	double c = 0.0, m = 0.0, x = 0.0;
 	c = (1.0 - fabs(2 * l - 1.0)) * s;
 	m = 1.0 * (l - 0.5 * c);
-	x = c * (1.0 - fabs(fmod(h / 60.0, 2) - 1.0));
+	// x = c * (1.0 - fabs(fmod(h / 60.0, 2) - 1.0));
+	x = c * (1.0 - fabs(modFloat(h / 60.0, 2) - 1.0));
 	if (h == 360) h = 0;
 	if (h >= 0.0 && h < 60)  vSet3(color, c + m, x + m, m);
 	else if (h >= 60 && h < 120) vSet3(color, x + m, c + m, m);
@@ -1471,6 +1491,14 @@ void clamp(Vec2* v, Rect region) {
 	v->y = clamp(v->y, region.min.y, region.max.y);
 }
 
+float mapRange(float value, Vec2 dim, Vec2 range) {
+	return mapRange(value, dim.x, dim.y, range.x, range.y);
+};
+
+float mapRangeClamp(float value, Vec2 dim, Vec2 range) {
+	return mapRangeClamp(value, dim.x, dim.y, range.x, range.y);
+};
+
 inline Vec2 toVec2(Vec3 a) {
 	Vec2 result;
 	result.x = a.x;
@@ -1798,6 +1826,12 @@ Vec3 hslToRgb(Vec3 hslColor) {
 	Vec3 result = {};
 	hslToRgb(result.e, hslColor.x, hslColor.y, hslColor.z);
 	return result;
+}
+
+Vec2 operator+(Vec2 a, Vec2i b) {
+	a.x += b.x;
+	a.y += b.y;
+	return a;	
 }
 
 //
