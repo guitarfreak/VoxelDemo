@@ -2659,3 +2659,129 @@ Vec4 colorSRGB(Vec4 color) {
 	// color.a = powf(color.a, 2.2f);
 	return color;
 }
+
+
+
+
+void bubbleSort(int* list, int size) {
+
+	for(int off = 0; off < size-2; off++) {
+		bool swap = false;
+
+		for(int i = 0; i < size-1 - off; i++) {
+			if(list[i+1] < list[i]) {
+				swap(int, list[i], list[i+1]);
+				swap = true;
+			}
+		}
+
+		if(!swap) break;
+	}
+}
+
+void mergeSort(int* list, int size) {
+
+	int* buffer = getTArray(int, size);
+	int stage = 0;
+
+	for(;;) {
+		stage++;
+		int stageSize = 1 << stage;
+		int splitSize = 1 << stage-1;
+
+		int* src = stage%2 == 0 ? list : buffer;
+		int* dest = stage%2 == 0 ? buffer : list;
+
+		int count = ceil(size/(float)splitSize);
+		if(count <= 1) {
+			if(stage%2 == 0) memCpy(list, buffer, size);
+			break;
+		}
+
+		for(int i = 0; i < size; i += stageSize) {
+			int* fbuf = src + i;
+			int fi = 0;
+			int remainder = size - i;
+			int as0 = min(splitSize, remainder);
+			int as1 = min(splitSize, clampMin(remainder-splitSize, 0));
+			int ai0 = 0; 
+			int ai1 = 0;
+			int* buf0 = dest + i;
+			int* buf1 = buf0 + as0;
+
+			for(;;) {
+				if(ai0 < as0 && ai1 < as1) {
+					if(buf0[ai0] < buf1[ai1]) fbuf[fi++] = buf0[ai0++];
+					else 					  fbuf[fi++] = buf1[ai1++];
+				} 
+				else if(ai0 < as0) fbuf[fi++] = buf0[ai0++];
+				else if(ai1 < as1) fbuf[fi++] = buf1[ai1++];
+				else break;
+			}
+		}
+	}
+}
+
+// sorts in bytes
+void radixSort(int* list, int size) {
+
+	int* buffer = getTArray(int, size);
+	int stageCount = 4;
+
+	for(int stage = 0; stage < stageCount; stage++) {
+		int* src = stage%2 == 0 ? list : buffer;
+		int* dst = stage%2 == 0 ? buffer : list;
+		int bucket[257] = {};
+
+		// count 
+		for(int i = 0; i < size; i++) {
+			uchar byte = src[i] >> (8*stage);
+			bucket[byte+1]++;
+		}
+
+		// turn sizes into offsets
+		for(int i = 0; i < 256-1; i++) {
+			bucket[i+1] += bucket[i];
+		}
+
+		for(int i = 0; i < size; i++) {
+			uchar byte = src[i] >> (8*stage);
+			dst[bucket[byte]] = src[i];
+			bucket[byte]++;
+		}
+	}
+}
+
+struct SortPair {
+	float key;
+	int index;
+};
+
+void radixSortPair(SortPair* list, int size) {
+
+	SortPair* buffer = getTArray(SortPair, size);
+	int stageCount = 4;
+
+	for(int stage = 0; stage < stageCount; stage++) {
+		SortPair* src = stage%2 == 0 ? list : buffer;
+		SortPair* dst = stage%2 == 0 ? buffer : list;
+		int bucket[257] = {};
+
+		// count 
+		for(int i = 0; i < size; i++) {
+			uchar byte = *((int*)&src[i].key) >> (8*stage);
+			bucket[byte+1]++;
+		}
+
+		// turn sizes into offsets
+		for(int i = 0; i < 256-1; i++) {
+			bucket[i+1] += bucket[i];
+		}
+
+		for(int i = 0; i < size; i++) {
+			uchar byte = *((int*)&src[i].key) >> (8*stage);
+			dst[bucket[byte]] = src[i];
+			bucket[byte]++;
+		}
+	}
+}

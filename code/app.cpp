@@ -52,21 +52,16 @@
 - advance timestep when window not in focus (stop game when not in focus)
 - reduce number of thread queue pushes
 - insert and init mesh not thread proof, make sure every mesh is initialized before generating
-- change bubblesort to mergesort\radixsort
 - implement sun and clouds that block beams of light
 - glowstone emmiting light
 - make voxel drop in tutorial code for stb_voxel
-- stb_voxel push block_selector, alpha test, clipping in voxel vertex shader
-- activate opengl debug output!
-- small menu
+- stb_voxel push alpha test in voxel vertex shader
 - rocket launcher
 - antialiased pixel graphics with neighbour sampling 
 - macros for array stuff so i dont have to inline updateMeshList[updateMeshListSize++] every time 
 - level of detail for world gen back row								
 - 32x32 gen chunks
 
-- put in a cubemap to make things prettier and not rely on white clear color as the sky
-- fix srgbv
 - put in spaces for fillString
 - save mouse position at startup and place the mouse there when the app closes
 - simplex noise instead of perlin noise
@@ -75,6 +70,8 @@
 
 - simd voxel generation
 - simd on vectors as a test first?
+
+- experiment with directx 11
 
 gui stuff: 
 additionally:
@@ -4123,6 +4120,9 @@ void guiSettings(Gui* gui) {
 
 
 struct AppData {
+	DebugState debugState;
+	DrawCommandList commandListDebug;
+
 	bool showHud;
 	bool updateFrameBuffers;
 	float guiAlpha;
@@ -4520,6 +4520,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// mainWindowCallBack(0,0,0,0);
 	globalMainWindowCallBack = mainWindowCallBack;
 
+	globalDebugState = &ad->debugState;
+
 	treeNoise = ad->treeNoise;
 
 	for(int i = 0; i < 8; i++) {
@@ -4607,6 +4609,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 		int interval = wglGetSwapIntervalEXT();
 
 		// @setup
+
+		ad->debugState.timerBuffer = getPArray(TimerSlot, 1000);
+		ad->debugState.bufferSize = 1000;
+		ad->debugState.stringMemory = getPArray(char, 1000);
+		ad->debugState.stringMemorySize = 1000;
+
+		int clSize = kiloBytes(5);
+		drawCommandListInit(&ad->commandListDebug, (char*)getPMemory(clSize), clSize);
+
 
 		// ad->fieldOfView = 55;
 		ad->fieldOfView = 60;
@@ -4888,15 +4899,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		loadFunctions();
 	}
 
-	// alloc drawcommandlist	
-	int clSize = kiloBytes(1000);
-	drawCommandListInit(&ad->commandListGui, (char*)getTMemory(clSize), clSize);
-	drawCommandListInit(&ad->commandList3d, (char*)getTMemory(clSize), clSize);
-	drawCommandListInit(&ad->commandList2d, (char*)getTMemory(clSize), clSize);
-	drawCommandListInit(&ad->commandList, (char*)getTMemory(clSize), clSize);
-	globalCommandList = &ad->commandList3d;
-
-
+	TIMER_BEGIN(Main)
 
 	LARGE_INTEGER counter;
 	LARGE_INTEGER frequency;
@@ -4921,6 +4924,18 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 	// printf("%f \n", ad->dt);
 	// ad->dt = 0.016f;
+
+
+
+	// alloc drawcommandlist	
+	int clSize = kiloBytes(1000);
+	drawCommandListInit(&ad->commandListGui, (char*)getTMemory(clSize), clSize);
+	drawCommandListInit(&ad->commandList3d, (char*)getTMemory(clSize), clSize);
+	drawCommandListInit(&ad->commandList2d, (char*)getTMemory(clSize), clSize);
+	drawCommandListInit(&ad->commandList, (char*)getTMemory(clSize), clSize);
+	globalCommandList = &ad->commandList3d;
+
+
 
 	updateInput(&ad->input, isRunning, windowHandle);
 
@@ -6062,15 +6077,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 	}
 
-	float* distanceList = (float*)getTMemory(sizeof(float)*2000);
-	int distanceListSize = 0;
-
-	struct SortPair {
-		float key;
-		int index;
-	};
-
-	SortPair* sortList = (SortPair*)getTMemory(sizeof(SortPair)*2000);
+	SortPair* sortList = (SortPair*)getTMemory(sizeof(SortPair)*coordListSize);
 	int sortListSize = 0;
 
 	for(int i = 0; i < coordListSize; i++) {
@@ -6079,25 +6086,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 		sortList[sortListSize++] = {distanceToCamera, i};
 	}
 
-	for(int off = 0; off < sortListSize-2; off++) {
-		bool swap = false;
-
-		for(int i = 0; i < sortListSize-1 - off; i++) {
-			if(sortList[i+1].key < sortList[i].key) {
-				SortPair temp = sortList[i];
-				sortList[i] = sortList[i+1];
-				sortList[i+1] = temp;
-
-				swap = true;
-			}
-		}
-
-		if(!swap) break;
+	{
+		TIMER_BLOCK();
+		radixSortPair(sortList, sortListSize);
 	}
 
-	// for(int i = 0; i < sortListSize-1; i++) {
-	// 	assert(sortList[i].key <= sortList[i+1].key);
-	// }
+	for(int i = 0; i < sortListSize-1; i++) {
+		assert(sortList[i].key <= sortList[i+1].key);
+	}
 
 	// draw world without water
 	{
@@ -6602,7 +6598,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		globalCommandList = &ad->commandListGui;
 
-		bool initSections = true;
+		bool initSections = false;
 
 		Gui* gui = &ad->gui;
 		static bool setupGui = true;
@@ -6619,7 +6615,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// gui->start(gInput, getFont(FONT_CONSOLAS, fontSize), wSettings->currentRes);
 		gui->start(gInput, getFont(FONT_CALIBRI, fontSize), wSettings->currentRes);
 
-		static bool sectionGuiSettings = true;
+		static bool sectionGuiSettings = false;
 		if(gui->beginSection("GuiSettings", &sectionGuiSettings)) {
 			guiSettings(gui);
 		} gui->endSection();
@@ -6778,6 +6774,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[4]);
 	executeCommandList(&ad->commandListGui);
+	executeCommandList(&ad->commandListDebug);
 	glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[3]);
 
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -6933,8 +6930,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-
-
 	if(USE_SRGB) glEnable(GL_FRAMEBUFFER_SRGB);
 	#if 0
 	bindShader(SHADER_QUAD);
@@ -6965,6 +6960,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		GLenum glError = glGetError(); printf("GLError: %i\n", glError);
 	}
 
+	TIMER_END(Main)
+
 	swapBuffers(&ad->systemData);
 	glFinish();
 
@@ -6973,4 +6970,141 @@ extern "C" APPMAINFUNCTION(appMain) {
 	if(*isRunning == false) {
 		guiSave(&ad->gui, 2, 0);
 	}
+
+
+
+	// collate timings 
+	{
+		globalCommandList = &ad->commandListDebug;
+		ad->commandListDebug.count = 0;
+		ad->commandListDebug.bytes = 0;
+
+		int globalTimingsCount = __COUNTER__;
+
+		// dcRect(rectCenDim(100,-100,100,100), vec4(1,0,0,1));
+
+		DebugState* ds = globalDebugState;
+		ds->stringMemoryIndex = 0;
+
+		float cyclesPerFrame = (float)((3*((float)1/60))*1024*1024*1024);
+
+		Timings* timings = ds->timings;
+		int size = ds->bufferIndex;
+		zeroMemory(timings,size*sizeof(Timings));
+
+		TimerStatistic stats[16] = {};
+		int index = 0;
+
+		for(int i = 0; i < size; ++i) {
+			TimerSlot* slot = ds->timerBuffer + i;
+
+			if(slot->type == TIMER_TYPE_BEGIN) {
+				stats[index].cycles = slot->cycles;
+				stats[index].timerIndex = slot->timerIndex;
+				index++;
+			}
+
+			if(slot->type == TIMER_TYPE_END) {
+				index--;
+				Timings* timing = timings + stats[index].timerIndex;
+				timing->cycles += slot->cycles - stats[index].cycles;
+				timing->hits++;
+			}
+		}
+
+
+		int fontHeight = 18;
+		Vec2 textPos = vec2(700, -fontHeight);
+		int infoCount = ds->timerInfoCount;
+		for(int i = 0; i < infoCount; i++) {
+			TimerInfo* tInfo = ds->timerInfos + i;
+			Timings* timing = ds->timings + i;
+
+			float cycleCountPercent = (float)timing->cycles/cyclesPerFrame;
+			char * percentString = &ds->stringMemory[ds->stringMemoryIndex]; ds->stringMemoryIndex += 30;
+			percentString = floatToStr(percentString, cycleCountPercent, 3);
+
+			u64 cyclesOverHit = timing->hits > 0 ? (u64)(timing->cycles/timing->hits) : 0; 
+			// int debugStringSize = 512;
+			int debugStringSize = 100;
+			char* buffer = &ds->stringMemory[ds->stringMemoryIndex]; ds->stringMemoryIndex += debugStringSize+1;
+			_snprintf_s(buffer, debugStringSize, debugStringSize, "%20s %14s(%4i) %9I64uc %5uh %9I64uc/h  %6s%%", tInfo->file, tInfo->function, tInfo->line, timing->cycles, timing->hits, cyclesOverHit, percentString);
+
+			Vec2 pos = textPos;
+			dcText(buffer, getFont(FONT_CALIBRI, fontHeight), pos, vec4(1,0,0,1), 0, 0, 1, vec4(0,0,0,1));
+			textPos.y -= fontHeight;
+		}
+
+
+
+		#if 0
+		for(int i = 0; i < globalTimingsCount; ++i) {
+			// TimerInfo* tInfo = globalTimings + i;
+			TimerInfo* tInfo = ds->timerInfos + i;
+
+			Statistic cycles, hits, cyclesOverHits;
+			beginStatistic(&cycles);
+			beginStatistic(&hits);
+			beginStatistic(&cyclesOverHits);
+
+			for(int i = 0; i < CYCLEBUFFERSIZE; ++i) {
+				u64 hitsAndCycles = tInfo->hitsAndCycles[i];
+				uint hitCount = (uint)(hitsAndCycles >> 32);
+				u64 cycleCount = (uint)(hitsAndCycles);
+				u64 cyclesOverHitsCount = hitCount == 0 ? 0 : cycleCount / hitCount;
+
+				updateStatistic(&cycles, cycleCount);
+				updateStatistic(&hits, hitCount);
+				updateStatistic(&cyclesOverHits, cyclesOverHitsCount);
+			}
+
+			endStatistic(&cycles);
+			endStatistic(&hits);
+			endStatistic(&cyclesOverHits);
+
+
+			float cycleCountPercent = (float)cycles.avg/cyclesPerFrame;
+			char * percentString = getTString(memoryBlock);
+			percentString = floatToStr(percentString, cycleCountPercent, 3);
+
+			int debugStringSize = 256;
+			char* buffer = (char*)(getTMemory(memoryBlock, debugStringSize));
+			_snprintf_s(buffer, debugStringSize, debugStringSize, "%20s %14s(%4i) %9I64uc %5uh %9I64uc/h  %6s%%", tInfo->file, tInfo->function, tInfo->line, (u64)cycles.avg, (uint)hits.avg, (u64)cyclesOverHits.avg, percentString);
+
+			Vec2 wDim = window->dim;
+			int fontHeight = 20;
+			Vec2 pos = vec2(10, wDim.y - (i+1)*22);
+			drawFont(debugDrawCalls, pos, -1, buffer, fontHeight, FONTTYPE_CONSOLAS, mapRGBA(1,1,1,1));
+
+
+			int height = fontHeight - 2;
+			int width = 4;
+			Vec2 startPos = pos + vec2(920, -height/2);
+			Rect barRect = rect(startPos, startPos+vec2(width,height));
+			Vec2 advance = vec2(width,height);
+			for(int i = 0; i < CYCLEBUFFERSIZE; ++i) {
+				u64 hitsAndCycles = tInfo->hitsAndCycles[i];
+				uint hitCount = (uint)(hitsAndCycles >> 32);
+				u64 cycleCount = (uint)(hitsAndCycles);
+				u64 cyclesOverHitsCount = hitCount == 0 ? 0 : cycleCount / hitCount;
+
+				float barPercent = mapRange(cycleCount, 0, cycles.max, 0, 1);
+
+				barRect.max.y = barRect.min.y + barPercent*height;
+				drawRect(debugDrawCalls, barRect, mapRGBA(barPercent,0,1,1));
+				barRect = rectAddOffset(barRect, vec2(width,0));
+			}
+
+			tInfo->hitsAndCycles[(debugState->globalIndex+1) % CYCLEBUFFERSIZE] = 0;
+		}
+		// debugState->globalIndex = (debugState->globalIndex+1) % CYCLEBUFFERSIZE;
+		#endif
+
+		ds->timerInfoCount = globalTimingsCount;
+		ds->bufferIndex = 0;
+
+		globalCommandList = 0;
+	}
+
+
 }

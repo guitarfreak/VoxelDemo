@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <limits>
 
 typedef unsigned int uint;
 typedef unsigned char uchar;
@@ -731,3 +732,139 @@ bool flagCheck(uint flags, int flagType)
 	return result;
 }
 
+//
+//
+//
+
+enum TimerType {
+	TIMER_TYPE_BEGIN,
+	TIMER_TYPE_END,
+};
+
+struct TimerInfo {
+	int initialised;
+
+	const char* file;
+	const char* function;
+	int line, line2;
+	uint type;
+};
+
+#define CYCLEBUFFERSIZE 120
+struct TimerSlot {
+	int timerIndex;
+	u64 cycles;
+	uint type;
+	uint threadId;
+};
+
+struct Timings {
+	u64 cycles;
+	int hits;
+};
+
+struct DebugState {
+	bool isInitialised;
+	int timerInfoCount;
+	TimerInfo timerInfos[256];
+	Timings timings[256];
+	TimerSlot* timerBuffer;
+	int bufferSize;
+	u64 bufferIndex;
+
+	char* stringMemory;
+	int stringMemorySize;
+	int stringMemoryIndex;
+};
+
+// extern const int globalTimingsCount;
+DebugState* globalDebugState;
+
+inline uint getThreadID() {
+	char *threadLocalStorage = (char *)__readgsqword(0x30);
+	uint threadID = *(uint *)(threadLocalStorage + 0x48);
+
+	return threadID;
+}
+
+void addTimerSlot(int timerIndex, int type) {
+	// uint id = atomicAdd64(&globalDebugState->bufferIndex, 1);
+	uint id = globalDebugState->bufferIndex++;
+	TimerSlot* slot = globalDebugState->timerBuffer + id;
+	slot->cycles = __rdtsc();
+	slot->type = type;
+	slot->threadId = getThreadID();
+	slot->timerIndex = timerIndex;
+}
+
+void addTimerSlotAndInfo(int timerIndex, int type, const char* file, const char* function, int line) {
+
+	TimerInfo* timerInfo = globalDebugState->timerInfos + timerIndex;
+
+	if(!timerInfo->initialised) {
+		timerInfo->initialised = true;
+		timerInfo->file = file;
+		timerInfo->function = function;
+		timerInfo->line = line;
+		timerInfo->type = type;
+	}
+
+	addTimerSlot(timerIndex, type);
+}
+
+struct TimerBlock {
+	int counter;
+
+	TimerBlock(int counter, const char* file, const char* function, int line) {
+
+		this->counter = counter;
+		addTimerSlotAndInfo(counter, TIMER_TYPE_BEGIN, file, function, line);
+	}
+
+	~TimerBlock() {
+		addTimerSlot(counter, TIMER_TYPE_END);
+	}
+};
+
+#define TIMER_BLOCK() \
+	TimerBlock timerBlock##__LINE__(__COUNTER__, __FILE__, __FUNCTION__, __LINE__);
+
+#define TIMER_BEGIN(ID) \
+	const int timerCounter##ID = __COUNTER__; \
+	addTimerSlotAndInfo(timerCounter##ID, TIMER_TYPE_BEGIN, __FILE__, __FUNCTION__, __LINE__); 
+
+#define TIMER_END(ID) \
+	addTimerSlot(timerCounter##ID, TIMER_TYPE_END);
+
+
+
+
+struct Statistic {
+	r64 min;
+	r64 max;
+	r64 avg;
+	int count;
+};
+
+void beginStatistic(Statistic* stat) {
+	stat->min = DBL_MAX; 
+	stat->max = -DBL_MAX; 
+	stat->avg = 0; 
+	stat->count = 0; 
+}
+
+void updateStatistic(Statistic* stat, r64 value) {
+	if(value < stat->min) stat->min = value;
+	if(value > stat->max) stat->max = value;
+	stat->avg += value;
+	++stat->count;
+}
+
+void endStatistic(Statistic* stat) {
+	stat->avg /= stat->count;
+}
+
+struct TimerStatistic {
+	u64 cycles;
+	int timerIndex;
+};
