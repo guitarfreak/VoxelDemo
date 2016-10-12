@@ -125,11 +125,17 @@ inline void clampInt(int* n, int min, int max) {
 
 inline float mapRange(float value, float min, float max, float rangeMin, float rangeMax) {
 	float off = min < 0 ? abs(min) : -abs(min);
-	float result = ((value+off)/((max+off)-(min+off))) * 
-				  (rangeMax-rangeMin) + rangeMin;
+	float result = ((value+off)/((max+off)-(min+off))) * (rangeMax-rangeMin) + rangeMin;
 
 	return result;
 };
+
+// inline float mapRangeU64(u64 value, u64 min, u64 max, u64 rangeMin, u64 rangeMax) {
+// 	u64 off = min;
+// 	u64 result = ((value+off)/((max+off)-(min+off))) * (rangeMax-rangeMin) + rangeMin;
+
+// 	return result;
+// };
 
 inline float mapRangeClamp(float value, float min, float max, float rangeMin, float rangeMax) {
 	float result = mapRange(value, min, max, rangeMin, rangeMax);

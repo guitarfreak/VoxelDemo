@@ -72,6 +72,7 @@
 - simd on vectors as a test first?
 
 - experiment with directx 11
+- font drawing bold
 
 gui stuff: 
 additionally:
@@ -85,6 +86,7 @@ additionally:
 - struct as defer for section begin and such
 - make settings pushable as a whole
   -> doesn't that remove the need for explicit stacking in scrollbars and such?
+- top menu bar
 
 //-------------------------------------
 //               BUGS
@@ -1320,7 +1322,11 @@ void getUniform(uint shaderId, int shaderStage, uint uniformId, float* data) {
 
 
 
-void drawRect(Rect r, Rect uv, Vec4 color, int texture, float texZ = -1) {
+void drawRect(Rect r, Rect uv, Vec4 color, int texture, float texZ = -1) {	
+	// TIMER_BLOCK();
+	if(globalDebugState->timerBuffer == 0) {
+		int stop = 234;
+	}
 	Rect cd = rectGetCenDim(r);
 
 	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_MOD, cd.e);
@@ -2491,6 +2497,8 @@ int stateSwitch(int state) {
 }
 
 void executeCommandList(DrawCommandList* list) {
+	TIMER_BLOCK();
+
 	char* drawListIndex = (char*)list->data;
 	for(int i = 0; i < list->count; i++) {
 		int command = *((int*)drawListIndex);
@@ -2773,7 +2781,7 @@ struct Gui {
 	int mainScrollHeight;
 
 	bool columnMode;
-	float columnArray[8];
+	float columnArray[10];
 	float columnSize;
 	int columnIndex;
 
@@ -2802,10 +2810,10 @@ struct Gui {
 	float heightStack[4];
 	int heightStackIndex;
 
-	void init(Rect panelRect) {
+	void init(Rect panelRect, int saveSlot) {
 		*this = {};
 
-		if(guiCreateSettingsFile()) {
+		if(guiCreateSettingsFile() || saveSlot == -1) {
 			Vec3 mainColor = vec3(280,0.7f,0.3f);
 
 			colors.panelColor 		= vec4(hslToRgb(mainColor), 1);
@@ -2840,7 +2848,7 @@ struct Gui {
 			panelStartDim = rectGetDim(panelRect);
 			panelStartDim.h += settings.border.h*2;
 		} else {
-			guiLoadAll(this, 0);
+			guiLoadAll(this, saveSlot);
 		}
 	}
 
@@ -2869,13 +2877,13 @@ struct Gui {
 			return newRect;
 		}
 
-		// if((newRect.max.x < newRect.min.x || newRect.max.y < newRect.min.y) || 
-		// 	newRect == rect(0,0,0,0)) {
-		// 	doScissor(scissorRect(rect(0,0,0,0)));
-		// 	scissorStack[scissorStackSize++] = rect(0,0,0,0);
+		if((newRect.max.x < newRect.min.x || newRect.max.y < newRect.min.y) || 
+			newRect == rect(0,0,0,0)) {
+			doScissor(scissorRect(rect(0,0,0,0)));
+			scissorStack[scissorStackSize++] = rect(0,0,0,0);
 
-		// 	return rect(0,0,0,0);
-		// }
+			return rect(0,0,0,0);
+		}
 
 		Rect currentRect = getCurrentScissor();
 		Rect intersection;
@@ -2903,7 +2911,7 @@ struct Gui {
 	void scissorPop() {
 		scissorStackSize--;
 		scissorStackSize = clampMin(scissorStackSize, 0);
-		doScissor(scissorRect(scissorStack[scissorStackSize-1]));
+		if(scissorStackSize > 0) doScissor(scissorRect(scissorStack[scissorStackSize-1]));
 	}
 
 	Rect scissorRect(Rect r) {
@@ -2924,6 +2932,18 @@ struct Gui {
 		scissorPop();
 	}
 
+	void drawText(char* text, int align, Rect region) {
+		scissorPush(region);
+
+		Vec2 textPos = rectGetCen(region) + vec2(0,fontHeight*settings.fontOffset);
+		if(align == 0) textPos.x -= rectGetDim(region).w*0.5f;
+		else if(align == 2) textPos.x += rectGetDim(region).w*0.5f;
+
+		dcText(text, font, textPos, colors.textColor, align, 1, settings.textShadow, colors.shadowColor);		
+
+		scissorPop();
+	}
+
 	int getTextWidth(char* text) {
 		Vec2 textDim = getTextDim(text, font);
 		return textDim.w;
@@ -2933,6 +2953,11 @@ struct Gui {
 		if(scissor) scissorPush(getCurrentRegion());
 		dcRect(r, rect(0,0,1,1), color, (int)getTexture(TEXTURE_WHITE)->id);
 		if(scissor) scissorPop();
+	}
+
+	void drawTextBox(Rect region, char* text, Vec4 bgColor, int align = 0) {
+		drawRect(region, bgColor, false);
+		drawText(text, align, region);
 	}
 
 	void start(GuiInput guiInput, Font* font, Vec2i res) {
@@ -3020,6 +3045,9 @@ struct Gui {
 		drawRect(resizeRegion, colors.resizeButtonColor, false);
 
 		startPos = cornerPos + settings.border;
+		// currentPos = startPos + vec2(0, getDefaultYOffset());
+		// getDefaultHeight();
+		defaultHeight();
 		currentPos = startPos + vec2(0, getDefaultYOffset());
 		
 		panelWidth = panelStartDim.w;
@@ -3032,6 +3060,10 @@ struct Gui {
 	}
 
 	void end() {
+		// terrible hack
+		currentPos.y = currentPos.y - (currentDim.h - getDefaultHeightEx());
+		currentDim.h = getDefaultHeightEx();
+
 		// panel scrollbar
 		{
 			endScroll();
@@ -3041,10 +3073,21 @@ struct Gui {
 		setScissor(false);
 	}
 
-	// float getDefaultHeight(){return fontHeight*settings.fontHeightOffset;};
-	float getDefaultHeight(){return fontHeight*settings.fontHeightOffset * heightStack[heightStackIndex];};
+	float getDefaultHeightEx(){return fontHeight*settings.fontHeightOffset;};
+	float getDefaultHeight() {
+		float height = fontHeight*settings.fontHeightOffset;
+		float stackValue = heightStack[heightStackIndex];
+
+		// switch from multiplier to pixels if over threshhold
+		if(stackValue > 10) height = stackValue;
+		else height *= stackValue;
+
+		return height;
+	};
 	float getDefaultWidth(){return panelWidth;};
 	float getDefaultYOffset(){return currentDim.h+settings.offsets.h;};
+	float getYOffset(){return currentDim.h+settings.offsets.h;};
+	// float getDefaultYOffset(){return getDefaultHeight()+settings.offsets.h;};
 	Vec2 getDefaultPos(){return vec2(startPos.x, currentPos.y - getDefaultYOffset());};
 	void advancePosY() 	{currentPos.y -= getDefaultYOffset();};
 	void defaultX() 	{currentPos.x = startPos.x;};
@@ -3099,6 +3142,7 @@ struct Gui {
 	void advanceY(float v) {
 		if(v >= 5) currentPos.y -= v;
 		else currentPos.y -= getDefaultYOffset()*v;
+		// else currentPos.y -= getYOffset();
 	}
 
 	void div(float* c, int size) {
@@ -3121,7 +3165,7 @@ struct Gui {
 		}
 
 		if(flowCount) {
-			float flowVal = abs(dynamicSum-1)/flowCount;
+			float flowVal = abs(dynamicSum-1)/(float)flowCount;
 			for(int i = 0; i < size; i++)
 				if(c[i] == 0) c[i] = flowVal;
 		}
@@ -3150,6 +3194,11 @@ struct Gui {
 	Rect getCurrentRegion() {
 		Rect result = rectULDim(currentPos, currentDim);
 		return result;
+	}
+
+	void empty() {
+		pre();
+		post();
 	}
 
 	void label(char* text, int align = 1, Vec4 bgColor = vec4(0,0,0,0)) {
@@ -3183,7 +3232,8 @@ struct Gui {
 
 		Rect r = rectULDim(getDefaultPos(), vec2(panelWidth, scrollHeight));
 
-		float diff = (scrollStack[scrollStackIndexX][scrollStackIndexY[scrollStackIndexX]] - scrollHeight - settings.offsets.y);
+		float scrollValue = scrollStack[scrollStackIndexX][scrollStackIndexY[scrollStackIndexX]];
+		float diff = (scrollValue - scrollHeight - settings.offsets.y);
 		if(diff > 0) {
 			panelWidth -= settings.scrollBarWidth + settings.offsets.w;
 
@@ -3221,9 +3271,13 @@ struct Gui {
 		scissorPop();
 
 		scrollStack[scrollStackIndexX][scrollStackIndexY[scrollStackIndexX]++] = -((currentPos.y) - scrollStartY[scrollStackIndexX]);
+		// float h = currentDim.h - getDefaultHeightEx();
+		// scrollStack[scrollStackIndexX][scrollStackIndexY[scrollStackIndexX]++] = -((currentPos.y + currentDim.h) - scrollStartY[scrollStackIndexX]);
+		// scrollStack[scrollStackIndexX][scrollStackIndexY[scrollStackIndexX]++] = -((currentPos.y + h) - scrollStartY[scrollStackIndexX]);
 
 		if(showScrollBar[scrollStackIndexX]) {
 			currentPos.y = scrollEndY[scrollStackIndexX];
+			// currentPos.y = scrollEndY[scrollStackIndexX] + currentDim.h;
 			panelWidth += settings.scrollBarWidth + settings.offsets.w;
 		}
 
@@ -4223,14 +4277,16 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		// @setup
 
-		ad->debugState.timerBuffer = getPArray(TimerSlot, 1000);
-		ad->debugState.bufferSize = 1000;
-		ad->debugState.stringMemory = getPArray(char, 1000);
-		ad->debugState.stringMemorySize = 1000;
+		int timerSlots = 10000;
+		ad->debugState.bufferSize = timerSlots;
+		ad->debugState.timerBuffer = getPArray(TimerSlot, timerSlots);
+		ad->debugState.savedTimerBuffer	= getPArray(TimerSlot, timerSlots);
+		ad->debugState.stringMemory = getPArray(char, 10000);
+		ad->debugState.stringMemorySize = 10000;
+		ad->debugState.cycleIndex = 0;
 
-		int clSize = kiloBytes(5);
+		int clSize = kiloBytes(200);
 		drawCommandListInit(&ad->commandListDebug, (char*)getPMemory(clSize), clSize);
-
 
 		// ad->fieldOfView = 55;
 		ad->fieldOfView = 60;
@@ -4512,7 +4568,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		loadFunctions();
 	}
 
-	TIMER_BEGIN(Main)
+	TIMER_BLOCK_BEGIN(Main)
 
 	LARGE_INTEGER counter;
 	LARGE_INTEGER frequency;
@@ -4549,9 +4605,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 	globalCommandList = &ad->commandList3d;
 
 
-
-	updateInput(&ad->input, isRunning, windowHandle);
-
+	{
+		TIMER_BLOCK_NAMED("Input");
+		updateInput(&ad->input, isRunning, windowHandle);
+	}
+	
 	if(input->keysPressed[VK_F1]) {
 		int mode;
 		if(wSettings->fullscreen) mode = WINDOW_MODE_WINDOWED;
@@ -4757,6 +4815,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}	
 
 	// @update entities
+	TIMER_BLOCK_BEGIN_NAMED(entities, "Upd Entities");
 	for(int i = 0; i < ad->entityList.size; i++) {
 		Entity* e = &ad->entityList.e[i];
 		if(!e->init) continue;
@@ -5174,6 +5233,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			};
 		}
 	}
+	TIMER_BLOCK_END(entities);
 
 	if(ad->playerMode) {
 		ad->activeCam = getCamData(ad->player->pos, ad->player->rot, ad->player->camOff);
@@ -5571,6 +5631,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 	#endif
 
+	TIMER_BLOCK_BEGIN_NAMED(world, "Upd World");
+
 	Vec2i* coordList = (Vec2i*)getTMemory(sizeof(Vec2i)*2000);
 	int coordListSize = 0;
 
@@ -5699,181 +5761,182 @@ extern "C" APPMAINFUNCTION(appMain) {
 		sortList[sortListSize++] = {distanceToCamera, i};
 	}
 
-	{
-		TIMER_BLOCK();
-		radixSortPair(sortList, sortListSize);
-	}
+	radixSortPair(sortList, sortListSize);
 
 	for(int i = 0; i < sortListSize-1; i++) {
 		assert(sortList[i].key <= sortList[i+1].key);
 	}
 
-	// draw world without water
+	TIMER_BLOCK_END(world);
+
 	{
-		for(int i = 0; i < sortListSize; i++) {
-			VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
-			drawVoxelMesh(m, 2);
-		}
-	}
-
-	// draw stencil
-	{
-		glEnable(GL_STENCIL_TEST);
-		glStencilMask(0xFF);
-		glClear(GL_STENCIL_BUFFER_BIT);
-		glStencilFunc(GL_ALWAYS, 1, 0xFF);
-		glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
-		glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-		glDepthMask(GL_FALSE);
-
-		glEnable(GL_CLIP_DISTANCE0);
-		glEnable(GL_CLIP_DISTANCE1);
-
-		pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CLIPPLANE, true);
-		pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CPLANE1, 0,0,1,-WATER_LEVEL_HEIGHT);
-		pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CPLANE2, 0,0,-1,WATER_LEVEL_HEIGHT);
-
-		pushUniform(SHADER_VOXEL, 1, VOXEL_UNIFORM_ALPHATEST, 0.5f);
-
-		for(int i = 0; i < sortListSize; i++) {
-			VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
-			drawVoxelMesh(m, 1);
+		TIMER_BLOCK_NAMED("D World");
+		// draw world without water
+		{
+			for(int i = 0; i < sortListSize; i++) {
+				VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
+				drawVoxelMesh(m, 2);
+			}
 		}
 
-		glDisable(GL_CLIP_DISTANCE0);
-		glDisable(GL_CLIP_DISTANCE1);
-		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-		glDepthMask(GL_TRUE);
-	}
+		// draw stencil
+		{
+			glEnable(GL_STENCIL_TEST);
+			glStencilMask(0xFF);
+			glClear(GL_STENCIL_BUFFER_BIT);
+			glStencilFunc(GL_ALWAYS, 1, 0xFF);
+			glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+			glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+			glDepthMask(GL_FALSE);
 
-	// draw reflection
-	{	
-		glStencilMask(0x00);
-		glStencilFunc(GL_EQUAL, 1, 0xFF);
+			glEnable(GL_CLIP_DISTANCE0);
+			glEnable(GL_CLIP_DISTANCE1);
 
-		glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[2]);
-		glClearColor(0,0,0,0);
-		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+			pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CLIPPLANE, true);
+			pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CPLANE1, 0,0,1,-WATER_LEVEL_HEIGHT);
+			pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CPLANE2, 0,0,-1,WATER_LEVEL_HEIGHT);
 
-		Vec2i reflectionRes = ad->curRes;
-		glBlitNamedFramebuffer (ad->frameBuffers[0], ad->frameBuffers[2], 
-			0,0, ad->curRes.x, ad->curRes.y,
-			0,0, ad->curRes.x, ad->curRes.y,
-			                   // 0,0, reflectionRes.x-1, reflectionRes.y-1,
-			                   // 0,0, ad->curRes.x*0.5f, ad->curRes.y*0.5f,
-			                   // GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT,
-			GL_STENCIL_BUFFER_BIT,
-			GL_NEAREST);
+			pushUniform(SHADER_VOXEL, 1, VOXEL_UNIFORM_ALPHATEST, 0.5f);
 
-		glEnable(GL_CLIP_DISTANCE0);
-		// glEnable(GL_CLIP_DISTANCE1);
-		glEnable(GL_DEPTH_TEST);
-		glFrontFace(GL_CCW);
+			for(int i = 0; i < sortListSize; i++) {
+				VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
+				drawVoxelMesh(m, 1);
+			}
 
-			// draw cubemap reflection
-			bindShader(SHADER_CUBEMAP);
-			glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
-			glBindTextures(0, 1, &ad->cubemapTextureId[ad->cubeMapDrawIndex]);
-			glBindSamplers(0, 1, ad->samplers);
-
-			Vec3 skyBoxRot;
-			if(ad->playerMode) skyBoxRot = ad->player->rot;
-			else skyBoxRot = ad->cameraEntity->rot;
-			skyBoxRot.x += M_PI;
-
-			Camera skyBoxCam = getCamData(vec3(0,0,0), skyBoxRot, vec3(0,0,0), vec3(0,1,0), vec3(0,0,1));
-
-			Mat4 viewMat; viewMatrix(&viewMat, skyBoxCam.pos, -skyBoxCam.look, skyBoxCam.up, skyBoxCam.right);
-			Mat4 projMat; projMatrix(&projMat, degreeToRadian(ad->fieldOfView), ad->aspectRatio, 0.001f, 2);
-			pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_VIEW, viewMat.e);
-			pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_PROJ, projMat.e);
-
-			pushUniform(SHADER_CUBEMAP, 2, CUBEMAP_UNIFORM_CLIPPLANE, true);
-			pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_CPLANE1, 0,0,-1,WATER_LEVEL_HEIGHT);
-
-			glDepthMask(false);
-			// glFrontFace(GL_CCW);
-			glDrawArrays(GL_TRIANGLES, 0, 6*6);
-			// glFrontFace(GL_CW);
-			glDepthMask(true);
-			glDisable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
-
-		setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, fogColor, vec3(0,0,WATER_LEVEL_HEIGHT*2 + 0.01f), vec3(1,1,-1));
-		pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CLIPPLANE, true);
-		pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CPLANE1, 0,0,-1,WATER_LEVEL_HEIGHT);
-
-		for(int i = 0; i < sortListSize; i++) {
-			VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
-			drawVoxelMesh(m, 2);
-		}
-		for(int i = sortListSize-1; i >= 0; i--) {
-			VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
-			drawVoxelMesh(m, 1);
+			glDisable(GL_CLIP_DISTANCE0);
+			glDisable(GL_CLIP_DISTANCE1);
+			glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+			glDepthMask(GL_TRUE);
 		}
 
-		glFrontFace(GL_CW);
-		glDisable(GL_CLIP_DISTANCE0);
-		// glDisable(GL_CLIP_DISTANCE1);
-		glDisable(GL_STENCIL_TEST);
-	}
+		// draw reflection
+		{	
+			glStencilMask(0x00);
+			glStencilFunc(GL_EQUAL, 1, 0xFF);
 
-	// draw reflection texture	
-	{ 
-		// 	// glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-		// 	// glBlendFunc(GL_SRC_COLOR, GL_ONE);
-		// 	// glBlendFunc(GL_SRC_COLOR, GL_ONE_MINUS_SRC_ALPHA);
-		// 	// glBlendFunc(GL_DST_COLOR, GL_ZERO);
-		// 	// glBlendFunc(GL_SRC_COLOR, GL_ONE);
+			glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[2]);
+			glClearColor(0,0,0,0);
+			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
-		// 	// glBlendFunc(GL_DST_COLOR, GL_ZERO);
-		// 	// glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
-		// 	// glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
+			Vec2i reflectionRes = ad->curRes;
+			glBlitNamedFramebuffer (ad->frameBuffers[0], ad->frameBuffers[2], 
+				0,0, ad->curRes.x, ad->curRes.y,
+				0,0, ad->curRes.x, ad->curRes.y,
+				                   // 0,0, reflectionRes.x-1, reflectionRes.y-1,
+				                   // 0,0, ad->curRes.x*0.5f, ad->curRes.y*0.5f,
+				                   // GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT,
+				GL_STENCIL_BUFFER_BIT,
+				GL_NEAREST);
 
-		// 	// glBlendFunc(GL_ONE, GL_DST_COLOR);
-		// 	// glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
-		// 	// glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
+			glEnable(GL_CLIP_DISTANCE0);
+			// glEnable(GL_CLIP_DISTANCE1);
+			glEnable(GL_DEPTH_TEST);
+			glFrontFace(GL_CCW);
 
-		// 	// GL_DST_COLOR, GL_ZERO
+				// draw cubemap reflection
+				bindShader(SHADER_CUBEMAP);
+				glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+				glBindTextures(0, 1, &ad->cubemapTextureId[ad->cubeMapDrawIndex]);
+				glBindSamplers(0, 1, ad->samplers);
 
-		// 	// void glBlendFuncSeparate(	GLenum srcRGB,
-		// 	//  	GLenum dstRGB,
-		// 	//  	GLenum srcAlpha,
-		// 	//  	GLenum dstAlpha);
+				Vec3 skyBoxRot;
+				if(ad->playerMode) skyBoxRot = ad->player->rot;
+				else skyBoxRot = ad->cameraEntity->rot;
+				skyBoxRot.x += M_PI;
 
-		// // glBlendFuncSeparate(GL_ONE_MINUS_DST_COLOR, GL_ZERO, GL_ONE, GL_ONE);
-		// // glBlendFuncSeparate(GL_ONE_MINUS_DST_COLOR, GL_ZERO, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-		// glBlendFuncSeparate(GL_ONE_MINUS_DST_COLOR, GL_ZEROd, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+				Camera skyBoxCam = getCamData(vec3(0,0,0), skyBoxRot, vec3(0,0,0), vec3(0,1,0), vec3(0,0,1));
+
+				Mat4 viewMat; viewMatrix(&viewMat, skyBoxCam.pos, -skyBoxCam.look, skyBoxCam.up, skyBoxCam.right);
+				Mat4 projMat; projMatrix(&projMat, degreeToRadian(ad->fieldOfView), ad->aspectRatio, 0.001f, 2);
+				pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_VIEW, viewMat.e);
+				pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_PROJ, projMat.e);
+
+				pushUniform(SHADER_CUBEMAP, 2, CUBEMAP_UNIFORM_CLIPPLANE, true);
+				pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_CPLANE1, 0,0,-1,WATER_LEVEL_HEIGHT);
+
+				glDepthMask(false);
+				// glFrontFace(GL_CCW);
+				glDrawArrays(GL_TRIANGLES, 0, 6*6);
+				// glFrontFace(GL_CW);
+				glDepthMask(true);
+				glDisable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+
+			setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, fogColor, vec3(0,0,WATER_LEVEL_HEIGHT*2 + 0.01f), vec3(1,1,-1));
+			pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CLIPPLANE, true);
+			pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CPLANE1, 0,0,-1,WATER_LEVEL_HEIGHT);
+
+			for(int i = 0; i < sortListSize; i++) {
+				VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
+				drawVoxelMesh(m, 2);
+			}
+			for(int i = sortListSize-1; i >= 0; i--) {
+				VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
+				drawVoxelMesh(m, 1);
+			}
+
+			glFrontFace(GL_CW);
+			glDisable(GL_CLIP_DISTANCE0);
+			// glDisable(GL_CLIP_DISTANCE1);
+			glDisable(GL_STENCIL_TEST);
+		}
+
+		// draw reflection texture	
+		{ 
+			// 	// glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			// 	// glBlendFunc(GL_SRC_COLOR, GL_ONE);
+			// 	// glBlendFunc(GL_SRC_COLOR, GL_ONE_MINUS_SRC_ALPHA);
+			// 	// glBlendFunc(GL_DST_COLOR, GL_ZERO);
+			// 	// glBlendFunc(GL_SRC_COLOR, GL_ONE);
+
+			// 	// glBlendFunc(GL_DST_COLOR, GL_ZERO);
+			// 	// glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
+			// 	// glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
+
+			// 	// glBlendFunc(GL_ONE, GL_DST_COLOR);
+			// 	// glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
+			// 	// glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
+
+			// 	// GL_DST_COLOR, GL_ZERO
+
+			// 	// void glBlendFuncSeparate(	GLenum srcRGB,
+			// 	//  	GLenum dstRGB,
+			// 	//  	GLenum srcAlpha,
+			// 	//  	GLenum dstAlpha);
+
+			// // glBlendFuncSeparate(GL_ONE_MINUS_DST_COLOR, GL_ZERO, GL_ONE, GL_ONE);
+			// // glBlendFuncSeparate(GL_ONE_MINUS_DST_COLOR, GL_ZERO, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			// glBlendFuncSeparate(GL_ONE_MINUS_DST_COLOR, GL_ZEROd, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
 
-		// 	glBlendEquation(GL_FUNC_ADD);
-		// 	// glBlendEquation(GL_FUNC_SUBTRACT);
-		// 	// glBlendEquation(GL_FUNC_REVERSE_SUBTRACT);
-		// 	// glBlendEquation(GL_MIN);
-		// 	// glBlendEquation(GL_MAX);
+			// 	glBlendEquation(GL_FUNC_ADD);
+			// 	// glBlendEquation(GL_FUNC_SUBTRACT);
+			// 	// glBlendEquation(GL_FUNC_REVERSE_SUBTRACT);
+			// 	// glBlendEquation(GL_MIN);
+			// 	// glBlendEquation(GL_MAX);
 
-		glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[0]);
-		glDisable(GL_DEPTH_TEST);
+			glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[0]);
+			glDisable(GL_DEPTH_TEST);
 
-		bindShader(SHADER_QUAD);
-		drawRect(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0), rect(0,1,1,0), vec4(1,1,1,reflectionAlpha), ad->frameBufferTextures[1]);
+			bindShader(SHADER_QUAD);
+			drawRect(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0), rect(0,1,1,0), vec4(1,1,1,reflectionAlpha), ad->frameBufferTextures[1]);
 
-		glEnable(GL_DEPTH_TEST);
+			glEnable(GL_DEPTH_TEST);
 
-		// 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-		// 	glBlendEquation(GL_FUNC_ADD);
-	}
+			// 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			// 	glBlendEquation(GL_FUNC_ADD);
+		}
 
-	// draw water
-	{
-		setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, fogColor);
-		pushUniform(SHADER_VOXEL, 1, VOXEL_UNIFORM_ALPHATEST, 0.5f);
+		// draw water
+		{
+			setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, fogColor);
+			pushUniform(SHADER_VOXEL, 1, VOXEL_UNIFORM_ALPHATEST, 0.5f);
 
-		for(int i = sortListSize-1; i >= 0; i--) {
-			VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
-			drawVoxelMesh(m, 1);
+			for(int i = sortListSize-1; i >= 0; i--) {
+				VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
+				drawVoxelMesh(m, 1);
+			}
 		}
 	}
-
 
 
 	// Vec3 off = vec3(0.5f, 0.5f, 0.5f);
@@ -6218,7 +6281,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		if(second) {
 			// gui->init(rectCenDim(vec2(0,1), vec2(300,800)));
 			// gui->init(rectCenDim(vec2(1300,1), vec2(300,500)));
-			gui->init(rectCenDim(vec2(1300,1), vec2(300, wSettings->currentRes.h)));
+			gui->init(rectCenDim(vec2(1300,1), vec2(300, wSettings->currentRes.h)), 0);
 			setupGui = false;
 		}
 		GuiInput gInput = { vec2(input->mousePos), input->mouseWheel, input->mouseButtonPressed[0], input->mouseButtonDown[0], 
@@ -6377,7 +6440,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	drawRect(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0), rect(0,1,1,0), vec4(1), ad->frameBufferTextures[0]);
 
 	executeCommandList(&ad->commandList2d);
-
 
 
 
@@ -6573,42 +6635,48 @@ extern "C" APPMAINFUNCTION(appMain) {
 		GLenum glError = glGetError(); printf("GLError: %i\n", glError);
 	}
 
-	TIMER_END(Main)
+	clearTMemory();
+
+	TIMER_BLOCK_END(Main)
 
 	swapBuffers(&ad->systemData);
 	glFinish();
 
-	clearTMemory();
-
-	if(*isRunning == false) {
-		guiSave(&ad->gui, 2, 0);
-	}
 
 
 
 	// collate timings 
-	{
+	{		
 		globalCommandList = &ad->commandListDebug;
 		ad->commandListDebug.count = 0;
 		ad->commandListDebug.bytes = 0;
 
 		int globalTimingsCount = __COUNTER__;
 
-		// dcRect(rectCenDim(100,-100,100,100), vec4(1,0,0,1));
-
 		DebugState* ds = globalDebugState;
+		ds->timerInfoCount = globalTimingsCount;
 		ds->stringMemoryIndex = 0;
 
-		float cyclesPerFrame = (float)((3*((float)1/60))*1024*1024*1024);
+		int bufferIndex = ds->bufferIndex;
+		Timings* timings = ds->timings[ds->cycleIndex];
+		zeroMemory(timings, ds->timerInfoCount*sizeof(Timings));
 
-		Timings* timings = ds->timings;
-		int size = ds->bufferIndex;
-		zeroMemory(timings,size*sizeof(Timings));
+		ds->cycleIndex = (ds->cycleIndex + 1)%arrayCount(ds->timings);
 
+		ds->bufferIndex = 0;
+
+		int fontHeight = 18;
+
+		if(reload) {
+			for(int i = 0; i < arrayCount(ds->timerInfos); i++) ds->timerInfos[i].initialised = false;
+			return;
+		}
+
+		// collate timing buffer
 		TimerStatistic stats[16] = {};
 		int index = 0;
 
-		for(int i = 0; i < size; ++i) {
+		for(int i = 0; i < bufferIndex; ++i) {
 			TimerSlot* slot = ds->timerBuffer + i;
 
 			if(slot->type == TIMER_TYPE_BEGIN) {
@@ -6625,99 +6693,262 @@ extern "C" APPMAINFUNCTION(appMain) {
 			}
 		}
 
+		for(int i = 0; i < ds->timerInfoCount; i++) {
+			Timings* t = timings + i;
+			t->cyclesOverHits = t->hits > 0 ? (u64)(t->cycles/t->hits) : 0; 
+		}
 
-		int fontHeight = 18;
-		Vec2 textPos = vec2(700, -fontHeight);
+		Statistic statistics[32] = {};
+		for(int timerIndex = 0; timerIndex < ds->timerInfoCount; timerIndex++) {
+			Statistic* stat = statistics + timerIndex;
+			beginStatistic(stat);
+
+			for(int i = 0; i < arrayCount(ds->timings); i++) {
+				Timings* t = &ds->timings[i][timerIndex];
+				updateStatistic(stat, t->cyclesOverHits);
+			}
+
+			endStatistic(stat);
+		}
+
+		Font* debugFont = getFont(FONT_CALIBRI, 18);
+
+		// draw timing info
+		float cyclesPerFrame = (float)((3*((float)1/60))*1024*1024*1024);
+		fontHeight = 18;
+		Vec2 textPos = vec2(550, -fontHeight);
 		int infoCount = ds->timerInfoCount;
-		for(int i = 0; i < infoCount; i++) {
-			TimerInfo* tInfo = ds->timerInfos + i;
-			Timings* timing = ds->timings + i;
 
-			float cycleCountPercent = (float)timing->cycles/cyclesPerFrame;
-			char * percentString = &ds->stringMemory[ds->stringMemoryIndex]; ds->stringMemoryIndex += 30;
-			percentString = floatToStr(percentString, cycleCountPercent, 3);
+		bool initSections = false;
 
-			u64 cyclesOverHit = timing->hits > 0 ? (u64)(timing->cycles/timing->hits) : 0; 
-			// int debugStringSize = 512;
-			int debugStringSize = 100;
-			char* buffer = &ds->stringMemory[ds->stringMemoryIndex]; ds->stringMemoryIndex += debugStringSize+1;
-			_snprintf_s(buffer, debugStringSize, debugStringSize, "%20s %14s(%4i) %9I64uc %5uh %9I64uc/h  %6s%%", tInfo->file, tInfo->function, tInfo->line, timing->cycles, timing->hits, cyclesOverHit, percentString);
+		if(second) {
+			ds->gui = getPStruct(Gui);
+			// ds->gui->init(rectCenDim(vec2(1300,1), vec2(400, wSettings->currentRes.h)), -1);
+			ds->gui->init(rectCenDim(vec2(1300,1), vec2(300, wSettings->currentRes.h)), 3);
+		}
+		GuiInput gInput = { vec2(input->mousePos), input->mouseWheel, input->mouseButtonPressed[0], input->mouseButtonDown[0], 
+							input->keysPressed[VK_ESCAPE], input->keysPressed[VK_RETURN], input->keysPressed[VK_SPACE], input->keysPressed[VK_BACK], input->keysPressed[VK_DELETE], input->keysPressed[VK_HOME], input->keysPressed[VK_END], 
+							input->keysPressed[VK_LEFT], input->keysPressed[VK_RIGHT], input->keysPressed[VK_UP], input->keysPressed[VK_DOWN], 
+							input->keysDown[VK_SHIFT], input->keysDown[VK_CONTROL], input->inputCharacters, input->inputCharacterCount};
+		Gui* gui = ds->gui;
+		gui->start(gInput, getFont(FONT_CALIBRI, fontHeight), wSettings->currentRes);
 
-			Vec2 pos = textPos;
-			dcText(buffer, getFont(FONT_CALIBRI, fontHeight), pos, vec4(1,0,0,1), 0, 0, 1, vec4(0,0,0,1));
-			textPos.y -= fontHeight;
+		static bool statsSection = false;
+		static bool graphSection = false;
+		gui->div(0.2f,0.2f,0); gui->switcher("Stats", &statsSection); gui->switcher("Graph", &graphSection); gui->empty();
+
+
+		if(statsSection) {
+			int barWidth = 1;
+			int barCount = arrayCount(ds->timings);
+			float sectionWidths[] = {0,0,0,0,0,0,0,0, barWidth*barCount};
+
+			char* headers[] = {"File", "Function", "Description", "Cycles", "Hits", "C/H", "Avg. Cycl.", "Total Time", ""};
+			gui->div(sectionWidths, arrayCount(sectionWidths));
+			for(int i = 0; i < arrayCount(sectionWidths); i++) gui->label(headers[i],1);
+
+			for(int i = 0; i < infoCount; i++) {
+				TimerInfo* tInfo = ds->timerInfos + i;
+				Timings* timing = timings + i;
+
+				float cycleCountPercent = (float)timing->cycles/cyclesPerFrame;
+				char * percentString = &ds->stringMemory[ds->stringMemoryIndex]; ds->stringMemoryIndex += 30;
+				percentString = floatToStr(percentString, cycleCountPercent*100, 3);
+
+				int debugStringSize = 0;
+				char* buffer = 0;
+
+				gui->div(sectionWidths, arrayCount(sectionWidths)); 
+
+				debugStringSize = 30;
+				buffer = &ds->stringMemory[ds->stringMemoryIndex]; ds->stringMemoryIndex += debugStringSize+1;
+				_snprintf_s(buffer, debugStringSize, debugStringSize, "%s", tInfo->file + 21);
+				gui->label(buffer,0);
+
+				debugStringSize = 30;
+				buffer = &ds->stringMemory[ds->stringMemoryIndex]; ds->stringMemoryIndex += debugStringSize+1;
+				_snprintf_s(buffer, debugStringSize, debugStringSize, "%s", tInfo->function);
+				gui->label(buffer,0);
+
+				debugStringSize = 30;
+				buffer = &ds->stringMemory[ds->stringMemoryIndex]; ds->stringMemoryIndex += debugStringSize+1;
+				_snprintf_s(buffer, debugStringSize, debugStringSize, "%s", tInfo->name);
+				gui->label(buffer,0);
+
+				debugStringSize = 30;
+				buffer = &ds->stringMemory[ds->stringMemoryIndex]; ds->stringMemoryIndex += debugStringSize+1;
+				_snprintf_s(buffer, debugStringSize, debugStringSize, "%I64uc", timing->cycles);
+				gui->label(buffer,2);
+
+				debugStringSize = 30;
+				buffer = &ds->stringMemory[ds->stringMemoryIndex]; ds->stringMemoryIndex += debugStringSize+1;
+				_snprintf_s(buffer, debugStringSize, debugStringSize, "%u", timing->hits);
+				gui->label(buffer,2);
+
+				debugStringSize = 30;
+				buffer = &ds->stringMemory[ds->stringMemoryIndex]; ds->stringMemoryIndex += debugStringSize+1;
+				_snprintf_s(buffer, debugStringSize, debugStringSize, "%I64u", timing->cyclesOverHits);
+				gui->label(buffer,2);
+
+				debugStringSize = 30;
+				buffer = &ds->stringMemory[ds->stringMemoryIndex]; ds->stringMemoryIndex += debugStringSize+1;
+				_snprintf_s(buffer, debugStringSize, debugStringSize, "%.0fc", statistics[i].avg);
+				gui->label(buffer,2);
+
+				debugStringSize = 30;
+				buffer = &ds->stringMemory[ds->stringMemoryIndex]; ds->stringMemoryIndex += debugStringSize+1;
+				_snprintf_s(buffer, debugStringSize, debugStringSize, "%s%%", percentString);
+				gui->label(buffer,2);
+
+				// gui->pre();
+				gui->empty();
+				Rect r = gui->getCurrentRegion();
+				float rheight = gui->getDefaultHeight();
+
+				float xOffset = 0;
+				for(int statIndex = 0; statIndex < barCount; statIndex++) {
+					Statistic* stat = statistics + i;
+					u64 coh = ds->timings[statIndex][i].cyclesOverHits;
+
+					float height = mapRangeClamp(coh, stat->min, stat->max, 1, rheight);
+					Vec2 rmin = r.min + vec2(xOffset,-2);
+					float colorOffset = mapRange(coh, stat->min, stat->max, 0, 1);
+					// dcRect(rectMinDim(rmin, vec2(barWidth, height)), vec4(colorOffset,0,1-colorOffset,1));
+					dcRect(rectMinDim(rmin, vec2(barWidth, height)), vec4(colorOffset,1-colorOffset,0,1));
+
+					xOffset += barWidth;
+				}
+			}
 		}
 
 
-
-		#if 0
-		for(int i = 0; i < globalTimingsCount; ++i) {
-			// TimerInfo* tInfo = globalTimings + i;
-			TimerInfo* tInfo = ds->timerInfos + i;
-
-			Statistic cycles, hits, cyclesOverHits;
-			beginStatistic(&cycles);
-			beginStatistic(&hits);
-			beginStatistic(&cyclesOverHits);
-
-			for(int i = 0; i < CYCLEBUFFERSIZE; ++i) {
-				u64 hitsAndCycles = tInfo->hitsAndCycles[i];
-				uint hitCount = (uint)(hitsAndCycles >> 32);
-				u64 cycleCount = (uint)(hitsAndCycles);
-				u64 cyclesOverHitsCount = hitCount == 0 ? 0 : cycleCount / hitCount;
-
-				updateStatistic(&cycles, cycleCount);
-				updateStatistic(&hits, hitCount);
-				updateStatistic(&cyclesOverHits, cyclesOverHitsCount);
+		// save timer buffer
+		if(input->keysPressed[VK_F9]) {
+			if(!ds->frozenGraph) {
+				memCpy(ds->savedTimerBuffer, ds->timerBuffer, bufferIndex*sizeof(TimerSlot));
+				ds->savedBufferIndex = bufferIndex;
+				memCpy(ds->savedTimings, timings, ds->timerInfoCount*sizeof(Timings));
 			}
 
-			endStatistic(&cycles);
-			endStatistic(&hits);
-			endStatistic(&cyclesOverHits);
-
-
-			float cycleCountPercent = (float)cycles.avg/cyclesPerFrame;
-			char * percentString = getTString(memoryBlock);
-			percentString = floatToStr(percentString, cycleCountPercent, 3);
-
-			int debugStringSize = 256;
-			char* buffer = (char*)(getTMemory(memoryBlock, debugStringSize));
-			_snprintf_s(buffer, debugStringSize, debugStringSize, "%20s %14s(%4i) %9I64uc %5uh %9I64uc/h  %6s%%", tInfo->file, tInfo->function, tInfo->line, (u64)cycles.avg, (uint)hits.avg, (u64)cyclesOverHits.avg, percentString);
-
-			Vec2 wDim = window->dim;
-			int fontHeight = 20;
-			Vec2 pos = vec2(10, wDim.y - (i+1)*22);
-			drawFont(debugDrawCalls, pos, -1, buffer, fontHeight, FONTTYPE_CONSOLAS, mapRGBA(1,1,1,1));
-
-
-			int height = fontHeight - 2;
-			int width = 4;
-			Vec2 startPos = pos + vec2(920, -height/2);
-			Rect barRect = rect(startPos, startPos+vec2(width,height));
-			Vec2 advance = vec2(width,height);
-			for(int i = 0; i < CYCLEBUFFERSIZE; ++i) {
-				u64 hitsAndCycles = tInfo->hitsAndCycles[i];
-				uint hitCount = (uint)(hitsAndCycles >> 32);
-				u64 cycleCount = (uint)(hitsAndCycles);
-				u64 cyclesOverHitsCount = hitCount == 0 ? 0 : cycleCount / hitCount;
-
-				float barPercent = mapRange(cycleCount, 0, cycles.max, 0, 1);
-
-				barRect.max.y = barRect.min.y + barPercent*height;
-				drawRect(debugDrawCalls, barRect, mapRGBA(barPercent,0,1,1));
-				barRect = rectAddOffset(barRect, vec2(width,0));
-			}
-
-			tInfo->hitsAndCycles[(debugState->globalIndex+1) % CYCLEBUFFERSIZE] = 0;
+			ds->frozenGraph = !ds->frozenGraph;
 		}
-		// debugState->globalIndex = (debugState->globalIndex+1) % CYCLEBUFFERSIZE;
-		#endif
 
-		ds->timerInfoCount = globalTimingsCount;
-		ds->bufferIndex = 0;
+
+		if(graphSection) {
+			static Vec2 trans = vec2(10,0);
+			static float zoom = 1;
+
+			gui->div(vec2(0.1f,0)); 
+			if(gui->button("Reset")) {
+				trans = vec2(10,0);
+				zoom = 1;
+			}
+			gui->empty();
+			gui->heightPush(3);
+			gui->empty();
+			
+			Rect bgRect = gui->getCurrentRegion();
+			Vec2 dragDelta = vec2(0,0);
+			gui->drag(bgRect, &dragDelta, vec4(0,0,0,0));
+
+			trans.x += dragDelta.x;
+			// trans.x = clampMax(trans.x, 10);
+			gui->heightPop();
+
+			if(gui->input.mouseWheel) {
+				zoom *= 1 + gui->input.mouseWheel*0.1f;
+				// zoom += gui->input.mouseWheel*10;
+			}
+
+
+			Timings* graphTimings = timings;
+			TimerSlot* graphTimerBuffer = ds->timerBuffer;
+			u64 graphBufferIndex = bufferIndex;
+
+			if(ds->frozenGraph) {
+				graphTimings = ds->savedTimings;
+				graphTimerBuffer = ds->savedTimerBuffer;
+				graphBufferIndex = ds->savedBufferIndex;
+			}
+
+			float graphWidth = rectGetDim(bgRect).w;
+			Vec2 startPos = rectGetUL(bgRect);
+
+			if(true) {
+				u64 baseCycleCount = graphTimerBuffer[0].cycles;
+				u64 startCycleCount = 0;
+				u64 endCycleCount = cyclesPerFrame;
+
+				float orthoLeft = 0 + trans.x;
+				float orthoRight = graphWidth*zoom + trans.x;
+
+				Rect bgRect = rectULDim(startPos, vec2(graphWidth, fontHeight*3));
+				dcRect(bgRect, vec4(1,1,1,0.2f));
+
+				float lineWidth = 1;
+				int lineCount = 10;
+				for(int i = 0; i < lineCount+1; i++) {
+					float linePos = ((graphWidth-20)/(float)lineCount) * i;
+					linePos *= zoom;
+					linePos += trans.x;
+					linePos += bgRect.min.x;
+					Vec4 color = vec4(0.7f,0.7f,0.7f,1);
+					float lw = lineWidth;
+					if(i == 0 || i == lineCount) {
+						color = vec4(1,1,1,1);
+						lw = lineWidth * 3;
+					}
+					dcRect(rect(linePos, bgRect.min.y, linePos+lw, bgRect.max.y), color);
+				} 
+
+				startPos -= vec2(0, fontHeight);
+				index = 0;
+				for(int i = 0; i < graphBufferIndex; ++i) {
+					TimerSlot* slot = graphTimerBuffer + i;
+
+					if(slot->type == TIMER_TYPE_BEGIN) {
+
+						Timings* t = graphTimings + slot->timerIndex;
+						TimerInfo* tInfo = ds->timerInfos + slot->timerIndex;
+
+						float xoff = mapRange(slot->cycles - baseCycleCount, startCycleCount, endCycleCount, orthoLeft, orthoRight);
+						float barWidth = mapRange(t->cycles, startCycleCount, endCycleCount, 0, graphWidth*zoom);
+						Vec2 pos = startPos + vec2(xoff,index*-fontHeight);
+						
+						Rect r = rect(pos, pos + vec2(barWidth,fontHeight));
+						float cOff = slot->timerIndex/(float)ds->timerInfoCount;
+						Vec4 c = vec4(1-cOff, 0, cOff, 1);
+
+						int debugStringSize = 50;
+						char* buffer = &ds->stringMemory[ds->stringMemoryIndex]; ds->stringMemoryIndex += debugStringSize+1;
+						_snprintf_s(buffer, debugStringSize, debugStringSize, "%s %s", tInfo->function, tInfo->name);
+
+						gui->drawRect(r, vec4(0,0,0,1));
+						gui->drawTextBox(rect(r.min+vec2(1,1), r.max-vec2(1,1)), buffer, c);
+
+						index++;
+					}
+
+					if(slot->type == TIMER_TYPE_END) {
+						index--;
+					}
+				}
+
+			}
+		}
+
+		gui->end();
+
+
 
 		globalCommandList = 0;
 	}
 
+
+
+	if(*isRunning == false) {
+		guiSave(&ad->gui, 2, 0);
+		if(globalDebugState->gui) guiSave(globalDebugState->gui, 2, 3);
+	}
 
 }

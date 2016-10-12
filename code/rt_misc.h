@@ -618,7 +618,7 @@ void initMemory(MemoryBlock * memory, void* baseAddress = 0) {
 // #define getDStruct(type, memory) 		(type*)(getDMemory(sizeof(type), memory))
 // #define getDArray(type, count, memory) 	(type*)(getDMemory(sizeof(type) * count, memory))
 
-#define getPStruct(type) 		(type*)(getPMemory(sizeof(type))
+#define getPStruct(type) 		(type*)(getPMemory(sizeof(type)))
 #define getPArray(type, count) 	(type*)(getPMemory(sizeof(type) * count))
 #define getTStruct(type) 		(type*)(getTMemory(sizeof(type)))
 #define getTArray(type, count) 	(type*)(getTMemory(sizeof(type) * count))
@@ -746,38 +746,50 @@ struct TimerInfo {
 
 	const char* file;
 	const char* function;
+	const char* name;
 	int line, line2;
 	uint type;
 };
 
 #define CYCLEBUFFERSIZE 120
 struct TimerSlot {
-	int timerIndex;
-	u64 cycles;
 	uint type;
 	uint threadId;
+	int timerIndex;
+	u64 cycles;
 };
 
 struct Timings {
 	u64 cycles;
 	int hits;
+	u64 cyclesOverHits;
 };
 
+
+struct Gui;
 struct DebugState {
 	bool isInitialised;
 	int timerInfoCount;
-	TimerInfo timerInfos[256];
-	Timings timings[256];
+	TimerInfo timerInfos[32]; // timerInfoCount
 	TimerSlot* timerBuffer;
 	int bufferSize;
 	u64 bufferIndex;
 
+	Timings timings[120][32];
+	int cycleIndex;
+
 	char* stringMemory;
 	int stringMemorySize;
 	int stringMemoryIndex;
+
+	bool frozenGraph;
+	TimerSlot* savedTimerBuffer;
+	u64 savedBufferIndex;
+	Timings savedTimings[32];
+
+	Gui* gui;
 };
 
-// extern const int globalTimingsCount;
 DebugState* globalDebugState;
 
 inline uint getThreadID() {
@@ -797,7 +809,7 @@ void addTimerSlot(int timerIndex, int type) {
 	slot->timerIndex = timerIndex;
 }
 
-void addTimerSlotAndInfo(int timerIndex, int type, const char* file, const char* function, int line) {
+void addTimerSlotAndInfo(int timerIndex, int type, const char* file, const char* function, int line, char* name = "") {
 
 	TimerInfo* timerInfo = globalDebugState->timerInfos + timerIndex;
 
@@ -807,6 +819,7 @@ void addTimerSlotAndInfo(int timerIndex, int type, const char* file, const char*
 		timerInfo->function = function;
 		timerInfo->line = line;
 		timerInfo->type = type;
+		timerInfo->name = name;
 	}
 
 	addTimerSlot(timerIndex, type);
@@ -815,10 +828,10 @@ void addTimerSlotAndInfo(int timerIndex, int type, const char* file, const char*
 struct TimerBlock {
 	int counter;
 
-	TimerBlock(int counter, const char* file, const char* function, int line) {
+	TimerBlock(int counter, const char* file, const char* function, int line, char* name = "") {
 
 		this->counter = counter;
-		addTimerSlotAndInfo(counter, TIMER_TYPE_BEGIN, file, function, line);
+		addTimerSlotAndInfo(counter, TIMER_TYPE_BEGIN, file, function, line, name);
 	}
 
 	~TimerBlock() {
@@ -829,12 +842,21 @@ struct TimerBlock {
 #define TIMER_BLOCK() \
 	TimerBlock timerBlock##__LINE__(__COUNTER__, __FILE__, __FUNCTION__, __LINE__);
 
-#define TIMER_BEGIN(ID) \
+#define TIMER_BLOCK_NAMED(name) \
+	TimerBlock timerBlock##__LINE__(__COUNTER__, __FILE__, __FUNCTION__, __LINE__, name);
+
+#define TIMER_BLOCK_BEGIN(ID) \
 	const int timerCounter##ID = __COUNTER__; \
 	addTimerSlotAndInfo(timerCounter##ID, TIMER_TYPE_BEGIN, __FILE__, __FUNCTION__, __LINE__); 
 
-#define TIMER_END(ID) \
+#define TIMER_BLOCK_BEGIN_NAMED(ID, name) \
+	const int timerCounter##ID = __COUNTER__; \
+	addTimerSlotAndInfo(timerCounter##ID, TIMER_TYPE_BEGIN, __FILE__, __FUNCTION__, __LINE__, name); 
+
+#define TIMER_BLOCK_END(ID) \
 	addTimerSlot(timerCounter##ID, TIMER_TYPE_END);
+
+
 
 
 
