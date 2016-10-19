@@ -1,12 +1,18 @@
+// #pragma optimize( "", off )
+#pragma optimize( "", on )
+
+#include <iacaMarks.h>
+#include <xmmintrin.h>
+#include <emmintrin.h>
+
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
 #include <gl\gl.h>
-#include "glext.h"
+// #include "glext.h"
 
 #include "rt_misc.h"
 #include "rt_math.h"
-
 #include "rt_hotload.h"
 #include "rt_misc_win32.h"
 #include "rt_platformWin32.h"
@@ -15,20 +21,22 @@
 #define STBI_ONLY_PNG
 #define STBI_ONLY_BMP
 #define STBI_ONLY_JPEG
-#include "stb_image.h"
 
+#include "stb_image.h"
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "stb_truetype.h"
 
 #define STB_VOXEL_RENDER_IMPLEMENTATION
 // #define STBVOX_CONFIG_LIGHTING_SIMPLE
 #define STBVOX_CONFIG_FOG_SMOOTHSTEP
-
 // #define STBVOX_CONFIG_MODE 0
 #define STBVOX_CONFIG_MODE 1
 #include "stb_voxel_render.h"
 
 #define USE_SRGB 1
+ 
+// #pragma optimize( "", off )
+// #pragma optimize( "", on )
 
 /*
 //-----------------------------------------
@@ -112,6 +120,8 @@ additionally:
 	using namedBufferSubData vs uniforms for vertices -> 2400 ticks vs 400 ticks
 */
 
+// main 171, radix 70 - 285,70
+
 MemoryBlock* globalMemory;
 ThreadQueue* globalThreadQueue;
 
@@ -123,28 +133,58 @@ DrawCommandList* globalCommandList;
 // char* dataFolder = "...\\data\\";
 // #define GetFilePath(name) ...\\data\\##name
 
-// #define GL_TEXTURE_CUBE_MAP_SEAMLESS      0x884F
-// #define GL_FRAMEBUFFER_SRGB               0x8DB9
-// #define GL_FRAMEBUFFER_SRGB               0x8DB9
-// #define GL_TEXTURE_BUFFER                 0x8C2A
-// #define GL_MAP_WRITE_BIT                  0x0002
-// #define GL_MAP_PERSISTENT_BIT             0x0040
-// #define GL_MAP_COHERENT_BIT               0x0080
-// #define GL_VERTEX_SHADER                  0x8B31
-// #define GL_FRAGMENT_SHADER                0x8B30
-// #define GL_VERTEX_SHADER_BIT              0x00000001
-// #define GL_FRAGMENT_SHADER_BIT            0x00000002
-// #define GL_DEBUG_OUTPUT                   0x92E0
-// #define WGL_CONTEXT_FLAGS_ARB             0x2094
-// #define WGL_CONTEXT_DEBUG_BIT_ARB         0x0001
-// #define WGL_CONTEXT_MAJOR_VERSION_ARB     0x2091
-// #define WGL_CONTEXT_MINOR_VERSION_ARB     0x2092
-// #define GL_MAJOR_VERSION                  0x821B
-// #define GL_MINOR_VERSION                  0x821C
-// #define GL_RGB32F                         0x8815
-// #define GL_RGBA8I                         0x8D8E
-// #define GL_RGBA8UI                        0x8D7C
-// #define GL_R8                             0x8229
+#define GL_TEXTURE_CUBE_MAP_SEAMLESS      0x884F
+#define GL_FRAMEBUFFER_SRGB               0x8DB9
+#define GL_FRAMEBUFFER_SRGB               0x8DB9
+#define GL_TEXTURE_BUFFER                 0x8C2A
+#define GL_MAP_WRITE_BIT                  0x0002
+#define GL_MAP_PERSISTENT_BIT             0x0040
+#define GL_MAP_COHERENT_BIT               0x0080
+#define GL_VERTEX_SHADER                  0x8B31
+#define GL_FRAGMENT_SHADER                0x8B30
+#define GL_VERTEX_SHADER_BIT              0x00000001
+#define GL_FRAGMENT_SHADER_BIT            0x00000002
+#define GL_DEBUG_OUTPUT                   0x92E0
+#define WGL_CONTEXT_FLAGS_ARB             0x2094
+#define WGL_CONTEXT_DEBUG_BIT_ARB         0x0001
+#define WGL_CONTEXT_MAJOR_VERSION_ARB     0x2091
+#define WGL_CONTEXT_MINOR_VERSION_ARB     0x2092
+#define GL_MAJOR_VERSION                  0x821B
+#define GL_MINOR_VERSION                  0x821C
+#define GL_RGB32F                         0x8815
+#define GL_RGBA8I                         0x8D8E
+#define GL_RGBA8UI                        0x8D7C
+#define GL_R8                             0x8229
+#define GL_ARRAY_BUFFER                   0x8892
+
+#define GL_CLAMP_TO_EDGE                  0x812F
+#define GL_TEXTURE_MAX_ANISOTROPY_EXT     0x84FE
+#define GL_TEXTURE_WRAP_R                 0x8072
+#define GL_STATIC_DRAW                    0x88E4
+#define GL_SRGB8_ALPHA8                   0x8C43
+#define GL_TEXTURE_CUBE_MAP_ARRAY         0x9009
+#define GL_STREAM_DRAW                    0x88E0
+#define GL_TEXTURE_2D_ARRAY               0x8C1A
+#define GL_FRAMEBUFFER                    0x8D40
+#define GL_COLOR_ATTACHMENT0              0x8CE0
+#define GL_RENDERBUFFER                   0x8D41
+#define GL_DEPTH_STENCIL                  0x84F9
+#define GL_DEPTH_STENCIL_ATTACHMENT       0x821A
+#define GL_DEPTH24_STENCIL8               0x88F0
+#define GL_DEBUG_OUTPUT_SYNCHRONOUS       0x8242
+#define GL_DEBUG_SEVERITY_HIGH            0x9146
+#define GL_DEBUG_SEVERITY_MEDIUM          0x9147
+#define GL_DEBUG_SEVERITY_LOW             0x9148
+#define GL_DEBUG_SEVERITY_NOTIFICATION    0x826B
+#define GL_MULTISAMPLE                    0x809D
+#define GL_FUNC_ADD                       0x8006
+#define GL_CLIP_DISTANCE0                 0x3000
+#define GL_CLIP_DISTANCE1                 0x3001
+#define GL_FUNC_ADD                       0x8006
+#define GL_MAX                            0x8008
+typedef char GLchar;
+typedef ptrdiff_t GLsizeiptr;
+typedef ptrdiff_t GLintptr;
 
 
 #define makeGLFunction(returnType, name, ...) \
@@ -235,8 +275,6 @@ DrawCommandList* globalCommandList;
 	GLOP(GLubyte*, GetStringi, GLenum name, GLuint index) \
 	GLOP(void, DrawArraysInstanced, GLenum mode, GLint first, GLsizei count, GLsizei primcount) \
 	GLOP(void, VertexAttribDivisor, GLuint index, GLuint divisor)
-
-
 
 
 
@@ -2497,7 +2535,7 @@ int stateSwitch(int state) {
 }
 
 void executeCommandList(DrawCommandList* list) {
-	TIMER_BLOCK();
+	// TIMER_BLOCK();
 
 	char* drawListIndex = (char*)list->data;
 	for(int i = 0; i < list->count; i++) {
@@ -4199,6 +4237,8 @@ struct CmdList {
 
 
 
+#pragma optimize( "", off )
+// #pragma optimize( "", on )
 
 extern "C" APPMAINFUNCTION(appMain) {
 	globalMemory = memoryBlock;
@@ -4228,6 +4268,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 	if(init) {
+
 		getPMemory(sizeof(AppData));
 		*ad = {};
 
@@ -4346,6 +4387,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		ad->entityList.size = 1000;
 		ad->entityList.e = (Entity*)getPMemory(sizeof(Entity)*ad->entityList.size);
+		for(int i = 0; i < ad->entityList.size; i++) ad->entityList.e[i].init = false;
 
 		Vec3 startDir = normVec3(vec3(1,0,0));
 
@@ -4459,7 +4501,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		ad->samplers[0] = createSampler(16.0f, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
 
-
 		// voxel textures
 		const int mipMapCount = 5;
 		char* p = getTString(34);
@@ -4469,10 +4510,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 		char* fullPath = getTString(234);
 		if(USE_SRGB) glTextureStorage3D(ad->voxelTextures[0], mipMapCount, GL_SRGB8_ALPHA8, 32, 32, BX_Size);
 		else glTextureStorage3D(ad->voxelTextures[0], mipMapCount, GL_RGBA8, 32, 32, BX_Size);
+
 		for(int layerIndex = 0; layerIndex < BX_Size; layerIndex++) {
 			int x,y,n;
 			unsigned char* stbData = stbi_load(textureFilePaths[layerIndex], &x, &y, &n, 4);
-			
+
 			if(layerIndex == BX_Water) {
 				uint* data = (uint*)stbData;
 				for(int x = 0; x < 32; x++) {
@@ -4490,7 +4532,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 			stbi_image_free(stbData);
 		}
 		glGenerateTextureMipmap(ad->voxelTextures[0]);
-
 
 
 		float alphaCoverage[mipMapCount] = {};
@@ -4548,18 +4589,20 @@ extern "C" APPMAINFUNCTION(appMain) {
 		GLenum result = glCheckNamedFramebufferStatus(ad->frameBuffers[0], GL_FRAMEBUFFER);
 
 
-		// 
-
-		// glCreateCommandListsNV(1,0);
-
 		return; // window operations only work after first frame?
 	}
 
+
+
 	if(second) {
-		setWindowProperties(windowHandle, wSettings->res.w, wSettings->res.h, -1920, 0);
+		// setWindowProperties(windowHandle, wSettings->res.w, wSettings->res.h, -1920, 0);
 		// setWindowProperties(windowHandle, wSettings->res.w, wSettings->res.h, 0, 0);
 		setWindowStyle(windowHandle, wSettings->style);
-		setWindowMode(windowHandle, wSettings, WINDOW_MODE_FULLBORDERLESS);
+		// setWindowMode(windowHandle, wSettings, WINDOW_MODE_FULLBORDERLESS);
+
+		setWindowProperties(windowHandle, wSettings->res.w, wSettings->res.h, 300, 300);
+		setWindowMode(windowHandle, wSettings, WINDOW_MODE_WINDOWED);
+
 
 		ad->updateFrameBuffers = true;
 	}
@@ -4606,7 +4649,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 	{
-		TIMER_BLOCK_NAMED("Input");
+		// TIMER_BLOCK_NAMED("Input");
 		updateInput(&ad->input, isRunning, windowHandle);
 	}
 	
@@ -4815,7 +4858,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}	
 
 	// @update entities
-	TIMER_BLOCK_BEGIN_NAMED(entities, "Upd Entities");
+	// TIMER_BLOCK_BEGIN_NAMED(entities, "Upd Entities");
 	for(int i = 0; i < ad->entityList.size; i++) {
 		Entity* e = &ad->entityList.e[i];
 		if(!e->init) continue;
@@ -5233,7 +5276,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			};
 		}
 	}
-	TIMER_BLOCK_END(entities);
+	// TIMER_BLOCK_END(entities);
 
 	if(ad->playerMode) {
 		ad->activeCam = getCamData(ad->player->pos, ad->player->rot, ad->player->camOff);
@@ -5543,7 +5586,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	glDisable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 
 
-	#if 1
+	// #if 1
 
 
 
@@ -5631,7 +5674,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 	#endif
 
-	TIMER_BLOCK_BEGIN_NAMED(world, "Upd World");
+	// TIMER_BLOCK_BEGIN_NAMED(world, "Upd World");
 
 	Vec2i* coordList = (Vec2i*)getTMemory(sizeof(Vec2i)*2000);
 	int coordListSize = 0;
@@ -5767,10 +5810,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 		assert(sortList[i].key <= sortList[i+1].key);
 	}
 
-	TIMER_BLOCK_END(world);
+	// TIMER_BLOCK_END(world);
 
 	{
-		TIMER_BLOCK_NAMED("D World");
+		// TIMER_BLOCK_NAMED("D World");
 		// draw world without water
 		{
 			for(int i = 0; i < sortListSize; i++) {
@@ -6405,8 +6448,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 	}
 
-	#endif 
-
 	bindShader(SHADER_CUBE);
 
 	executeCommandList(&ad->commandList3d);
@@ -6449,7 +6490,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[4]);
 	executeCommandList(&ad->commandListGui);
-	executeCommandList(&ad->commandListDebug);
+	{
+		TIMER_BLOCK_NAMED("asdf");
+		executeCommandList(&ad->commandListDebug);
+	}
 	glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[3]);
 
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -6800,7 +6844,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 				_snprintf_s(buffer, debugStringSize, debugStringSize, "%s%%", percentString);
 				gui->label(buffer,2);
 
-				// gui->pre();
 				gui->empty();
 				Rect r = gui->getCurrentRegion();
 				float rheight = gui->getDefaultHeight();
@@ -6820,6 +6863,30 @@ extern "C" APPMAINFUNCTION(appMain) {
 				}
 			}
 		}
+
+		// gui->button("asddsf");
+
+		// float xOffset = 0;
+		// for(int statIndex = 0; statIndex < bufferIndex; statIndex++) {
+		// 	Statistic* stat = statistics + ds->cycleIndex;
+		// 	u64 coh = ds->timings[statIndex][ds->cycleIndex].cyclesOverHits;
+
+		// 	int debugStringSize = 30;
+		// 	char* buffer = &ds->stringMemory[ds->stringMemoryIndex]; ds->stringMemoryIndex += debugStringSize+1;
+		// 	_snprintf_s(buffer, debugStringSize, debugStringSize, "%I64uc ", coh);
+		// 	gui->label(buffer,0);
+
+		// 	// float height = mapRangeClamp(coh, stat->min, stat->max, 1, rheight);
+		// 	// Vec2 rmin = r.min + vec2(xOffset,-2);
+		// 	// float colorOffset = mapRange(coh, stat->min, stat->max, 0, 1);
+		// 	// dcRect(rectMinDim(rmin, vec2(barWidth, height)), vec4(colorOffset,0,1-colorOffset,1));
+		// 	// dcRect(rectMinDim(rmin, vec2(barWidth, height)), vec4(colorOffset,1-colorOffset,0,1));
+
+		// 	// xOffset += barWidth;
+		// }
+
+
+
 
 
 		// save timer buffer
@@ -6914,6 +6981,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 						float xoff = mapRange(slot->cycles - baseCycleCount, startCycleCount, endCycleCount, orthoLeft, orthoRight);
 						float barWidth = mapRange(t->cycles, startCycleCount, endCycleCount, 0, graphWidth*zoom);
 						Vec2 pos = startPos + vec2(xoff,index*-fontHeight);
+						// Vec2 pos = startPos + vec2(xoff,0);
 						
 						Rect r = rect(pos, pos + vec2(barWidth,fontHeight));
 						float cOff = slot->timerIndex/(float)ds->timerInfoCount;
@@ -6939,8 +7007,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		gui->end();
 
-
-
 		globalCommandList = 0;
 	}
 
@@ -6952,3 +7018,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 }
+
+// #pragma optimize( "", off)
+#pragma optimize( "", on ) 

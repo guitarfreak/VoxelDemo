@@ -473,7 +473,7 @@ typedef ptrdiff_t GLintptr;
 #define GL_CURRENT_QUERY                  0x8865
 #define GL_QUERY_RESULT                   0x8866
 #define GL_QUERY_RESULT_AVAILABLE         0x8867
-#define GL_ARRAY_BUFFER                   0x8892
+#define GL_CLAMP_TO_EDGE                   0x8892
 #define GL_ELEMENT_ARRAY_BUFFER           0x8893
 #define GL_ARRAY_BUFFER_BINDING           0x8894
 #define GL_ELEMENT_ARRAY_BUFFER_BINDING   0x8895

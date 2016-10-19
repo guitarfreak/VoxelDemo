@@ -1,5 +1,5 @@
 #pragma once
-#include <Shlwapi.h> // PathFileExists()
+// #include <Shlwapi.h> // PathFileExists()
 
 void* mallocWithBaseAddress(void* baseAddress, int sizeInBytes) {
     void* mem = VirtualAlloc(baseAddress, (size_t)sizeInBytes, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);

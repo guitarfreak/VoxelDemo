@@ -196,9 +196,9 @@ inline bool pointIsLeftOfLine(float a[2], float b[2], float c[2]) {
 	return ((b[0] - a[0])*(c[1] - a[1]) - (b[1] - a[1])*(c[0] - a[0])) > 0;
 }
 
-// inline int round(int i) {
-// 	return (int)floor(i + 0.5f);
-// }
+inline int round(int i) {
+	return (int)floor(i + 0.5f);
+}
 
 inline int roundInt(float i) {
 	return (int)floor(i + 0.5f);
@@ -896,11 +896,12 @@ union Vec3 {
 
 	struct {
 		Vec2 xy;
-		float z;
+		// float z;
 	};
 
 	struct {
-		float x;
+		float nothing;
+		// float x;
 		Vec2 yz;
 	};
 
@@ -914,11 +915,12 @@ union Vec3i {
 
 	struct {
 		Vec2i xy;
-		int z;
+		// int z;
 	};
 
 	struct {
-		int x;
+		int nothing;
+		// int x;
 		Vec2i yz;
 	};
 
@@ -932,7 +934,7 @@ union Vec4 {
 
 	struct {
 		Vec3 xyz;
-		float w;
+		// float w;
 	};
 
 	struct {
@@ -2118,7 +2120,8 @@ union Quat {
 	};
 
 	struct {
-		float w;
+		float nothing;
+		// float w;
 		Vec3 xyz;
 	};
 
@@ -2728,9 +2731,9 @@ void mergeSort(int* list, int size) {
 	}
 }
 
+
 // sorts in bytes
 void radixSort(int* list, int size) {
-
 	int* buffer = getTArray(int, size);
 	int stageCount = 4;
 
@@ -2738,10 +2741,11 @@ void radixSort(int* list, int size) {
 		int* src = stage%2 == 0 ? list : buffer;
 		int* dst = stage%2 == 0 ? buffer : list;
 		int bucket[257] = {};
+		int offset = 8*stage;
 
 		// count 
 		for(int i = 0; i < size; i++) {
-			uchar byte = src[i] >> (8*stage);
+			uchar byte = src[i] >> offset;
 			bucket[byte+1]++;
 		}
 
@@ -2751,12 +2755,57 @@ void radixSort(int* list, int size) {
 		}
 
 		for(int i = 0; i < size; i++) {
-			uchar byte = src[i] >> (8*stage);
+			uchar byte = src[i] >> offset;
 			dst[bucket[byte]] = src[i];
 			bucket[byte]++;
 		}
 	}
 }
+
+void radixSortSimd(int* list, int size) {
+	int* buffer = getTArray(int, size);
+	int stageCount = 4;
+
+	for(int stage = 0; stage < stageCount; stage++) {
+		int* src = stage%2 == 0 ? list : buffer;
+		int* dst = stage%2 == 0 ? buffer : list;
+		int bucket[257] = {};
+		int offset = 8*stage;
+
+		__m128i stageS = _mm_set1_epi32(stage*8);
+		__m128i one = _mm_set1_epi32(1);
+
+		if(size % 4 != 0) {
+			int rest = size % 4;
+			for(int i = 0; i < rest; i++) {
+				uchar byte = src[i] >> offset;
+				bucket[byte+1]++;
+			}
+		}
+
+		for(int i = 0; i < size; i += 4) {
+			__m128i byte = _mm_set_epi32(src[i], src[i+1], src[i+2], src[i+3]);
+			byte = _mm_srl_epi32(byte, stageS);
+			byte = _mm_add_epi32(byte, one);
+			bucket[byte.m128i_u8[0]] = bucket[byte.m128i_u8[0]] + 1;
+			bucket[byte.m128i_u8[1]] = bucket[byte.m128i_u8[1]] + 1;
+			bucket[byte.m128i_u8[2]] = bucket[byte.m128i_u8[2]] + 1;
+			bucket[byte.m128i_u8[3]] = bucket[byte.m128i_u8[3]] + 1;
+		}
+
+		// turn sizes into offsets
+		for(int i = 0; i < 256-1; i++) {
+			bucket[i+1] += bucket[i];
+		}
+
+		for(int i = 0; i < size; i++) {
+			uchar byte = src[i] >> offset;
+			dst[bucket[byte]] = src[i];
+			bucket[byte]++;
+		}
+	}
+}
+
 
 struct SortPair {
 	float key;
