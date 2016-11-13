@@ -126,39 +126,36 @@ void systemDataInit(SystemData* sd, HINSTANCE instance) {
 	sd->instance = instance;
 }
 
-// LRESULT CALLBACK mainWindowCallBack(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
-//     switch(message) {
-//         case WM_DESTROY: {
-//             PostMessage(window, message, wParam, lParam);
-//         } break;
+LRESULT CALLBACK mainWindowCallBack(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
+    switch(message) {
+        case WM_DESTROY: {
+            PostMessage(window, message, wParam, lParam);
+        } break;
 
-//         case WM_CLOSE: {
-//             PostMessage(window, message, wParam, lParam);
-//         } break;
+        case WM_CLOSE: {
+            PostMessage(window, message, wParam, lParam);
+        } break;
 
-//         case WM_QUIT: {
-//             PostMessage(window, message, wParam, lParam);
-//         } break;
+        case WM_QUIT: {
+            PostMessage(window, message, wParam, lParam);
+        } break;
 
-//         default: {
-//             return DefWindowProc(window, message, wParam, lParam);
-//         } break;
-//     }
+        default: {
+            return DefWindowProc(window, message, wParam, lParam);
+        } break;
+    }
 
-//     return 1;
-// }
-
-WNDPROC globalMainWindowCallBack;
+    return 1;
+}
 
 void initSystem(SystemData* systemData, WindowsData wData, uint style, int x, int y, int w, int h) {
 	systemData->windowsData = wData;
 
     WNDCLASS windowClass = {};
     windowClass.style = CS_OWNDC|CS_HREDRAW|CS_VREDRAW;
-    // windowClass.lpfnWndProc = mainWindowCallBack;
-    windowClass.lpfnWndProc = globalMainWindowCallBack;
+    windowClass.lpfnWndProc = mainWindowCallBack;
     windowClass.hInstance = systemData->instance;
-    windowClass.lpszClassName = "CDownloaderClass";
+    windowClass.lpszClassName = "App";
     windowClass.hCursor = LoadCursor(0, IDC_ARROW);
 
     if(!RegisterClass(&windowClass)) {
@@ -388,12 +385,12 @@ void initInput(Input* input) {
 }
 
 // MetaPlatformFunction();
-const char* getClipboard(MemoryBlock* memory) {
-    BOOL result = OpenClipboard(0);
-    HANDLE clipBoardData = GetClipboardData(CF_TEXT);
+// const char* getClipboard(MemoryBlock* memory) {
+//     BOOL result = OpenClipboard(0);
+//     HANDLE clipBoardData = GetClipboardData(CF_TEXT);
 
-    return (char*)clipBoardData;
-}
+//     return (char*)clipBoardData;
+// }
 
 // MetaPlatformFunction();
 void setClipboard(char* text) {

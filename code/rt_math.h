@@ -2591,16 +2591,17 @@ int blueNoise(Rect region, float radius, Vec2** noiseSamples, int numOfSamples =
 	int sampleMax = ((regionDim.w+1)*(regionDim.h+1)) / cs;
 
 	Vec2* samples = *noiseSamples;
-	samples = getTArray(Vec2, sampleMax);
+	samples = (Vec2*)malloc(sizeof(Vec2) * sampleMax);
 	*noiseSamples = samples;
 	int testCount = 64;
 	int gridW = regionDim.w/cs + 1;
 	int gridH = regionDim.h/cs + 1;
 	int gridSize = (gridH+1)*(gridW+1);
-	int* grid = getTArray(int, gridSize);
+	int* grid = (int*)malloc(sizeof(int)*gridSize);
 	memset(grid, -1, gridSize*sizeof(int));
 
-	int* activeList = getTArray(int, max(gridH, gridW));
+	int* activeList = (int*)malloc(sizeof(int) * max(gridH, gridW));
+	int* activeListPointer = activeList;
 	int sampleCount = 1;
 	samples[0] = vec2(randomInt(0, regionDim.w), randomInt(0, regionDim.h));
 	activeList[0] = 0;
@@ -2630,6 +2631,10 @@ int blueNoise(Rect region, float radius, Vec2** noiseSamples, int numOfSamples =
 			for(int y = sampleRegion.min.y; y < (int)sampleRegion.max.y+1; ++y) {
 				for(int x = sampleRegion.min.x; x < (int)sampleRegion.max.x+1; ++x) {
 					int index = grid[y*gridW+x];
+					// bug
+					if(x < 0 || y < 0) {
+						continue;
+					}
 					if(index > -1) {
 						Vec2 s = samples[index];
 						float distance = lenVec2(s - newSample);
@@ -2657,6 +2662,9 @@ int blueNoise(Rect region, float radius, Vec2** noiseSamples, int numOfSamples =
 	}
 
 	for(int i = 0; i < sampleCount; ++i) samples[i] += region.min;
+
+	free(grid);
+	free(activeListPointer);
 
 	return sampleCount;
 }
@@ -2689,8 +2697,8 @@ void bubbleSort(int* list, int size) {
 }
 
 void mergeSort(int* list, int size) {
-
-	int* buffer = getTArray(int, size);
+	// int* buffer = getTArray(int, size);
+	int* buffer = (int*)malloc(sizeof(int)*size);
 	int stage = 0;
 
 	for(;;) {
@@ -2729,12 +2737,15 @@ void mergeSort(int* list, int size) {
 			}
 		}
 	}
+
+	free(buffer);
 }
 
 
 // sorts in bytes
 void radixSort(int* list, int size) {
-	int* buffer = getTArray(int, size);
+	// int* buffer = getTArray(int, size);
+	int* buffer = (int*)malloc(sizeof(int)*size);
 	int stageCount = 4;
 
 	for(int stage = 0; stage < stageCount; stage++) {
@@ -2760,10 +2771,14 @@ void radixSort(int* list, int size) {
 			bucket[byte]++;
 		}
 	}
+
+	free(buffer);
 }
 
 void radixSortSimd(int* list, int size) {
-	int* buffer = getTArray(int, size);
+	// int* buffer = getTArray(int, size);
+	int* buffer = (int*)malloc(sizeof(int)*size);
+
 	int stageCount = 4;
 
 	for(int stage = 0; stage < stageCount; stage++) {
@@ -2804,6 +2819,8 @@ void radixSortSimd(int* list, int size) {
 			bucket[byte]++;
 		}
 	}
+
+	free(buffer);
 }
 
 
@@ -2813,8 +2830,9 @@ struct SortPair {
 };
 
 void radixSortPair(SortPair* list, int size) {
+	// SortPair* buffer = getTArray(SortPair, size);
+	SortPair* buffer = (SortPair*)malloc(sizeof(SortPair)*size);
 
-	SortPair* buffer = getTArray(SortPair, size);
 	int stageCount = 4;
 
 	for(int stage = 0; stage < stageCount; stage++) {
@@ -2839,4 +2857,6 @@ void radixSortPair(SortPair* list, int size) {
 			bucket[byte]++;
 		}
 	}
+
+	free(buffer);
 }

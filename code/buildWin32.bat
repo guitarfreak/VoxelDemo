@@ -52,7 +52,7 @@ rem clang-cl /?
 
 del main_*.pdb > NUL 2> NUL
 echo. 2>lock.tmp
-cl %COMPILER_OPTIONS% ..\code\app.cpp -LD %INCLUDES% -link -incremental:no -opt:ref -PDB:main_%random%.pdb -EXPORT:appMain %LINKER_INCLUDES% %LINKER_LIBS%
+cl %COMPILER_OPTIONS% ..\code\app.cpp -LD %INCLUDES% -link -incremental:no -opt:ref -PDB:main_%random%.pdb -EXPORT:appMain -EXPORT:postMain %LINKER_INCLUDES% %LINKER_LIBS%
 rem cl %COMPILER_OPTIONS% ..\code\app.cpp -LD %INCLUDES% -link -PDB:main_%random%.pdb -EXPORT:appMain %LINKER_INCLUDES% %LINKER_LIBS%
 
 del lock.tmp

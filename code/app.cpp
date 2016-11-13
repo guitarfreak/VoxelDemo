@@ -122,13 +122,82 @@ additionally:
 
 // main 171, radix 70 - 285,70
 
-MemoryBlock* globalMemory;
 ThreadQueue* globalThreadQueue;
 
 struct GraphicsState;
 struct DrawCommandList;
 GraphicsState* globalGraphicsState;
 DrawCommandList* globalCommandList;
+struct MemoryBlock;
+MemoryBlock* globalMemory;
+
+struct MemoryBlock {
+	ExtendibleMemoryArray* pMemory;
+	MemoryArray* tMemory;
+	ExtendibleBucketMemory* dMemory;
+
+	MemoryArray* tMemoryDebug;
+};
+
+#define getPStruct(type) 		(type*)(getPMemory(sizeof(type)))
+#define getPArray(type, count) 	(type*)(getPMemory(sizeof(type) * count))
+#define getTStruct(type) 		(type*)(getTMemory(sizeof(type)))
+#define getTArray(type, count) 	(type*)(getTMemory(sizeof(type) * count))
+#define getTString(size) 		(char*)(getTMemory(size)) 
+#define getDStruct(type) 		(type*)(getDMemory(sizeof(type)))
+#define getDArray(type, count) 	(type*)(getDMemory(sizeof(type) * count))
+
+void *getPMemory(int size, MemoryBlock * memory = 0) {
+	if(memory == 0) memory = globalMemory;
+
+	void* location = getExtendibleMemoryArray(size, memory->pMemory);
+    return location;
+}
+
+void * getTMemory(int size, MemoryBlock * memory = 0) {
+	if(memory == 0) memory = globalMemory;
+
+	void* location = getMemoryArray(size, memory->tMemory);
+    return location;
+}
+
+void clearTMemory(MemoryBlock * memory = 0) {
+	if(memory == 0) memory = globalMemory;
+
+	clearMemoryArray(memory->tMemory);
+
+	// zeroMemory(memory->temporary, memory->temporarySize);
+}
+
+// void pushMarkerTMemory(MemoryBlock * memory = 0)  {
+    // if(!memory) memory = globalMemory;
+    // memory->markerStack[memory->markerStackIndex] = memory->temporaryIndex;
+    // memory->markerStackIndex++;
+// }
+
+// void popMarkerTMemory(MemoryBlock * memory = 0)  {
+    // if(!memory) memory = globalMemory;
+    // int size = memory->temporaryIndex - memory->markerStack[memory->markerStackIndex];
+    // memory->markerStackIndex--;
+    // freeTMemory(size, memory);
+// }
+
+void * getDMemory(int size, MemoryBlock * memory = 0) {
+	if(memory == 0) memory = globalMemory;
+
+	void* location = getExtendibleBucketMemory(memory->dMemory);
+    return location;
+}
+
+void freeDMemory(void* address, MemoryBlock * memory = 0) {
+	if(memory == 0) memory = globalMemory;
+
+	freeExtendibleBucketMemory(address, memory->dMemory);
+}
+
+
+
+
 
 // char* dataFolder = "...\\data\\";
 // #define GetFilePath(name) ...\\data\\##name
@@ -4241,23 +4310,41 @@ struct CmdList {
 // #pragma optimize( "", on )
 
 extern "C" APPMAINFUNCTION(appMain) {
-	globalMemory = memoryBlock;
-	AppData* ad = (AppData*)memoryBlock->permanent;
+	if(init) {
+		SYSTEM_INFO info;
+		GetSystemInfo(&info);
+		
+		ExtendibleMemoryArray* pMemory = &appMemory->extendibleMemoryArrays[appMemory->extendibleMemoryArrayCount++];
+		initExtendibleMemoryArray(pMemory, megaBytes(512), info.dwAllocationGranularity, (LPVOID)gigaBytes(5));
+
+		MemoryArray* tMemory = &appMemory->memoryArrays[appMemory->memoryArrayCount++];
+		initMemoryArray(tMemory, megaBytes(30), (LPVOID)gigaBytes(4));
+
+		ExtendibleBucketMemory* dMemory = &appMemory->extendibleBucketMemories[appMemory->extendibleBucketMemoryCount++];
+		initExtendibleBucketMemory(dMemory, megaBytes(1), megaBytes(512), info.dwAllocationGranularity, (LPVOID)gigaBytes(30));
+
+		MemoryArray* tMemoryDebug = &appMemory->memoryArrays[appMemory->memoryArrayCount++];
+		initMemoryArray(tMemoryDebug, megaBytes(30), (LPVOID)(gigaBytes(4) + megaBytes(512)));
+	}
+
+	MemoryBlock gMemory = {};
+	gMemory.pMemory = &appMemory->extendibleMemoryArrays[0];
+	gMemory.tMemory = &appMemory->memoryArrays[0];
+	gMemory.dMemory = &appMemory->extendibleBucketMemories[0];
+	gMemory.tMemoryDebug = &appMemory->memoryArrays[1];
+	globalMemory = &gMemory;
+
+	// globalMemory = memoryBlock;
+	// AppData* ad = (AppData*)memoryBlock->permanent;
+	AppData* ad = (AppData*)globalMemory->pMemory->arrays[0].data;
 	Input* input = &ad->input;
 	SystemData* systemData = &ad->systemData;
 	HWND windowHandle = systemData->windowHandle;
 	WindowSettings* wSettings = &ad->wSettings;
 
-	// globalThreadQueue = &ad->highQueue;
 	globalThreadQueue = threadQueue;
 	globalGraphicsState = &ad->graphicsState;
-
 	threadData = ad->threadData;
-
-	// HWND window, UINT message, WPARAM wParam, LPARAM lParam
-	// mainWindowCallBack(0,0,0,0);
-	globalMainWindowCallBack = mainWindowCallBack;
-
 	globalDebugState = &ad->debugState;
 
 	treeNoise = ad->treeNoise;
@@ -4268,7 +4355,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 	if(init) {
-
 		getPMemory(sizeof(AppData));
 		*ad = {};
 
@@ -4374,6 +4460,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		Vec2* noiseSamples;
 		// int noiseSamplesSize = blueNoise(bounds, 5, &noiseSamples);
 		int noiseSamplesSize = blueNoise(bounds, treeRadius, &noiseSamples);
+		// int noiseSamplesSize = 10;
 		for(int i = 0; i < noiseSamplesSize; i++) {
 			Vec2 s = noiseSamples[i];
 			// Vec2i p = vec2i((int)(s.x/gridCell) * gridCell, (int)(s.y/gridCell) * gridCell);
@@ -4381,6 +4468,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			Vec2i index = vec2i(s);
 			ad->treeNoise[index.y*VOXEL_X + index.x] = 1;
 		}
+		free(noiseSamples);
 
 		ad->bombFireInterval = 0.1f;
 		ad->bombButtonDown = false;
@@ -4588,7 +4676,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glCreateTextures(GL_TEXTURE_2D, 6, ad->frameBufferTextures);
 		GLenum result = glCheckNamedFramebufferStatus(ad->frameBuffers[0], GL_FRAMEBUFFER);
 
-
 		return; // window operations only work after first frame?
 	}
 
@@ -4609,6 +4696,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	if(reload) {
 		loadFunctions();
+		SetWindowLongPtr(systemData->windowHandle, GWLP_WNDPROC, (LONG_PTR)mainWindowCallBack);
 	}
 
 	TIMER_BLOCK_BEGIN(Main)
@@ -5451,8 +5539,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 			}
 		}
 	}
-
-
 
 	// opengl init
 
@@ -7017,6 +7103,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 		if(globalDebugState->gui) guiSave(globalDebugState->gui, 2, 3);
 	}
 
+}
+
+POSTMAINFUNCTION(postMain) {
+	
 }
 
 // #pragma optimize( "", off)

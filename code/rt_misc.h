@@ -8,7 +8,8 @@
 typedef unsigned int uint;
 typedef unsigned char uchar;
 typedef uint64_t u64;
-typedef double r64;
+typedef int64_t i64;
+typedef double f64;
 
 void assert(bool check) {
 	if(!check) {
@@ -526,15 +527,15 @@ int timeToSeconds(int year = 0, int month = 0, int day = 0, int hour = 0, int mi
 		hour * 3600 + minute * 60 + seconds);
 };
 
-inline int terraBytes(int count)
+inline i64 terraBytes(i64 count)
 {
-	int result = count * 1024 * 1024 * 1024 * 1024;
+	i64 result = count * 1024 * 1024 * 1024 * 1024;
 	return result;
 }
 
-inline int gigaBytes(int count)
+inline i64 gigaBytes(i64 count)
 {
-	int result = count * 1024 * 1024 * 1024;
+	i64 result = count * 1024 * 1024 * 1024;
 	return result;
 }
 
@@ -554,167 +555,254 @@ inline int kiloBytes(int count)
 //
 //
 
-struct MemoryBlock {
-    int totalSize;
+inline int roundDown(int i, int size) {
+	int val = (i/size) * size;
+	return val;
+}
 
-    void * permanent;
-    int permanentIndex;
-    int permanentSize;
+inline int roundUp(int i, int size) {
+	int val = roundDown(i, size);
+	if(val != 0) val += size;
+	return val;	
+}
 
-    void * temporary;
-    int temporaryIndex;
-    int temporarySize;
-    int markerStack[32];
-    int markerStackIndex;
 
-    void * dynamic;
-    int dynamicSize;
-    char * chunks;
-    int chunkCount;
-    int chunkSize;
+struct MemoryArray {
+	char * data;
+	int index;
+	int size;
 };
 
-extern MemoryBlock* globalMemory;
+void initMemoryArray(MemoryArray * memory, int slotSize, void* baseAddress = 0) {
+    if(baseAddress) {
+	    memory->data = (char*)VirtualAlloc(baseAddress, slotSize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+	    int errorCode = GetLastError();
+    } else memory->data = (char*)malloc(slotSize);
 
-void initMemorySizes(MemoryBlock* memory, int permanentSize, int temporarySize, int dynamicSize, int chunkSize) {
+    assert(memory->data);
 
-	float chunkCount = (float)dynamicSize / chunkSize;
-	if(chunkCount != (int)chunkCount) chunkCount = (int)chunkCount + 1;
-	dynamicSize = chunkCount*chunkSize;
-	
-	memory->permanentSize = permanentSize;
-	memory->temporarySize = temporarySize;
-	memory->dynamicSize = dynamicSize;
-	memory->chunkSize = chunkSize;
-	memory->totalSize = permanentSize + temporarySize + dynamicSize + chunkCount;
+    memory->index = 0;
+    memory->size = slotSize;
 }
 
-void initMemory(MemoryBlock * memory, void* baseAddress = 0) {
-    void * mem;
-    if(baseAddress) mem = baseAddress;
-    else mem = malloc(memory->totalSize);
+MemoryArray* globalMemoryArray;
 
-    assert(mem);
+void* getMemoryArray(int size, MemoryArray * memory = 0) {
+    if(!memory) memory = globalMemoryArray;
+    assert(memory->index + size <= memory->size);
 
-    memory->permanent = mem;
-    memory->permanentIndex = 0;
+    void * location = memory->data + memory->index;
+    memory->index += size;
 
-    memory->temporary = (char*)mem + memory->permanentSize;
-    memory->temporaryIndex = 0;
-    memory->markerStackIndex = 0;
-
-    memory->dynamic = (char*)mem + memory->permanentSize + memory->temporarySize;
-    memory->chunks = (char*)mem + memory->permanentSize + memory->temporarySize + memory->dynamicSize;
-    memory->chunkCount = memory->chunkCount;
-
-    // zeroMemory(memory->dynamic, memory->dynamicSize + memory->chunkCount);
-}
-
-// #define getPStruct(type, memory) 		(type*)(getPMemory(sizeof(type), memory)
-// #define getPArray(type, count, memory) 	(type*)(getPMemory(sizeof(type) * count, memory))
-// #define getTStruct(type, memory) 		(type*)(getTMemory(sizeof(type), memory))
-// #define getTArray(type, count, memory) 	(type*)(getTMemory(sizeof(type) * count, memory))
-// #define getTString(size, memory) 		(char*)(getTMemory(size, memory)) 
-// #define getDStruct(type, memory) 		(type*)(getDMemory(sizeof(type), memory))
-// #define getDArray(type, count, memory) 	(type*)(getDMemory(sizeof(type) * count, memory))
-
-#define getPStruct(type) 		(type*)(getPMemory(sizeof(type)))
-#define getPArray(type, count) 	(type*)(getPMemory(sizeof(type) * count))
-#define getTStruct(type) 		(type*)(getTMemory(sizeof(type)))
-#define getTArray(type, count) 	(type*)(getTMemory(sizeof(type) * count))
-#define getTString(size) 		(char*)(getTMemory(size)) 
-#define getDStruct(type) 		(type*)(getDMemory(sizeof(type)))
-#define getDArray(type, count) 	(type*)(getDMemory(sizeof(type) * count))
-
-void *getPMemory(int size, MemoryBlock * memory = 0) {
-    if(!memory) memory = globalMemory;
-    assert(memory->permanentIndex + size <= memory->permanentSize);
-
-    void * location = (char*)memory->permanent + memory->permanentIndex;
-    memory->permanentIndex += size;
     return location;
 }
 
-void * getTMemory(int size, MemoryBlock * memory = 0) {
-    if(!memory) memory = globalMemory;
-    assert(memory->temporaryIndex + size <= memory->temporarySize);
-
-    void * location = (char*)memory->temporary + memory->temporaryIndex;
-    memory->temporaryIndex += size;
-    return location;
+void clearMemoryArray(MemoryArray* memory = 0) {
+    if(!memory) memory = globalMemoryArray;
+	memory->index = 0;
 }
 
-void freeTMemory(int size, MemoryBlock * memory = 0)  {
-    if(!memory) memory = globalMemory;
-    memory->temporaryIndex -= size;
+struct ExtendibleMemoryArray {
+	void* startAddress;
+	int slotSize;
+	int allocGranularity;
+	MemoryArray arrays[32];
+	int index;
+};
+
+void initExtendibleMemoryArray(ExtendibleMemoryArray* memory, int slotSize, int allocGranularity, void* baseAddress = 0) {
+	memory->startAddress = baseAddress;
+	memory->index = 0;
+	memory->allocGranularity = allocGranularity;
+	memory->slotSize = roundUp(slotSize, memory->allocGranularity);
+
+	initMemoryArray(memory->arrays, memory->slotSize, memory->startAddress);
 }
 
-void clearTMemory(MemoryBlock * memory = 0) {
-    if(!memory) memory = globalMemory;
-    memory->temporaryIndex = 0;
-    // zeroMemory(memory->temporary, memory->temporarySize);
-}
+ExtendibleMemoryArray* globalExtendibleMemoryArray;
 
-void pushMarkerTMemory(MemoryBlock * memory = 0)  {
-    if(!memory) memory = globalMemory;
-    memory->markerStack[memory->markerStackIndex] = memory->temporaryIndex;
-    memory->markerStackIndex++;
-}
+void* getExtendibleMemoryArray(int size, ExtendibleMemoryArray* memory = 0) {
+	if(!memory) memory = globalExtendibleMemoryArray;
+	assert(size <= memory->slotSize);
 
-void popMarkerTMemory(MemoryBlock * memory = 0)  {
-    if(!memory) memory = globalMemory;
-    int size = memory->temporaryIndex - memory->markerStack[memory->markerStackIndex];
-    memory->markerStackIndex--;
-    freeTMemory(size, memory);
-}
-
-void * getDMemory(int size, MemoryBlock * memory = 0) {
-    if(!memory) memory = globalMemory;
-    char * dynamic = (char*)memory->dynamic;
-    char * chunks = memory->chunks;
-    int chunkSize = memory->chunkSize;
-
-    int availableChunks = 0;
-    bool foundMemorySlot = false;
-    void * location = 0;
-    for(int chunkIndex = 0; chunkIndex < memory->chunkCount; chunkIndex++) {
-
-        if(chunks[chunkIndex] == 0) {
-			availableChunks++;
-
-			if(availableChunks*chunkSize >= size+sizeof(int)) {
-				int firstChunk = chunkIndex-availableChunks+1;
-				memSet(chunks + firstChunk, 255, sizeof(char)*availableChunks);
-				location = dynamic + firstChunk*chunkSize;
-				*((uint*)location) = availableChunks;
-				location = (char*)location + sizeof(uint);
-				foundMemorySlot = true;
-				break;
-			}
-        } else  {
-            availableChunks = 0;
-            // chunkIndex += *((int*)(dynamic + (chunkIndex * chunkSize)));
-        }
+	MemoryArray* currentArray = memory->arrays + memory->index;
+	if(currentArray->index + size > currentArray->size) {
+		memory->index++;
+		assert(memory->index < arrayCount(memory->arrays));
+		i64 baseOffset = (memory->index)*(memory->slotSize);
+		initMemoryArray(&memory->arrays[memory->index], memory->slotSize, (char*)memory->startAddress + baseOffset);
+		currentArray = memory->arrays + memory->index;
 	}
 
-	assert(foundMemorySlot);
-
-    return location;
+	void* location = getMemoryArray(size, currentArray);
+	return location;
 }
 
-void freeDMemory(void * data, MemoryBlock * memory = 0) {
-    if(!memory) memory = globalMemory;
-	if(data == 0) return;
 
-    char* dataStart = (char*)data - sizeof(int);
 
-    int byteOffset = (char*)dataStart - (char*)memory->dynamic;
-    int chunkIndex = byteOffset / memory->chunkSize;
+struct BucketMemory {
+	int pageSize;
+	int count;
+	int useCount;
+	char* data;
+	bool* used;
+};
 
-    int chunkCount = *((int*)dataStart);
+// slotSize has to be dividable by pageSize
+void initBucketMemory(BucketMemory* memory, int pageSize, int slotSize, void* baseAddress = 0) {
+	memory->pageSize = pageSize;
+	memory->count = slotSize / pageSize;
+	memory->useCount = 0;
 
-    zeroMemory(memory->chunks+chunkIndex, chunkCount);
+	if(baseAddress) memory->data = (char*)VirtualAlloc(baseAddress, slotSize + memory->count, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+	else memory->data = (char*)malloc(slotSize + memory->count);
+	assert(memory->data);
+
+	memory->used = (bool*)memory->data + slotSize;
+	memSet(memory->used, 0, memory->count);
 }
+
+void deleteBucketMemory(BucketMemory* memory) {
+	VirtualFree(memory->data, 0, MEM_RELEASE);
+}
+
+BucketMemory* globalBucketMemory;
+
+void* getBucketMemory(BucketMemory* memory = 0) {
+	if(memory == 0) memory = globalBucketMemory;
+	assert(memory);
+
+	if(memory->useCount == memory->count) return 0;
+
+	char* address = 0;
+	int index;
+	for(int i = 0; i < memory->count; i++) {
+		if(memory->used[i] == 0) {
+			address = memory->data + i*memory->pageSize;
+			index = i;
+			break;
+		}
+	}
+
+	assert(address);
+
+	if(address) {
+		memory->used[index] = true;
+
+		memory->useCount++;
+		assert(memory->useCount <= memory->count);
+
+		return address;
+	}
+
+	return 0;
+}
+
+void freeBucketMemory(void* address, BucketMemory* memory = 0) {
+	if(memory == 0) memory = globalBucketMemory;
+	assert(memory);
+
+	memory->useCount--;
+	assert(memory->useCount >= 0);
+
+	int dataOffset = ((char*)address - memory->data) / memory->pageSize;
+	memory->used[dataOffset] = false;
+}
+
+
+
+struct ExtendibleBucketMemory {
+	void* startAddress;
+	int slotSize;
+	int fullSize;
+	int allocGranularity;
+	BucketMemory arrays[32];
+	bool allocated[32];
+
+	int pageSize;
+};
+
+ExtendibleBucketMemory* globalExtendibleBucketMemory;
+
+void initExtendibleBucketMemory(ExtendibleBucketMemory* memory, int pageSize, int slotSize, int allocGranularity, void* baseAddress = 0) {
+	memory->startAddress = baseAddress;
+	memory->allocGranularity = allocGranularity;
+	memory->slotSize = slotSize;
+	memory->fullSize = roundUp(slotSize + (slotSize / pageSize), memory->allocGranularity);
+	memory->pageSize = pageSize;
+
+	memSet(memory->allocated, 0, arrayCount(memory->arrays));
+}
+
+void* getExtendibleBucketMemory(ExtendibleBucketMemory* memory = 0) {
+	if(!memory) memory = globalExtendibleBucketMemory;
+
+	// check all allocated arrays for a free slot
+	BucketMemory* availableBucket = 0;
+	for(int i = 0; i < arrayCount(memory->arrays); i++) {
+		if(memory->allocated[i] && (memory->arrays[i].useCount < memory->arrays[i].count)) {
+			availableBucket = memory->arrays + i;
+			break;
+		}
+	}
+
+	// allocate array
+	if(!availableBucket) {
+		// get first array that is not allocated
+		int arrayIndex = -1;
+		for(int i = 0; i < arrayCount(memory->allocated); i++) {
+			if(!memory->allocated[i]) {
+				availableBucket = memory->arrays + i;
+				arrayIndex = i;
+				break;
+			}
+		}
+
+		assert(availableBucket);
+
+		int slotSize = memory->slotSize;
+		i64 baseOffset = arrayIndex * memory->fullSize;
+		initBucketMemory(availableBucket, memory->pageSize, memory->slotSize, (char*)memory->startAddress + baseOffset);
+
+		memory->allocated[arrayIndex] = true;
+	}
+
+	void* location = getBucketMemory(availableBucket);
+	return location;
+}
+
+void freeExtendibleBucketMemory(void* address, ExtendibleBucketMemory* memory = 0) {
+	if(!memory) memory = globalExtendibleBucketMemory;
+
+	// calculate array index with address
+	int arrayIndex = ((char*)address - (char*)memory->startAddress) / memory->fullSize;
+	BucketMemory* bMemory = memory->arrays + arrayIndex;
+	freeBucketMemory(address, bMemory);
+
+	if(bMemory->useCount == 0) {
+		deleteBucketMemory(bMemory);
+		memory->allocated[arrayIndex] = false;
+	}
+}
+
+struct AppMemory {
+	MemoryArray memoryArrays[4];
+	int memoryArrayCount;
+	
+	ExtendibleMemoryArray extendibleMemoryArrays[4];
+	int extendibleMemoryArrayCount;
+
+	BucketMemory bucketMemories[4];
+	int bucketMemoryCount;
+
+	ExtendibleBucketMemory extendibleBucketMemories[4];
+	int extendibleBucketMemoryCount;
+};
+
+
+
+
+
 
 //
 //
@@ -862,9 +950,9 @@ struct TimerBlock {
 
 
 struct Statistic {
-	r64 min;
-	r64 max;
-	r64 avg;
+	f64 min;
+	f64 max;
+	f64 avg;
 	int count;
 };
 
@@ -875,7 +963,7 @@ void beginStatistic(Statistic* stat) {
 	stat->count = 0; 
 }
 
-void updateStatistic(Statistic* stat, r64 value) {
+void updateStatistic(Statistic* stat, f64 value) {
 	if(value < stat->min) stat->min = value;
 	if(value > stat->max) stat->max = value;
 	stat->avg += value;
