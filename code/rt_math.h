@@ -2600,8 +2600,8 @@ int blueNoise(Rect region, float radius, Vec2** noiseSamples, int numOfSamples =
 	int* grid = (int*)malloc(sizeof(int)*gridSize);
 	memset(grid, -1, gridSize*sizeof(int));
 
-	int* activeList = (int*)malloc(sizeof(int) * max(gridH, gridW));
-	int* activeListPointer = activeList;
+	// int* activeList = (int*)malloc(sizeof(int) * max(gridH, gridW));
+	int* activeList = (int*)malloc(sizeof(int) * gridH * gridW);
 	int sampleCount = 1;
 	samples[0] = vec2(randomInt(0, regionDim.w), randomInt(0, regionDim.h));
 	activeList[0] = 0;
@@ -2614,6 +2614,7 @@ int blueNoise(Rect region, float radius, Vec2** noiseSamples, int numOfSamples =
 
 		int activeIndex = randomInt(0,activeListSize-1);
 		int sampleIndex = activeList[activeIndex];
+		// assert(activeIndex <= max(gridH, gridW));
 		Vec2 sample = samples[sampleIndex];
 		for(int i = 0; i < testCount; ++i) {
 			float angle = randomFloat(0, M_2PI, 0.01f);
@@ -2648,6 +2649,7 @@ int blueNoise(Rect region, float radius, Vec2** noiseSamples, int numOfSamples =
 			}
 
 			if(validPosition) {
+				// assert(sampleCount < sampleMax);
 				samples[sampleCount] = newSample;
 				activeList[activeListSize] = sampleCount;
 				grid[(int)(newSample.y/cs)*gridW+(int)(newSample.x/cs)] = sampleCount;
@@ -2664,7 +2666,7 @@ int blueNoise(Rect region, float radius, Vec2** noiseSamples, int numOfSamples =
 	for(int i = 0; i < sampleCount; ++i) samples[i] += region.min;
 
 	free(grid);
-	free(activeListPointer);
+	free(activeList);
 
 	return sampleCount;
 }

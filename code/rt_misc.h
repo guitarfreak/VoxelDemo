@@ -34,6 +34,13 @@ void memSet(void* dest, int value, int numOfBytes) {
 	}
 }
 
+void memSetLarge(void* dest, int value, i64 numOfBytes) {
+	char* destPointer = (char*)dest;
+	for(i64 i = 0; i < numOfBytes; i++) {
+		destPointer[i] = value;
+	}
+}
+
 void zeroMemory(void* memory, int size) {
 	memSet(memory, 0, size);
 }
@@ -575,7 +582,8 @@ struct MemoryArray {
 
 void initMemoryArray(MemoryArray * memory, int slotSize, void* baseAddress = 0) {
     if(baseAddress) {
-	    memory->data = (char*)VirtualAlloc(baseAddress, slotSize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+	    memory->data = (char*)VirtualAlloc(baseAddress, slotSize, MEM_COMMIT, PAGE_READWRITE);
+	    // memory->data = (char*)malloc(slotSize);
 	    int errorCode = GetLastError();
     } else memory->data = (char*)malloc(slotSize);
 
@@ -595,6 +603,13 @@ void* getMemoryArray(int size, MemoryArray * memory = 0) {
     memory->index += size;
 
     return location;
+}
+
+void freeMemoryArray(int size, MemoryArray * memory = 0) {
+    if(!memory) memory = globalMemoryArray;
+    assert(memory->size >= memory->index);
+
+    memory->index -= size;
 }
 
 void clearMemoryArray(MemoryArray* memory = 0) {
@@ -629,7 +644,7 @@ void* getExtendibleMemoryArray(int size, ExtendibleMemoryArray* memory = 0) {
 	if(currentArray->index + size > currentArray->size) {
 		memory->index++;
 		assert(memory->index < arrayCount(memory->arrays));
-		i64 baseOffset = (memory->index)*(memory->slotSize);
+		i64 baseOffset = (i64)memory->index*(i64)memory->slotSize;
 		initMemoryArray(&memory->arrays[memory->index], memory->slotSize, (char*)memory->startAddress + baseOffset);
 		currentArray = memory->arrays + memory->index;
 	}
@@ -654,7 +669,10 @@ void initBucketMemory(BucketMemory* memory, int pageSize, int slotSize, void* ba
 	memory->count = slotSize / pageSize;
 	memory->useCount = 0;
 
-	if(baseAddress) memory->data = (char*)VirtualAlloc(baseAddress, slotSize + memory->count, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+	if(baseAddress) {
+		memory->data = (char*)VirtualAlloc(baseAddress, slotSize + memory->count, MEM_COMMIT, PAGE_READWRITE);
+		// memory->data = (char*)malloc(slotSize + memory->count);
+	}
 	else memory->data = (char*)malloc(slotSize + memory->count);
 	assert(memory->data);
 
@@ -664,6 +682,7 @@ void initBucketMemory(BucketMemory* memory, int pageSize, int slotSize, void* ba
 
 void deleteBucketMemory(BucketMemory* memory) {
 	VirtualFree(memory->data, 0, MEM_RELEASE);
+	// free(memory->data);
 }
 
 BucketMemory* globalBucketMemory;

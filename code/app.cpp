@@ -1864,7 +1864,7 @@ void buildColorPalette() {
 // #define VIEW_DISTANCE 256 // 4
 // #define VIEW_DISTANCE 128 // 2
 
-#define USE_MALLOC 1
+#define USE_MALLOC 0
 
 #define VOXEL_X 64
 #define VOXEL_Y 64
@@ -1931,16 +1931,15 @@ void initVoxelMesh(VoxelMesh* m, Vec2i coord) {
 		m->voxels = (uchar*)malloc(VOXEL_SIZE);
 		m->lighting = (uchar*)malloc(VOXEL_SIZE);
 	} else {
-// m->meshBufferCapacity = kiloBytes(150);
-		m->meshBufferCapacity = kiloBytes(200);
-		m->meshBuffer = (char*)getPMemory(m->meshBufferCapacity);
-		m->texBufferCapacity = m->meshBufferCapacity/4;
-		m->texBuffer = (char*)getPMemory(m->texBufferCapacity);
+		// m->meshBufferCapacity = kiloBytes(200);
+		// m->meshBuffer = (char*)getPMemory(m->meshBufferCapacity);
+		// m->texBufferCapacity = m->meshBufferCapacity/4;
+		// m->texBuffer = (char*)getPMemory(m->texBufferCapacity);
 
-		m->meshBufferTransCapacity = kiloBytes(200);
-		m->meshBufferTrans = (char*)getPMemory(m->meshBufferTransCapacity);
-		m->texBufferTransCapacity = m->meshBufferTransCapacity/4;
-		m->texBufferTrans = (char*)getPMemory(m->texBufferTransCapacity);
+		// m->meshBufferTransCapacity = kiloBytes(200);
+		// m->meshBufferTrans = (char*)getPMemory(m->meshBufferTransCapacity);
+		// m->texBufferTransCapacity = m->meshBufferTransCapacity/4;
+		// m->texBufferTrans = (char*)getPMemory(m->texBufferTransCapacity);
 
 		m->voxels = (uchar*)getPMemory(VOXEL_SIZE);
 		m->lighting = (uchar*)getPMemory(VOXEL_SIZE);
@@ -2216,6 +2215,26 @@ void makeMeshThreaded(void* data) {
 		m->meshBufferTrans = (char*)malloc(m->meshBufferTransCapacity);
 		m->texBufferTransCapacity = m->meshBufferTransCapacity/4;
 		m->texBufferTrans = (char*)malloc(m->texBufferTransCapacity);
+	} else {
+		// m->meshBufferCapacity = kiloBytes(500);
+		// m->meshBuffer = (char*)getDMemory(m->meshBufferCapacity);
+		// m->texBufferCapacity = m->meshBufferCapacity/4;
+		// m->texBuffer = (char*)getDMemory(m->texBufferCapacity);
+
+		// m->meshBufferTransCapacity = kiloBytes(500);
+		// m->meshBufferTrans = (char*)getDMemory(m->meshBufferTransCapacity);
+		// m->texBufferTransCapacity = m->meshBufferTransCapacity/4;
+		// m->texBufferTrans = (char*)getDMemory(m->texBufferTransCapacity);
+
+		m->meshBufferCapacity = kiloBytes(500);
+		m->meshBuffer = (char*)malloc(m->meshBufferCapacity);
+		m->texBufferCapacity = m->meshBufferCapacity/4;
+		m->texBuffer = (char*)malloc(m->texBufferCapacity);
+
+		m->meshBufferTransCapacity = kiloBytes(500);
+		m->meshBufferTrans = (char*)malloc(m->meshBufferTransCapacity);
+		m->texBufferTransCapacity = m->meshBufferTransCapacity/4;
+		m->texBufferTrans = (char*)malloc(m->texBufferTransCapacity);
 	}
 
 	stbvox_set_buffer(&mm, 0, 0, m->meshBuffer, m->meshBufferCapacity);
@@ -2339,17 +2358,24 @@ void makeMesh(VoxelMesh* m, VoxelNode** voxelHash, int voxelHashSize) {
 	glNamedBufferData(m->texBufferId, m->textureBufferSizePerQuad*m->quadCount, m->texBuffer, GL_STATIC_DRAW);
 	glTextureBuffer(m->textureId, GL_RGBA8UI, m->texBufferId);
 
-	if(USE_MALLOC) {
-		free(m->meshBuffer);
-		free(m->texBuffer);
-	}
-
 	glNamedBufferData(m->bufferTransId, m->bufferSizePerQuad*m->quadCountTrans, m->meshBufferTrans, GL_STATIC_DRAW);
 
 	glNamedBufferData(m->texBufferTransId, m->textureBufferSizePerQuad*m->quadCountTrans, m->texBufferTrans, GL_STATIC_DRAW);
 	glTextureBuffer(m->textureTransId, GL_RGBA8UI, m->texBufferTransId);
 
 	if(USE_MALLOC) {
+		free(m->meshBuffer);
+		free(m->texBuffer);
+		free(m->meshBufferTrans);
+		free(m->texBufferTrans);
+	} else {
+		// freeDMemory(m->meshBuffer);
+		// freeDMemory(m->texBuffer);
+		// freeDMemory(m->meshBufferTrans);
+		// freeDMemory(m->texBufferTrans);
+
+		free(m->meshBuffer);
+		free(m->texBuffer);
 		free(m->meshBufferTrans);
 		free(m->texBufferTrans);
 	}
@@ -4313,18 +4339,26 @@ extern "C" APPMAINFUNCTION(appMain) {
 	if(init) {
 		SYSTEM_INFO info;
 		GetSystemInfo(&info);
-		
-		ExtendibleMemoryArray* pMemory = &appMemory->extendibleMemoryArrays[appMemory->extendibleMemoryArrayCount++];
-		initExtendibleMemoryArray(pMemory, megaBytes(512), info.dwAllocationGranularity, (LPVOID)gigaBytes(5));
 
-		MemoryArray* tMemory = &appMemory->memoryArrays[appMemory->memoryArrayCount++];
-		initMemoryArray(tMemory, megaBytes(30), (LPVOID)gigaBytes(4));
+		char* baseAddress = (char*)gigaBytes(8);
+	    VirtualAlloc(baseAddress, gigaBytes(40), MEM_RESERVE, PAGE_READWRITE);
+
+		ExtendibleMemoryArray* pMemory = &appMemory->extendibleMemoryArrays[appMemory->extendibleMemoryArrayCount++];
+		initExtendibleMemoryArray(pMemory, megaBytes(512), info.dwAllocationGranularity, baseAddress);
 
 		ExtendibleBucketMemory* dMemory = &appMemory->extendibleBucketMemories[appMemory->extendibleBucketMemoryCount++];
-		initExtendibleBucketMemory(dMemory, megaBytes(1), megaBytes(512), info.dwAllocationGranularity, (LPVOID)gigaBytes(30));
+		initExtendibleBucketMemory(dMemory, megaBytes(1), megaBytes(512), info.dwAllocationGranularity, baseAddress + gigaBytes(16));
+
+		MemoryArray* tMemory = &appMemory->memoryArrays[appMemory->memoryArrayCount++];
+		initMemoryArray(tMemory, megaBytes(30), baseAddress + gigaBytes(32));
 
 		MemoryArray* tMemoryDebug = &appMemory->memoryArrays[appMemory->memoryArrayCount++];
-		initMemoryArray(tMemoryDebug, megaBytes(30), (LPVOID)(gigaBytes(4) + megaBytes(512)));
+		initMemoryArray(tMemoryDebug, megaBytes(30), baseAddress + gigaBytes(33));
+
+
+
+		ExtendibleMemoryArray* debugMemory = &appMemory->extendibleMemoryArrays[appMemory->extendibleMemoryArrayCount++];
+		initExtendibleMemoryArray(debugMemory, megaBytes(512), info.dwAllocationGranularity, baseAddress + gigaBytes(34));
 	}
 
 	MemoryBlock gMemory = {};
@@ -4334,8 +4368,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	gMemory.tMemoryDebug = &appMemory->memoryArrays[1];
 	globalMemory = &gMemory;
 
-	// globalMemory = memoryBlock;
-	// AppData* ad = (AppData*)memoryBlock->permanent;
 	AppData* ad = (AppData*)globalMemory->pMemory->arrays[0].data;
 	Input* input = &ad->input;
 	SystemData* systemData = &ad->systemData;
@@ -4510,6 +4542,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 								// "..\\data\\skybox\\sb3.jpg", 
 								// "..\\data\\skybox\\sb4.png", 
 								"..\\data\\skybox\\xoGVD3X.jpg", 
+								// "..\\data\\skybox\\xoGVD3X.jpg", 
+								// "C:\\Projects\\Hmm\\data\\skybox\\xoGVD3X.jpg", 
 								};
 
 		ad->cubeMapCount = arrayCount(texturePaths);
@@ -4740,7 +4774,27 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// TIMER_BLOCK_NAMED("Input");
 		updateInput(&ad->input, isRunning, windowHandle);
 	}
-	
+
+	{
+		ExtendibleMemoryArray* debugMemory = &appMemory->extendibleMemoryArrays[1];
+		ExtendibleMemoryArray* pMemory = globalMemory->pMemory;
+
+		if(input->keysPressed[VK_F11]) {
+			for(int i = 0; i < pMemory->index; i++) {
+				if(debugMemory->index < i) getExtendibleMemoryArray(pMemory->slotSize, debugMemory);
+
+				void* data = debugMemory->arrays[i].data;
+				memCpy(data, pMemory->arrays[i].data, pMemory->slotSize);
+			}
+		}
+		
+		// if(input->keysPressed[VK_F12]) {
+		// 	for(int i = 0; i < pMemory->index; i++) {
+		// 		memCpy(pMemory->arrays[i].data, debugMemory->arrays[i].data, pMemory->slotSize);
+		// 	}
+		// }
+	}
+
 	if(input->keysPressed[VK_F1]) {
 		int mode;
 		if(wSettings->fullscreen) mode = WINDOW_MODE_WINDOWED;
@@ -7097,10 +7151,20 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 
-
 	if(*isRunning == false) {
 		guiSave(&ad->gui, 2, 0);
 		if(globalDebugState->gui) guiSave(globalDebugState->gui, 2, 3);
+	}
+
+	{
+		ExtendibleMemoryArray* debugMemory = &appMemory->extendibleMemoryArrays[1];
+		ExtendibleMemoryArray* pMemory = globalMemory->pMemory;
+		
+		if(input->keysPressed[VK_F12]) {
+			for(int i = 0; i < pMemory->index; i++) {
+				memCpy(pMemory->arrays[i].data, debugMemory->arrays[i].data, pMemory->slotSize);
+			}
+		}
 	}
 
 }
