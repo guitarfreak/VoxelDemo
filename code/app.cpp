@@ -130,13 +130,17 @@ GraphicsState* globalGraphicsState;
 DrawCommandList* globalCommandList;
 struct MemoryBlock;
 MemoryBlock* globalMemory;
+struct DebugState;
+DebugState* globalDebugState;
 
 struct MemoryBlock {
 	ExtendibleMemoryArray* pMemory;
 	MemoryArray* tMemory;
 	ExtendibleBucketMemory* dMemory;
 
+	MemoryArray* pDebugMemory;
 	MemoryArray* tMemoryDebug;
+	ExtendibleMemoryArray* debugMemory;
 };
 
 #define getPStruct(type) 		(type*)(getPMemory(sizeof(type)))
@@ -165,8 +169,26 @@ void clearTMemory(MemoryBlock * memory = 0) {
 	if(memory == 0) memory = globalMemory;
 
 	clearMemoryArray(memory->tMemory);
+}
 
-	// zeroMemory(memory->temporary, memory->temporarySize);
+void *getPMemoryDebug(int size, MemoryBlock * memory = 0) {
+	if(memory == 0) memory = globalMemory;
+
+	void* location = getMemoryArray(size, memory->pDebugMemory);
+    return location;
+}
+
+void * getTMemoryDebug(int size, MemoryBlock * memory = 0) {
+	if(memory == 0) memory = globalMemory;
+
+	void* location = getMemoryArray(size, memory->tMemoryDebug);
+    return location;
+}
+
+void clearTMemoryDebug(MemoryBlock * memory = 0) {
+	if(memory == 0) memory = globalMemory;
+
+	clearMemoryArray(memory->tMemoryDebug);
 }
 
 // void pushMarkerTMemory(MemoryBlock * memory = 0)  {
@@ -1426,6 +1448,175 @@ void getUniform(uint shaderId, int shaderStage, uint uniformId, float* data) {
 
 	glGetUniformfv(stage, location, data);
 }
+
+
+
+
+
+
+
+enum TimerType {
+	TIMER_TYPE_BEGIN,
+	TIMER_TYPE_END,
+};
+
+struct TimerInfo {
+	int initialised;
+
+	const char* file;
+	const char* function;
+	const char* name;
+	int line, line2;
+	uint type;
+};
+
+#define CYCLEBUFFERSIZE 120
+struct TimerSlot {
+	uint type;
+	uint threadId;
+	int timerIndex;
+	u64 cycles;
+};
+
+struct Timings {
+	u64 cycles;
+	int hits;
+	u64 cyclesOverHits;
+};
+
+
+struct Gui;
+struct Input;
+struct DebugState {
+	DrawCommandList commandListDebug;
+	
+	bool isInitialised;
+	int timerInfoCount;
+	TimerInfo timerInfos[32]; // timerInfoCount
+	TimerSlot* timerBuffer;
+	int bufferSize;
+	u64 bufferIndex;
+
+	Timings timings[120][32];
+	int cycleIndex;
+
+	char* stringMemory;
+	int stringMemorySize;
+	int stringMemoryIndex;
+
+	bool frozenGraph;
+	TimerSlot* savedTimerBuffer;
+	u64 savedBufferIndex;
+	Timings savedTimings[32];
+
+	Gui* gui;
+
+	Input* input;
+	int inputCapacity;
+	bool recordingInput;
+	int inputIndex;
+
+	bool playbackStart;
+	bool playbackInput;
+	int playbackIndex;
+	bool playbackSwapMemory;
+};
+
+
+inline uint getThreadID() {
+	char *threadLocalStorage = (char *)__readgsqword(0x30);
+	uint threadID = *(uint *)(threadLocalStorage + 0x48);
+
+	return threadID;
+}
+
+void addTimerSlot(int timerIndex, int type) {
+	// uint id = atomicAdd64(&globalDebugState->bufferIndex, 1);
+	uint id = globalDebugState->bufferIndex++;
+	TimerSlot* slot = globalDebugState->timerBuffer + id;
+	slot->cycles = __rdtsc();
+	slot->type = type;
+	slot->threadId = getThreadID();
+	slot->timerIndex = timerIndex;
+}
+
+void addTimerSlotAndInfo(int timerIndex, int type, const char* file, const char* function, int line, char* name = "") {
+
+	TimerInfo* timerInfo = globalDebugState->timerInfos + timerIndex;
+
+	if(!timerInfo->initialised) {
+		timerInfo->initialised = true;
+		timerInfo->file = file;
+		timerInfo->function = function;
+		timerInfo->line = line;
+		timerInfo->type = type;
+		timerInfo->name = name;
+	}
+
+	addTimerSlot(timerIndex, type);
+}
+
+struct TimerBlock {
+	int counter;
+
+	TimerBlock(int counter, const char* file, const char* function, int line, char* name = "") {
+
+		this->counter = counter;
+		addTimerSlotAndInfo(counter, TIMER_TYPE_BEGIN, file, function, line, name);
+	}
+
+	~TimerBlock() {
+		addTimerSlot(counter, TIMER_TYPE_END);
+	}
+};
+
+#define TIMER_BLOCK() \
+	TimerBlock timerBlock##__LINE__(__COUNTER__, __FILE__, __FUNCTION__, __LINE__);
+
+#define TIMER_BLOCK_NAMED(name) \
+	TimerBlock timerBlock##__LINE__(__COUNTER__, __FILE__, __FUNCTION__, __LINE__, name);
+
+#define TIMER_BLOCK_BEGIN(ID) \
+	const int timerCounter##ID = __COUNTER__; \
+	addTimerSlotAndInfo(timerCounter##ID, TIMER_TYPE_BEGIN, __FILE__, __FUNCTION__, __LINE__); 
+
+#define TIMER_BLOCK_BEGIN_NAMED(ID, name) \
+	const int timerCounter##ID = __COUNTER__; \
+	addTimerSlotAndInfo(timerCounter##ID, TIMER_TYPE_BEGIN, __FILE__, __FUNCTION__, __LINE__, name); 
+
+#define TIMER_BLOCK_END(ID) \
+	addTimerSlot(timerCounter##ID, TIMER_TYPE_END);
+
+struct Statistic {
+	f64 min;
+	f64 max;
+	f64 avg;
+	int count;
+};
+
+void beginStatistic(Statistic* stat) {
+	stat->min = DBL_MAX; 
+	stat->max = -DBL_MAX; 
+	stat->avg = 0; 
+	stat->count = 0; 
+}
+
+void updateStatistic(Statistic* stat, f64 value) {
+	if(value < stat->min) stat->min = value;
+	if(value > stat->max) stat->max = value;
+	stat->avg += value;
+	++stat->count;
+}
+
+void endStatistic(Statistic* stat) {
+	stat->avg /= stat->count;
+}
+
+struct TimerStatistic {
+	u64 cycles;
+	int timerIndex;
+};
+
 
 
 
@@ -3951,9 +4142,6 @@ void guiSettings(Gui* gui) {
 
 
 struct AppData {
-	DebugState debugState;
-	DrawCommandList commandListDebug;
-
 	bool showHud;
 	bool updateFrameBuffers;
 	float guiAlpha;
@@ -4332,6 +4520,11 @@ struct CmdList {
 
 
 
+
+
+
+
+
 #pragma optimize( "", off )
 // #pragma optimize( "", on )
 
@@ -4349,13 +4542,16 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ExtendibleBucketMemory* dMemory = &appMemory->extendibleBucketMemories[appMemory->extendibleBucketMemoryCount++];
 		initExtendibleBucketMemory(dMemory, megaBytes(1), megaBytes(512), info.dwAllocationGranularity, baseAddress + gigaBytes(16));
 
-		MemoryArray* tMemory = &appMemory->memoryArrays[appMemory->memoryArrayCount++];
-		initMemoryArray(tMemory, megaBytes(30), baseAddress + gigaBytes(32));
-
 		MemoryArray* tMemoryDebug = &appMemory->memoryArrays[appMemory->memoryArrayCount++];
 		initMemoryArray(tMemoryDebug, megaBytes(30), baseAddress + gigaBytes(33));
 
 
+
+		MemoryArray* pDebugMemory = &appMemory->memoryArrays[appMemory->memoryArrayCount++];
+		initMemoryArray(pDebugMemory, megaBytes(50), 0);
+
+		MemoryArray* tMemory = &appMemory->memoryArrays[appMemory->memoryArrayCount++];
+		initMemoryArray(tMemory, megaBytes(30), 0);
 
 		ExtendibleMemoryArray* debugMemory = &appMemory->extendibleMemoryArrays[appMemory->extendibleMemoryArrayCount++];
 		initExtendibleMemoryArray(debugMemory, megaBytes(512), info.dwAllocationGranularity, baseAddress + gigaBytes(34));
@@ -4365,10 +4561,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 	gMemory.pMemory = &appMemory->extendibleMemoryArrays[0];
 	gMemory.tMemory = &appMemory->memoryArrays[0];
 	gMemory.dMemory = &appMemory->extendibleBucketMemories[0];
-	gMemory.tMemoryDebug = &appMemory->memoryArrays[1];
+	gMemory.pDebugMemory = &appMemory->memoryArrays[1];
+	gMemory.tMemoryDebug = &appMemory->memoryArrays[2];
+	gMemory.debugMemory = &appMemory->extendibleMemoryArrays[1];
+
 	globalMemory = &gMemory;
 
-	AppData* ad = (AppData*)globalMemory->pMemory->arrays[0].data;
+	AppData* ad = (AppData*)getBaseExtendibleMemoryArray(globalMemory->pMemory);
 	Input* input = &ad->input;
 	SystemData* systemData = &ad->systemData;
 	HWND windowHandle = systemData->windowHandle;
@@ -4377,7 +4576,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 	globalThreadQueue = threadQueue;
 	globalGraphicsState = &ad->graphicsState;
 	threadData = ad->threadData;
-	globalDebugState = &ad->debugState;
+
+	DebugState* ds = (DebugState*)globalMemory->pDebugMemory->data;
+	globalDebugState = ds;
 
 	treeNoise = ad->treeNoise;
 
@@ -4387,6 +4588,21 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 	if(init) {
+		getPMemoryDebug(sizeof(DebugState));
+		*ds = {};
+
+		ds->inputCapacity = 600;
+		ds->input = (Input*)getPMemoryDebug(sizeof(Input) * ds->inputCapacity);
+
+		int timerSlots = 10000;
+		globalDebugState->bufferSize = timerSlots;
+		globalDebugState->timerBuffer = (TimerSlot*)getPMemoryDebug(sizeof(TimerSlot) * timerSlots);
+		globalDebugState->savedTimerBuffer	= (TimerSlot*)getPMemoryDebug(sizeof(TimerSlot) * timerSlots);
+		globalDebugState->stringMemory = (char*)getPMemoryDebug(sizeof(char) * 10000);
+		globalDebugState->stringMemorySize = 10000;
+		globalDebugState->cycleIndex = 0;
+
+
 		getPMemory(sizeof(AppData));
 		*ad = {};
 
@@ -4435,17 +4651,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		int interval = wglGetSwapIntervalEXT();
 
 		// @setup
-
-		int timerSlots = 10000;
-		ad->debugState.bufferSize = timerSlots;
-		ad->debugState.timerBuffer = getPArray(TimerSlot, timerSlots);
-		ad->debugState.savedTimerBuffer	= getPArray(TimerSlot, timerSlots);
-		ad->debugState.stringMemory = getPArray(char, 10000);
-		ad->debugState.stringMemorySize = 10000;
-		ad->debugState.cycleIndex = 0;
-
-		int clSize = kiloBytes(200);
-		drawCommandListInit(&ad->commandListDebug, (char*)getPMemory(clSize), clSize);
 
 		// ad->fieldOfView = 55;
 		ad->fieldOfView = 60;
@@ -4713,8 +4918,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		return; // window operations only work after first frame?
 	}
 
-
-
 	if(second) {
 		// setWindowProperties(windowHandle, wSettings->res.w, wSettings->res.h, -1920, 0);
 		// setWindowProperties(windowHandle, wSettings->res.w, wSettings->res.h, 0, 0);
@@ -4770,30 +4973,51 @@ extern "C" APPMAINFUNCTION(appMain) {
 	globalCommandList = &ad->commandList3d;
 
 
+
 	{
 		// TIMER_BLOCK_NAMED("Input");
 		updateInput(&ad->input, isRunning, windowHandle);
 	}
 
 	{
+		// cant use f10 or f12 while debugging...
+
 		ExtendibleMemoryArray* debugMemory = &appMemory->extendibleMemoryArrays[1];
 		ExtendibleMemoryArray* pMemory = globalMemory->pMemory;
 
-		if(input->keysPressed[VK_F11]) {
+		if(input->keysPressed[VK_F8]) {
 			for(int i = 0; i < pMemory->index; i++) {
 				if(debugMemory->index < i) getExtendibleMemoryArray(pMemory->slotSize, debugMemory);
 
-				void* data = debugMemory->arrays[i].data;
-				memCpy(data, pMemory->arrays[i].data, pMemory->slotSize);
+				memCpy(debugMemory->arrays[i].data, pMemory->arrays[i].data, pMemory->slotSize);
+			}
+
+			ds->recordingInput = true;
+			ds->inputIndex = 0;
+		}
+
+		if(input->keysPressed[VK_F9]) {
+			ds->recordingInput = false;
+		}
+
+		if(ds->recordingInput) {
+			memCpy(ds->input + ds->inputIndex, &ad->input, sizeof(Input));
+			ds->inputIndex++;
+			if(ds->inputIndex >= ds->inputCapacity) {
+				ds->recordingInput = false;
 			}
 		}
-		
-		// if(input->keysPressed[VK_F12]) {
-		// 	for(int i = 0; i < pMemory->index; i++) {
-		// 		memCpy(pMemory->arrays[i].data, debugMemory->arrays[i].data, pMemory->slotSize);
-		// 	}
-		// }
-	}
+
+		if(input->keysPressed[VK_F11]) {
+			ds->playbackStart = true;
+		}
+
+		if(ds->playbackInput) {
+			ad->input = ds->input[ds->playbackIndex];
+			ds->playbackIndex = (ds->playbackIndex+1)%ds->inputIndex;
+			if(ds->playbackIndex == 0) ds->playbackSwapMemory = true;
+		}
+	} 
 
 	if(input->keysPressed[VK_F1]) {
 		int mode;
@@ -4898,7 +5122,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		GLenum result2 = glCheckNamedFramebufferStatus(ad->frameBuffers[1], GL_FRAMEBUFFER);
 		GLenum result3 = glCheckNamedFramebufferStatus(ad->frameBuffers[2], GL_FRAMEBUFFER);
 	}
-
 
 
 	// 2d camera controls
@@ -6357,7 +6580,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				memCpy(ad->testBuffer + bufferOffset, p->color.e, sizeof(p->color)); bufferOffset += sizeof(p->color);
 			}
 
-			// printf("%i \n", emitter.particleListCount);
+			// printf("f%i \n", emitter.particleListCount);
 
 
 			timer = 0;
@@ -6632,7 +6855,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	executeCommandList(&ad->commandListGui);
 	{
 		TIMER_BLOCK_NAMED("asdf");
-		executeCommandList(&ad->commandListDebug);
+		executeCommandList(&ds->commandListDebug);
 	}
 	glBindFramebuffer(GL_FRAMEBUFFER, ad->frameBuffers[3]);
 
@@ -6831,9 +7054,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// collate timings 
 	{		
-		globalCommandList = &ad->commandListDebug;
-		ad->commandListDebug.count = 0;
-		ad->commandListDebug.bytes = 0;
+		clearTMemoryDebug();
+
+		globalCommandList = &ds->commandListDebug;
+		int clSize = megaBytes(1);
+		drawCommandListInit(&ds->commandListDebug, (char*)getTMemoryDebug(clSize), clSize);
 
 		int globalTimingsCount = __COUNTER__;
 
@@ -7030,7 +7255,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 		// save timer buffer
-		if(input->keysPressed[VK_F9]) {
+		if(input->keysPressed[VK_F6]) {
 			if(!ds->frozenGraph) {
 				memCpy(ds->savedTimerBuffer, ds->timerBuffer, bufferIndex*sizeof(TimerSlot));
 				ds->savedBufferIndex = bufferIndex;
@@ -7156,14 +7381,22 @@ extern "C" APPMAINFUNCTION(appMain) {
 		if(globalDebugState->gui) guiSave(globalDebugState->gui, 2, 3);
 	}
 
-	{
+	if(ds->playbackStart) {
+		ds->playbackStart = false;
+		ds->playbackInput = true;
+		ds->playbackIndex = 0;
+
+		ds->playbackSwapMemory = true;
+	}
+
+	if(ds->playbackSwapMemory) {
+		ds->playbackSwapMemory = false;
+
 		ExtendibleMemoryArray* debugMemory = &appMemory->extendibleMemoryArrays[1];
 		ExtendibleMemoryArray* pMemory = globalMemory->pMemory;
-		
-		if(input->keysPressed[VK_F12]) {
-			for(int i = 0; i < pMemory->index; i++) {
-				memCpy(pMemory->arrays[i].data, debugMemory->arrays[i].data, pMemory->slotSize);
-			}
+
+		for(int i = 0; i < pMemory->index; i++) {
+			memCpy(pMemory->arrays[i].data, debugMemory->arrays[i].data, pMemory->slotSize);
 		}
 	}
 
