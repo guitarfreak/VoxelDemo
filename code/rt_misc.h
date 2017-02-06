@@ -844,3 +844,40 @@ bool flagCheck(uint flags, int flagType)
 //
 //
 //
+
+
+
+
+
+
+enum TimerType {
+	TIMER_TYPE_BEGIN,
+	TIMER_TYPE_END,
+};
+
+struct TimerInfo {
+	int initialised;
+
+	const char* file;
+	const char* function;
+	const char* name;
+	int line, line2;
+	uint type;
+};
+
+#define CYCLEBUFFERSIZE 120
+struct TimerSlot {
+	uint type;
+	uint threadId;
+	int timerIndex;
+	u64 cycles;
+};
+
+struct Timings {
+	u64 cycles;
+	int hits;
+	u64 cyclesOverHits;
+};
+
+
+

@@ -2862,3 +2862,19 @@ void radixSortPair(SortPair* list, int size) {
 
 	free(buffer);
 }
+
+void getPointsFromQuadAndNormal(Vec3 p, Vec3 normal, float size, Vec3 verts[4]) {
+	int sAxis[2];
+	int biggestAxis = getBiggestAxis(normal, sAxis);
+
+	float s2 = size*0.5f;
+
+	for(int i = 0; i < 4; i++) {
+		Vec3 d = p;
+		if(i == 0) { d.e[sAxis[0]] += -s2; d.e[sAxis[1]] += -s2; }
+		else if(i == 1) { d.e[sAxis[0]] += -s2; d.e[sAxis[1]] +=  s2; }
+		else if(i == 2) { d.e[sAxis[0]] +=  s2; d.e[sAxis[1]] +=  s2; }
+		else if(i == 3) { d.e[sAxis[0]] +=  s2; d.e[sAxis[1]] += -s2; }
+		verts[i] = d;
+	}
+}

@@ -1,5 +1,19 @@
 #pragma once
 
+#define VK_W 0x57
+#define VK_A 0x41
+#define VK_S 0x53
+#define VK_D 0x44
+#define VK_E 0x45
+#define VK_Q 0x51
+#define VK_T 0x54
+
+#define KEYCODE_0 0x30
+#define KEYCODE_1 0x31
+#define KEYCODE_2 0x32
+#define KEYCODE_3 0x33
+#define KEYCODE_4 0x34
+
 enum Keycode {
 	KEYCODE_TAB = 0,
 	KEYCODE_LEFT,
