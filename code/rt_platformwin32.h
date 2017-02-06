@@ -1,39 +1,76 @@
 #pragma once
 
-#define VK_W 0x57
-#define VK_A 0x41
-#define VK_S 0x53
-#define VK_D 0x44
-#define VK_E 0x45
-#define VK_Q 0x51
-#define VK_T 0x54
-
-#define KEYCODE_0 0x30
-#define KEYCODE_1 0x31
-#define KEYCODE_2 0x32
-#define KEYCODE_3 0x33
-#define KEYCODE_4 0x34
-
 enum Keycode {
-	KEYCODE_TAB = 0,
-	KEYCODE_LEFT,
-	KEYCODE_RIGHT,
-	KEYCODE_UP,
-	KEYCODE_DOWN,
-	KEYCODE_PAGEUP,
-	KEYCODE_PAGEDOWN,
+	KEYCODE_CTRL = 0,
+	KEYCODE_CTRL_RIGHT,
+	KEYCODE_SHIFT,
+	KEYCODE_SHIFT_RIGHT,
+	KEYCODE_ALT,
+	KEYCODE_CAPS,
+	KEYCODE_TAB,
+	KEYCODE_SPACE,
+	KEYCODE_RETURN,
+	KEYCODE_ESCAPE,
+	KEYCODE_BACKSPACE,
+	KEYCODE_DEL,
 	KEYCODE_HOME,
 	KEYCODE_END,
-	KEYCODE_DELETE,
-	KEYCODE_BACKSPACE,
-	KEYCODE_ENTER,
-	KEYCODE_ESCAPE,
+	KEYCODE_UP,
+	KEYCODE_DOWN,
+	KEYCODE_LEFT,
+	KEYCODE_RIGHT,
+
 	KEYCODE_A,
+	KEYCODE_B,
 	KEYCODE_C,
+	KEYCODE_D,
+	KEYCODE_E,
+	KEYCODE_F,
+	KEYCODE_G,
+	KEYCODE_H,
+	KEYCODE_I,
+	KEYCODE_J,
+	KEYCODE_K,
+	KEYCODE_L,
+	KEYCODE_M,
+	KEYCODE_N,
+	KEYCODE_O,
+	KEYCODE_P,
+	KEYCODE_Q,
+	KEYCODE_R,
+	KEYCODE_S,
+	KEYCODE_T,
+	KEYCODE_U,
 	KEYCODE_V,
+	KEYCODE_W,
 	KEYCODE_X,
 	KEYCODE_Y,
 	KEYCODE_Z,
+
+	KEYCODE_0,
+	KEYCODE_1,
+	KEYCODE_2,
+	KEYCODE_3,
+	KEYCODE_4,
+	KEYCODE_5,
+	KEYCODE_6,
+	KEYCODE_7,
+	KEYCODE_8,
+	KEYCODE_9,
+
+	KEYCODE_F1,
+	KEYCODE_F2,
+	KEYCODE_F3,
+	KEYCODE_F4,
+	KEYCODE_F5,
+	KEYCODE_F6,
+	KEYCODE_F7,
+	KEYCODE_F8,
+	KEYCODE_F9,
+	KEYCODE_F10,
+	KEYCODE_F11,
+	KEYCODE_F12,
+
 	KEYCODE_COUNT,
 };
 
@@ -45,19 +82,62 @@ struct Input {
 	bool mouseButtonPressed[8];
 	bool mouseButtonDown[8];
 
-	bool keysDown[512];
-	bool keysPressed[512];
+	bool keysDown[KEYCODE_COUNT];
+	bool keysPressed[KEYCODE_COUNT];
 	char inputCharacters[32];
 	int inputCharacterCount;
 
-	int keyCodes[KEYCODE_COUNT];
 	bool mShift, mCtrl, mAlt;
 
 	bool captureMouse;
 };
 
-bool inputKeyPressed(Input* input, int keyCode) {
-	return input->keysPressed[input->keyCodes[keyCode]];
+#define WIN_KEY_NUMERIC_START 0x30
+#define WIN_KEY_NUMERIC_END 0x39
+#define WIN_KEY_LETTERS_START 0x41
+#define WIN_KEY_LETTERS_END 0x5a
+#define WIN_KEY_F_START 0x70
+#define WIN_KEY_F_END 0x7B
+
+int vkToKeycode(int vk) {
+
+	switch(vk) {
+		case VK_CONTROL: return KEYCODE_CTRL;
+		case VK_RCONTROL: return KEYCODE_CTRL_RIGHT;
+		case VK_SHIFT: return KEYCODE_SHIFT;
+		case VK_RSHIFT: return KEYCODE_SHIFT_RIGHT;
+		case VK_MENU: return KEYCODE_ALT;
+		case VK_CAPITAL: return KEYCODE_CAPS;
+		case VK_TAB: return KEYCODE_TAB;
+		case VK_SPACE: return KEYCODE_SPACE;
+		case VK_RETURN: return KEYCODE_RETURN;
+		case VK_ESCAPE: return KEYCODE_ESCAPE;
+		case VK_BACK: return KEYCODE_BACKSPACE;
+		case VK_DELETE: return KEYCODE_DEL;
+		case VK_HOME: return KEYCODE_HOME;
+		case VK_END: return KEYCODE_END;
+		case VK_UP: return KEYCODE_UP;
+		case VK_DOWN: return KEYCODE_DOWN;
+		case VK_LEFT: return KEYCODE_LEFT;
+		case VK_RIGHT: return KEYCODE_RIGHT;
+
+		default: {
+				 if(vk >= WIN_KEY_NUMERIC_START && vk <= WIN_KEY_NUMERIC_END) return KEYCODE_0 + vk - WIN_KEY_NUMERIC_START;
+			else if(vk >= WIN_KEY_LETTERS_START && vk <= WIN_KEY_LETTERS_END) return KEYCODE_A + vk - WIN_KEY_LETTERS_START;
+			else if(vk >= WIN_KEY_F_START 		&& vk <= WIN_KEY_F_END) 	  return KEYCODE_F1 + vk - WIN_KEY_F_START;
+		}
+	}
+
+	return -1;
+}
+
+// int keycode = vkToKeycode(VK_UP);
+
+void initInput(Input* input) {
+    *input = {};
+
+    input->firstFrame = true;
+
 }
 
 enum RequestType {
@@ -295,11 +375,12 @@ void updateInput(Input* input, bool* isRunning, HWND windowHandle) {
 
             case WM_KEYDOWN:
             case WM_KEYUP: {
-                uint key = uint(message.wParam);
+                uint vk = uint(message.wParam);
 
                 bool keyDown = (message.message == WM_KEYDOWN);
-                input->keysDown[key] = keyDown;
-                input->keysPressed[key] = keyDown;
+                int keycode = vkToKeycode(vk);
+                input->keysDown[keycode] = keyDown;
+                input->keysPressed[keycode] = keyDown;
                 input->mShift = ((GetKeyState(VK_SHIFT) & 0x80) != 0);
                 input->mCtrl = ((GetKeyState(VK_CONTROL) & 0x80) != 0);
                 input->mAlt = ((GetKeyState(VK_MENU) & 0x80) != 0);
@@ -307,7 +388,7 @@ void updateInput(Input* input, bool* isRunning, HWND windowHandle) {
                 if(keyDown) {
                     TranslateMessage(&message); 
 
-                    if(key == VK_ESCAPE) *isRunning = false;
+                    if(vk == VK_ESCAPE) *isRunning = false;
                 }
             } break;
 
@@ -369,33 +450,6 @@ void updateInput(Input* input, bool* isRunning, HWND windowHandle) {
     input->mousePos.y = point.y;
 
     input->firstFrame = false;
-}
-
-void initInput(Input* input) {
-    *input = {};
-
-    input->firstFrame = true;
-
-    int i = 0;
-    input->keyCodes[i++] = VK_TAB;
-    input->keyCodes[i++] = VK_LEFT;
-    input->keyCodes[i++] = VK_RIGHT;
-    input->keyCodes[i++] = VK_UP;
-    input->keyCodes[i++] = VK_DOWN;
-    input->keyCodes[i++] = VK_PRIOR;
-    input->keyCodes[i++] = VK_NEXT;
-    input->keyCodes[i++] = VK_HOME;
-    input->keyCodes[i++] = VK_END;
-    input->keyCodes[i++] = VK_DELETE;
-    input->keyCodes[i++] = VK_BACK;
-    input->keyCodes[i++] = VK_RETURN;
-    input->keyCodes[i++] = VK_ESCAPE;
-    input->keyCodes[i++] = 0x41;
-    input->keyCodes[i++] = 0x43;
-    input->keyCodes[i++] = 0x56;
-    input->keyCodes[i++] = 0x58;
-    input->keyCodes[i++] = 0x59;
-    input->keyCodes[i++] = 0x5A;
 }
 
 // MetaPlatformFunction();

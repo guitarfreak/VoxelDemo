@@ -64,6 +64,7 @@ Changing course for now:
  - 3d animation system. (Search Opengl vertex skinning)
  - Sound perturbation (Whatever that is). 
 
+ - Should test hot code reloading again!
 
 
 //-------------------------------------
@@ -148,18 +149,6 @@ GraphicsState* globalGraphicsState;
 DrawCommandList* globalCommandList;
 MemoryBlock* globalMemory;
 DebugState* globalDebugState;
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -734,7 +723,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 	} 
 
-	if(input->keysPressed[VK_F1]) {
+	if(input->keysPressed[KEYCODE_F1]) {
 		int mode;
 		if(wSettings->fullscreen) mode = WINDOW_MODE_WINDOWED;
 		else mode = WINDOW_MODE_FULLBORDERLESS;
@@ -743,7 +732,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->updateFrameBuffers = true;
 	}
 
-	if(input->keysPressed[VK_F2]) {
+	if(input->keysPressed[KEYCODE_F2]) {
 		input->captureMouse = !input->captureMouse;
 	}
 
@@ -761,7 +750,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		while(ShowCursor(true) < 0);
 	}
 
-	if(input->keysPressed[VK_F3]) {
+	if(input->keysPressed[KEYCODE_F3]) {
 		static bool switchMonitor = false;
 
 		setWindowMode(windowHandle, wSettings, WINDOW_MODE_WINDOWED);
@@ -855,7 +844,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	Entity* player = ad->player;
 	Entity* camera = ad->cameraEntity;
 
-	if(input->keysPressed[VK_F4]) {
+	if(input->keysPressed[KEYCODE_F4]) {
 		if(ad->playerMode) {
 			camera->pos = player->pos + player->camOff;
 			camera->dir = player->dir;
@@ -881,15 +870,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 		player->vel = vec3(0,0,0);
 	}
 
-	if(!ad->playerMode && input->keysPressed[VK_SPACE]) {
+	if(!ad->playerMode && input->keysPressed[KEYCODE_SPACE]) {
 		player->pos = camera->pos;
 		player->dir = camera->dir;
 		player->rot = camera->rot;
 		player->rotAngle = camera->rotAngle;
 		player->vel = camera->vel;
 		ad->playerMode = true;
-		input->keysPressed[VK_SPACE] = false;
-		input->keysDown[VK_SPACE] = false;
+		input->keysPressed[KEYCODE_SPACE] = false;
+		input->keysDown[KEYCODE_SPACE] = false;
 	}
 
 	// spawn bomb
@@ -968,25 +957,25 @@ extern "C" APPMAINFUNCTION(appMain) {
 					e->rot.x = modFloat(e->rot.x, (float)M_PI*4);
 				}
 
-				if( input->keysDown[VK_W] || input->keysDown[VK_A] || input->keysDown[VK_S] || 
-					input->keysDown[VK_D]) {
+				if( input->keysDown[KEYCODE_W] || input->keysDown[KEYCODE_A] || input->keysDown[KEYCODE_S] || 
+					input->keysDown[KEYCODE_D]) {
 
-					if(rightLock || input->keysDown[VK_CONTROL]) cam.look = cross(up, cam.right);
+					if(rightLock || input->keysDown[KEYCODE_CTRL]) cam.look = cross(up, cam.right);
 
 					Vec3 acceleration = vec3(0,0,0);
-					if(input->keysDown[VK_SHIFT]) speed *= runBoost;
-					if(input->keysDown[VK_W]) acceleration +=  normVec3(cam.look);
-					if(input->keysDown[VK_S]) acceleration += -normVec3(cam.look);
-					if(input->keysDown[VK_D]) acceleration +=  normVec3(cam.right);
-					if(input->keysDown[VK_A]) acceleration += -normVec3(cam.right);
+					if(input->keysDown[KEYCODE_SHIFT]) speed *= runBoost;
+					if(input->keysDown[KEYCODE_W]) acceleration +=  normVec3(cam.look);
+					if(input->keysDown[KEYCODE_S]) acceleration += -normVec3(cam.look);
+					if(input->keysDown[KEYCODE_D]) acceleration +=  normVec3(cam.right);
+					if(input->keysDown[KEYCODE_A]) acceleration += -normVec3(cam.right);
 					e->acc += normVec3(acceleration)*speed;
 				}
 
 				e->acc.z = 0;
 
 				if(ad->playerMode) {
-					// if(input->keysPressed[VK_SPACE]) {
-					if(input->keysDown[VK_SPACE]) {
+					// if(input->keysPressed[KEYCODE_SPACE]) {
+					if(input->keysDown[KEYCODE_SPACE]) {
 						if(player->playerOnGround) {
 							player->vel += up*7.0f;
 							player->playerOnGround = false;
@@ -1176,7 +1165,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				bool rightLock = false;
 				float runBoost = 2.0f;
 				float speed = 150;
-				if(input->keysDown[VK_T]) speed = 1000;
+				if(input->keysDown[KEYCODE_T]) speed = 1000;
 
 				if((!fpsMode && input->mouseButtonDown[1]) || fpsMode) {
 					float turnRate = ad->dt*0.3f;
@@ -1187,19 +1176,19 @@ extern "C" APPMAINFUNCTION(appMain) {
 					clamp(&e->rot.y, -M_PI+margin, M_PI-margin);
 				}
 
-				if( input->keysDown[VK_W] || input->keysDown[VK_A] || input->keysDown[VK_S] || 
-					input->keysDown[VK_D] || input->keysDown[VK_E] || input->keysDown[VK_Q]) {
+				if( input->keysDown[KEYCODE_W] || input->keysDown[KEYCODE_A] || input->keysDown[KEYCODE_S] || 
+					input->keysDown[KEYCODE_D] || input->keysDown[KEYCODE_E] || input->keysDown[KEYCODE_Q]) {
 
-					if(rightLock || input->keysDown[VK_CONTROL]) cam.look = cross(up, cam.right);
+					if(rightLock || input->keysDown[KEYCODE_CTRL]) cam.look = cross(up, cam.right);
 
 					Vec3 acceleration = vec3(0,0,0);
-					if(input->keysDown[VK_SHIFT]) speed *= runBoost;
-					if(input->keysDown[VK_W]) acceleration +=  normVec3(cam.look);
-					if(input->keysDown[VK_S]) acceleration += -normVec3(cam.look);
-					if(input->keysDown[VK_D]) acceleration +=  normVec3(cam.right);
-					if(input->keysDown[VK_A]) acceleration += -normVec3(cam.right);
-					if(input->keysDown[VK_E]) acceleration +=  normVec3(up);
-					if(input->keysDown[VK_Q]) acceleration += -normVec3(up);
+					if(input->keysDown[KEYCODE_SHIFT]) speed *= runBoost;
+					if(input->keysDown[KEYCODE_W]) acceleration +=  normVec3(cam.look);
+					if(input->keysDown[KEYCODE_S]) acceleration += -normVec3(cam.look);
+					if(input->keysDown[KEYCODE_D]) acceleration +=  normVec3(cam.right);
+					if(input->keysDown[KEYCODE_A]) acceleration += -normVec3(cam.right);
+					if(input->keysDown[KEYCODE_E]) acceleration +=  normVec3(up);
+					if(input->keysDown[KEYCODE_Q]) acceleration += -normVec3(up);
 					e->acc += normVec3(acceleration)*speed;
 				}
 
@@ -2447,7 +2436,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 
 		{			
-			if(input->keysPressed[VK_F5]) ad->showHud = !ad->showHud;
+			if(input->keysPressed[KEYCODE_F5]) ad->showHud = !ad->showHud;
 
 			if(ad->showHud) {
 				int fontSize = 18;
@@ -2456,9 +2445,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 				Gui* gui = ds->gui;
 				GuiInput gInput = { vec2(input->mousePos), input->mouseWheel, input->mouseButtonPressed[0], input->mouseButtonDown[0], 
-									input->keysPressed[VK_ESCAPE], input->keysPressed[VK_RETURN], input->keysPressed[VK_SPACE], input->keysPressed[VK_BACK], input->keysPressed[VK_DELETE], input->keysPressed[VK_HOME], input->keysPressed[VK_END], 
-									input->keysPressed[VK_LEFT], input->keysPressed[VK_RIGHT], input->keysPressed[VK_UP], input->keysPressed[VK_DOWN], 
-									input->keysDown[VK_SHIFT], input->keysDown[VK_CONTROL], input->inputCharacters, input->inputCharacterCount};
+									input->keysPressed[KEYCODE_ESCAPE], input->keysPressed[KEYCODE_RETURN], input->keysPressed[KEYCODE_SPACE], input->keysPressed[KEYCODE_BACKSPACE], input->keysPressed[KEYCODE_DEL], input->keysPressed[KEYCODE_HOME], input->keysPressed[KEYCODE_END], 
+									input->keysPressed[KEYCODE_LEFT], input->keysPressed[KEYCODE_RIGHT], input->keysPressed[KEYCODE_UP], input->keysPressed[KEYCODE_DOWN], 
+									input->keysDown[KEYCODE_SHIFT], input->keysDown[KEYCODE_CTRL], input->inputCharacters, input->inputCharacterCount};
 				// gui->start(gInput, getFont(FONT_CONSOLAS, fontSize), wSettings->currentRes);
 				gui->start(gInput, getFont(FONT_CALIBRI, fontSize), wSettings->currentRes);
 
@@ -2499,7 +2488,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 				static bool sectionWorld = initSections;
 				if(gui->beginSection("World", &sectionWorld)) { 
-					if(gui->button("Reload World") || input->keysPressed[VK_TAB]) ad->reloadWorld = true;
+					if(gui->button("Reload World") || input->keysPressed[KEYCODE_TAB]) ad->reloadWorld = true;
 					
 					gui->div(vec2(0,0)); gui->label("CubeMap", 0); gui->slider(&ad->cubeMapDrawIndex, 0, ad->cubeMapCount);
 
@@ -2628,9 +2617,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 		bool initSections = false;
 
 		GuiInput gInput = { vec2(input->mousePos), input->mouseWheel, input->mouseButtonPressed[0], input->mouseButtonDown[0], 
-							input->keysPressed[VK_ESCAPE], input->keysPressed[VK_RETURN], input->keysPressed[VK_SPACE], input->keysPressed[VK_BACK], input->keysPressed[VK_DELETE], input->keysPressed[VK_HOME], input->keysPressed[VK_END], 
-							input->keysPressed[VK_LEFT], input->keysPressed[VK_RIGHT], input->keysPressed[VK_UP], input->keysPressed[VK_DOWN], 
-							input->keysDown[VK_SHIFT], input->keysDown[VK_CONTROL], input->inputCharacters, input->inputCharacterCount};
+							input->keysPressed[KEYCODE_ESCAPE], input->keysPressed[KEYCODE_RETURN], input->keysPressed[KEYCODE_SPACE], input->keysPressed[KEYCODE_BACKSPACE], input->keysPressed[KEYCODE_DEL], input->keysPressed[KEYCODE_HOME], input->keysPressed[KEYCODE_END], 
+							input->keysPressed[KEYCODE_LEFT], input->keysPressed[KEYCODE_RIGHT], input->keysPressed[KEYCODE_UP], input->keysPressed[KEYCODE_DOWN], 
+							input->keysDown[KEYCODE_SHIFT], input->keysDown[KEYCODE_CTRL], input->inputCharacters, input->inputCharacterCount};
 		Gui* gui = ds->gui2;
 		gui->start(gInput, getFont(FONT_CALIBRI, fontHeight), wSettings->currentRes);
 
@@ -2746,7 +2735,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 		// save timer buffer
-		if(input->keysPressed[VK_F6]) {
+		if(input->keysPressed[KEYCODE_F6]) {
 			if(!ds->frozenGraph) {
 				memCpy(ds->savedTimerBuffer, ds->timerBuffer, bufferIndex*sizeof(TimerSlot));
 				ds->savedBufferIndex = bufferIndex;
