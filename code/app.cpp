@@ -153,6 +153,7 @@ DebugState* globalDebugState;
 
 
 struct AppData {
+	bool captureMouse;
 	bool showHud;
 	bool updateFrameBuffers;
 	float guiAlpha;
@@ -365,6 +366,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		int interval = wglGetSwapIntervalEXT();
 
+
+		HANDLE fileChangeHandle = FindFirstChangeNotification("..\\data\\Textures", false, FILE_NOTIFY_CHANGE_LAST_WRITE);
+		if(fileChangeHandle == INVALID_HANDLE_VALUE) {
+			printf("Could not set folder change notification.");
+		}
+		systemData->folderHandle = fileChangeHandle;
+
+
+
 		// @setup
 
 		// ad->fieldOfView = 55;
@@ -398,7 +408,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->pickMode = true;
 		ad->selectionRadius = 5;
 		// input->captureMouse = true;
-		input->captureMouse = false;
+		ad->captureMouse = false;
 
 		*ad->blockMenu = {};
 		ad->blockMenuSelected = 0;
@@ -447,16 +457,22 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glCreateVertexArrays(1, &vao);
 		glBindVertexArray(vao);
 
-		// setup textures
+		//
+		// Setup Textures.
+		//
+
 		for(int i = 0; i < TEXTURE_SIZE; i++) {
 			#ifdef USE_SRGB 
-				globalGraphicsState->textures[i] = loadTextureFile(texturePaths[i], 1, GL_SRGB8_ALPHA8, GL_RGBA, GL_UNSIGNED_BYTE);
+				globalGraphicsState->textures[i] = loadTextureFile(texturePaths[i], -1, GL_SRGB8_ALPHA8, GL_RGBA, GL_UNSIGNED_BYTE);
 			#else 
-				globalGraphicsState->textures[i] = loadTextureFile(texturePaths[i], 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+				globalGraphicsState->textures[i] = loadTextureFile(texturePaths[i], -1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
 			#endif
 		}
 
-		// load cubemap
+		//
+		// Load Cubemaps.
+		//
+
 		glCreateTextures(GL_TEXTURE_CUBE_MAP_ARRAY, arrayCount(ad->cubemapTextureId), &ad->cubemapTextureId[0]);
 
 		char* texturePaths[] = {
@@ -498,45 +514,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 			stbi_image_free(stbData);
 		}
 
-
-
-
-		// setup shaders and uniforms
-		for(int i = 0; i < SHADER_SIZE; i++) {
-			MakeShaderInfo* info = makeShaderInfo + i; 
-			Shader* s = globalGraphicsState->shaders + i;
-
-			s->program = createShader(info->vertexString, info->fragmentString, &s->vertex, &s->fragment);
-			s->uniformCount = info->uniformCount;
-			s->uniforms = getPArray(ShaderUniform, s->uniformCount);
-
-			for(int i = 0; i < s->uniformCount; i++) {
-				ShaderUniform* uni = s->uniforms + i;
-				uni->type = info->uniformNameMap[i].type;	
-				uni->vertexLocation = glGetUniformLocation(s->vertex, info->uniformNameMap[i].name);
-				uni->fragmentLocation = glGetUniformLocation(s->fragment, info->uniformNameMap[i].name);
-			}
-		}
-
-
-
-		// setup meshs
-		for(int i = 0; i < MESH_SIZE; i++) {
-			Mesh* mesh = getMesh(i);
-
-			MeshMap* meshMap = meshArrays +i;
-
-			glCreateBuffers(1, &mesh->bufferId);
-			glNamedBufferData(mesh->bufferId, meshMap->size, meshMap->vertexArray, GL_STATIC_DRAW);
-			mesh->vertCount = meshMap->size / sizeof(Vertex);
-		}
-
-		ad->testBufferSize = megaBytes(10);
-		ad->testBuffer = getPArray(char, ad->testBufferSize);
-		glCreateBuffers(1, &ad->testBufferId);
-		glNamedBufferData(ad->testBufferId, ad->testBufferSize, ad->testBuffer, GL_STREAM_DRAW);
-
-
+		// 
+		// Voxel Textures.
+		//
 
 		ad->voxelSamplers[0] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_NEAREST, GL_NEAREST_MIPMAP_LINEAR);
 		ad->voxelSamplers[1] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_NEAREST, GL_NEAREST_MIPMAP_LINEAR);
@@ -546,7 +526,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		ad->samplers[0] = createSampler(16.0f, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
 
-		// voxel textures
+
 		const int mipMapCount = 5;
 		char* p = getTString(34);
 		strClear(p);
@@ -593,7 +573,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 					alphaCoverage[i] += pixels[y*size + x].a;
 				}
 			}
-	
+		
 			alphaCoverage[i] = alphaCoverage[i] / (size*size);
 			size /= 2;
 		}
@@ -633,6 +613,48 @@ extern "C" APPMAINFUNCTION(appMain) {
 			glTextureSubImage3D(ad->voxelTextures[1], 0, 0, 0, layerIndex, x, y, 1, GL_RGBA, GL_UNSIGNED_BYTE, stbData);
 			stbi_image_free(stbData);
 		}
+
+
+
+		// setup shaders and uniforms
+		for(int i = 0; i < SHADER_SIZE; i++) {
+			MakeShaderInfo* info = makeShaderInfo + i; 
+			Shader* s = globalGraphicsState->shaders + i;
+
+			s->program = createShader(info->vertexString, info->fragmentString, &s->vertex, &s->fragment);
+			s->uniformCount = info->uniformCount;
+			s->uniforms = getPArray(ShaderUniform, s->uniformCount);
+
+			for(int i = 0; i < s->uniformCount; i++) {
+				ShaderUniform* uni = s->uniforms + i;
+				uni->type = info->uniformNameMap[i].type;	
+				uni->vertexLocation = glGetUniformLocation(s->vertex, info->uniformNameMap[i].name);
+				uni->fragmentLocation = glGetUniformLocation(s->fragment, info->uniformNameMap[i].name);
+			}
+		}
+
+
+		// setup meshs
+		for(int i = 0; i < MESH_SIZE; i++) {
+			Mesh* mesh = getMesh(i);
+
+			MeshMap* meshMap = meshArrays +i;
+
+			glCreateBuffers(1, &mesh->bufferId);
+			glNamedBufferData(mesh->bufferId, meshMap->size, meshMap->vertexArray, GL_STATIC_DRAW);
+			mesh->vertCount = meshMap->size / sizeof(Vertex);
+		}
+
+		ad->testBufferSize = megaBytes(10);
+		ad->testBuffer = getPArray(char, ad->testBufferSize);
+		glCreateBuffers(1, &ad->testBufferId);
+		glNamedBufferData(ad->testBufferId, ad->testBufferSize, ad->testBuffer, GL_STREAM_DRAW);
+
+
+
+
+
+
 
 
 		glCreateFramebuffers(5, ad->frameBuffers);
@@ -698,6 +720,43 @@ extern "C" APPMAINFUNCTION(appMain) {
 	globalCommandList = &ad->commandList3d;
 
 
+	DWORD fileStatus = WaitForMultipleObjects(1, &systemData->folderHandle, false, 0);
+	if(fileStatus == WAIT_OBJECT_0) {
+		FindNextChangeNotification(systemData->folderHandle);
+
+		// Right now we will reload every texture on every change to the Texture folder.
+
+		for(int i = 0; i < TEXTURE_SIZE; i++) {
+			#ifdef USE_SRGB 
+				reloadTextureFile(i, -1, GL_SRGB8_ALPHA8, GL_RGBA, GL_UNSIGNED_BYTE);
+			#else 
+				reloadTextureFile(i, -1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+			#endif
+		}
+
+		// Todo: Get ReadDirectoryChangesW to work instead of FindNextChangeNotification.
+
+		/*
+		// HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+		// HANDLE directory = CreateFile("C:\\Projects", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
+		// HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
+		HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
+		// HANDLE directory = CreateFile("C:\\Projects\\", FILE_LIST_DIRECTORY, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+		if(directory == INVALID_HANDLE_VALUE) {
+			printf("Could not open directory.\n");
+		}
+
+		FILE_NOTIFY_INFORMATION notifyInformation[1024];
+		DWORD bytesReturned = 0;
+		bool result = ReadDirectoryChangesW(directory, (LPVOID)&notifyInformation, sizeof(notifyInformation), false, FILE_NOTIFY_CHANGE_LAST_WRITE, &bytesReturned, 0, 0);
+		CloseHandle(directory);
+		*/
+	}
+
+	dcRect(rectCenDim(400,-400,200,200), rect(0,0,1,1), vec4(1,1,1,1), getTexture(TEXTURE_RECT)->id, -1, &ad->commandList2d);
+
+
+
 
 	{
 		// TIMER_BLOCK_NAMED("Input");
@@ -733,11 +792,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 	if(input->keysPressed[KEYCODE_F2]) {
-		input->captureMouse = !input->captureMouse;
+		ad->captureMouse = !ad->captureMouse;
 	}
 
 	bool focus = GetFocus() == windowHandle;
-	bool fpsMode = input->captureMouse && focus;
+	bool fpsMode = ad->captureMouse && focus;
 
 	if(fpsMode) {
 		int w,h;
@@ -2387,6 +2446,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		globalCommandList = &ad->commandList3d;
 	}
+
+
 
 	TIMER_BLOCK_END(Main)
 

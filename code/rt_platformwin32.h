@@ -88,8 +88,6 @@ struct Input {
 	int inputCharacterCount;
 
 	bool mShift, mCtrl, mAlt;
-
-	bool captureMouse;
 };
 
 #define WIN_KEY_NUMERIC_START 0x30
@@ -185,24 +183,24 @@ void atomicSub(volatile unsigned int* n) {
 }
 
 struct ThreadQueue;
-struct PlatformData {
-	int windowX, windowY;
-	int windowWidth, windowHeight;
-	int viewportWidth, viewportHeight;
-	ThreadQueue* highQueue;
-	ThreadQueue* lowQueue;
+// struct PlatformData {
+// 	int windowX, windowY;
+// 	int windowWidth, windowHeight;
+// 	int viewportWidth, viewportHeight;
+// 	ThreadQueue* highQueue;
+// 	ThreadQueue* lowQueue;
 
-	// PlatformFunctions functions;
-};
+// 	// PlatformFunctions functions;
+// };
 
 int getThreadId() {
 	int tId = GetCurrentThreadId();
 	return tId;
 }
 
-void platformDataInit(PlatformData* pd) {
-	*pd = {};
-}
+// void platformDataInit(PlatformData* pd) {
+	// *pd = {};
+// }
 
 #include <winsock2.h>
 #include <WS2tcpip.h>
@@ -214,6 +212,8 @@ struct SystemData {
 	HINSTANCE instance;
 	HDC deviceContext;
 	HWND windowHandle;
+
+	HANDLE folderHandle;
 };
 
 void systemDataInit(SystemData* sd, HINSTANCE instance) {
@@ -417,7 +417,6 @@ void updateInput(Input* input, bool* isRunning, HWND windowHandle) {
             } break;
 
             // case WM_SIZE: {
-
             // } break;
 
             case WM_DESTROY: {

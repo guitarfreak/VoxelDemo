@@ -860,13 +860,14 @@ enum TextureId {
 };
 
 char* texturePaths[] = {
-	"..\\data\\white.png",
-	"..\\data\\rect.png",
-	"..\\data\\circle.png",
-	"..\\data\\test.png",
+	"..\\data\\Textures\\white.png",
+	"..\\data\\Textures\\rect.png",
+	"..\\data\\Textures\\circle.png",
+	"..\\data\\Textures\\test.png",
 };
 
 struct Texture {
+	// char* name;
 	uint id;
 	Vec2i dim;
 	int channels;
@@ -889,11 +890,36 @@ Texture loadTextureFile(char* path, int mipLevels, int internalFormat, int chann
 	int x,y,n;
 	unsigned char* stbData = stbi_load(path, &x, &y, &n, 0);
 
+	if(mipLevels == -1) {
+		int levelCount = 1;
+		int size = min(x, y);
+		while(size >= 2) {
+			size /= 2;
+			levelCount++;
+		}
+		mipLevels = levelCount;
+	}
 	Texture tex = loadTexture(stbData, x, y, mipLevels, internalFormat, channelType, channelFormat);
-	stbi_image_free(stbData);	
+
+	stbi_image_free(stbData);
 
 	return tex;
 }
+
+Texture* getTexture(int textureId);
+void reloadTextureFile(int textureIndex, int mipLevels, int internalFormat, int channelType, int channelFormat) {
+	Texture* texture = getTexture(textureIndex);
+	const char* path = texturePaths[textureIndex];
+
+	int x,y,n;
+	unsigned char* stbData = stbi_load(path, &x, &y, &n, 0);
+
+	glTextureSubImage2D(texture->id, 0, 0, 0, x, y, channelType, channelFormat, stbData);
+	glGenerateTextureMipmap(texture->id);
+
+	stbi_image_free(stbData);	
+}
+
 
 enum FontId {
 	FONT_LIBERATION_MONO = 0,
@@ -905,11 +931,11 @@ enum FontId {
 };
 
 char* fontPaths[] = {
-	"..\\data\\LiberationMono-Bold.ttf",
-	"..\\data\\SourceSansPro-Regular.ttf",
-	"..\\data\\consola.ttf",
-	"..\\data\\arial.ttf",
-	"..\\data\\calibri.ttf",
+	"..\\data\\Fonts\\LiberationMono-Bold.ttf",
+	"..\\data\\Fonts\\SourceSansPro-Regular.ttf",
+	"..\\data\\Fonts\\consola.ttf",
+	"..\\data\\Fonts\\arial.ttf",
+	"..\\data\\Fonts\\calibri.ttf",
 };
 
 struct Font {
