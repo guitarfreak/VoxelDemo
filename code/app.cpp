@@ -64,6 +64,7 @@ Changing course for now:
  - 3d animation system. (Search Opengl vertex skinning)
  - Sound perturbation (Whatever that is). 
 
+ - Spawn player on the ground.
 
 
 //-------------------------------------
@@ -2098,6 +2099,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			dcDisable(STATE_CULL);
 			Vec3 vs[4];
 			getPointsFromQuadAndNormal(ad->selectedBlock + ad->selectedBlockFaceDir*0.5f*1.01f, ad->selectedBlockFaceDir, 1, vs);
+
 			dcQuad(vs[0], vs[1], vs[2], vs[3], vec4(1,1,1,0.025f));
 			dcEnable(STATE_CULL);
 
@@ -2449,6 +2451,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			#define PVEC3(v) v.x, v.y, v.z
 			#define PVEC2(v) v.x, v.y
 			dcText(fillString("Pos  : (%f,%f,%f)", PVEC3(ad->activeCam.pos)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow);
+			dcText(fillString("Pos  : (%f,%f,%f)", PVEC3(ad->selectedBlock)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow);
 			dcText(fillString("Look : (%f,%f,%f)", PVEC3(ad->activeCam.look)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow);
 			dcText(fillString("Up   : (%f,%f,%f)", PVEC3(ad->activeCam.up)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow);
 			dcText(fillString("Right: (%f,%f,%f)", PVEC3(ad->activeCam.right)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow);

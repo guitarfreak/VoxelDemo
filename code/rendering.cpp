@@ -1296,15 +1296,6 @@ void drawText(char* text, Font* font, Vec2 pos, Vec4 color, int vAlign = 0, int 
 }
 
 void drawCube(Vec3 trans, Vec3 scale, Vec4 color, float degrees, Vec3 rot) {
-	// glBindTextures(0,1,&getTexture(TEXTURE_WHITE)->id);
-
-	// Mat4 model = modelMatrix(trans, scale, degrees, rot);
-	// pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODEL, model.e);
-	// pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, &color);
-	// pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODE, false);
-
-	// glDrawArrays(GL_QUADS, 0, 6*4);
-
 	glBindTextures(0,1,&getTexture(TEXTURE_WHITE)->id);
 
 	Mesh* cubeMesh = getMesh(MESH_CUBE);
@@ -1328,6 +1319,9 @@ void drawCube(Vec3 trans, Vec3 scale, Vec4 color, float degrees, Vec3 rot) {
 }
 
 void drawLine(Vec3 p0, Vec3 p1, Vec4 color) {
+
+	// Disabling these arrays is very important.
+
 	glDisableVertexAttribArray(0);
 	glDisableVertexAttribArray(1);
 	glDisableVertexAttribArray(2);
@@ -1346,6 +1340,13 @@ void drawLine(Vec3 p0, Vec3 p1, Vec4 color) {
 }
 
 void drawQuad(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec4 color) {
+
+	// Disabling these arrays is very important.
+
+	glDisableVertexAttribArray(0);
+	glDisableVertexAttribArray(1);
+	glDisableVertexAttribArray(2);
+	
 	Vec3 verts[] = {p0, p1, p2, p3};
 
 	uint tex[2] = {getTexture(TEXTURE_WHITE)->id, 0};
@@ -1417,9 +1418,8 @@ int stateSwitch(int state) {
 void executeCommandList(DrawCommandList* list, bool print = false) {
 	// TIMER_BLOCK();
 
-
 	if(print) {
-		printf("\nDrawCommands: \n");
+		printf("\nDrawCommands: %i \n", list->count);
 	}
 
 	char* drawListIndex = (char*)list->data;
@@ -1444,6 +1444,7 @@ void executeCommandList(DrawCommandList* list, bool print = false) {
 
 			case Draw_Command_Quad_Type: {
 				dcGetStructAndIncrement(Quad);
+
 				drawQuad(dc.p0, dc.p1, dc.p2, dc.p3, dc.color);
 			} break;
 
