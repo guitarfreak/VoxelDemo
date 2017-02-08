@@ -948,6 +948,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			threadQueueComplete(globalThreadQueue);
 		// }
+
+		// Push the player up until he is right above the ground.
+
+		Entity* player = ad->player;
+
+		while(collisionVoxelWidthBox(ad->voxelHash, ad->voxelHashSize, player->pos, player->dim)) {
+			player->pos.z += 2;
+		}
 	}	
 
 	// TIMER_BLOCK_BEGIN_NAMED(entities, "Upd Entities");
@@ -1030,35 +1038,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 					int collisionCount = 0;
 					bool collision = true;
 					while(collision) {
-
-						// // get mesh coords that touch the player box
-						// Rect3 box = rect3CenDim(nPos, pSize);
-						// Vec3i voxelMin = coordToVoxel(box.min);
-						// Vec3i voxelMax = coordToVoxel(box.max+1);
-
-						// Vec3 collisionBox;
-						// collision = false;
-						// float minDistance = 100000;
-
-						// // check collision with the voxel thats closest
-						// for(int x = voxelMin.x; x < voxelMax.x; x++) {
-						// 	for(int y = voxelMin.y; y < voxelMax.y; y++) {
-						// 		for(int z = voxelMin.z; z < voxelMax.z; z++) {
-						// 			Vec3i coord = vec3i(x,y,z);
-						// 			uchar* block = getBlockFromVoxel(ad->voxelHash, ad->voxelHashSize, coord);
-
-						// 			if(*block > 0) {
-						// 				Vec3 cBox = voxelToVoxelCoord(coord);
-						// 				float distance = lenVec3(nPos - cBox);
-						// 				if(minDistance == 100000 || distance > minDistance) {
-						// 					minDistance = distance;
-						// 					collisionBox = cBox;
-						// 				}
-						// 				collision = true;
-						// 			}
-						// 		}
-						// 	}
-						// }
 
 						float minDistance;
 						Vec3 collisionBox;

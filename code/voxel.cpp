@@ -1085,7 +1085,7 @@ void loadVoxelTextures(char* folderPath, int internalFormat, bool reload = false
 }
 
 
-bool collisionVoxelWidthBox(VoxelNode** voxelHash, int voxelHashSize, Vec3 boxPos, Vec3 boxSize, float* shortestDistance, Vec3* collisionVoxel) {
+bool collisionVoxelWidthBox(VoxelNode** voxelHash, int voxelHashSize, Vec3 boxPos, Vec3 boxSize, float* minDistance = 0, Vec3* collisionVoxel = 0) {
 
 	// First get the mesh coords that touch the player box.
 
@@ -1093,8 +1093,10 @@ bool collisionVoxelWidthBox(VoxelNode** voxelHash, int voxelHashSize, Vec3 boxPo
 	Vec3i voxelMin = coordToVoxel(box.min);
 	Vec3i voxelMax = coordToVoxel(box.max+1);
 
+	bool checkDistance = minDistance != 0 && collisionVoxel != 0;
+
 	bool collision = false;
-	float minDistance = 100000; // @Cleanup: Replace with FLT_MAX or something.
+	if(checkDistance) *minDistance = 100000; // @Cleanup: Replace with FLT_MAX or something.
 
 	// Check collision with the voxel that's closest.
 
@@ -1105,19 +1107,20 @@ bool collisionVoxelWidthBox(VoxelNode** voxelHash, int voxelHashSize, Vec3 boxPo
 				uchar* block = getBlockFromVoxel(voxelHash, voxelHashSize, coord);
 
 				if(*block > 0) {
-					Vec3 cBox = voxelToVoxelCoord(coord);
-					float distance = lenVec3(boxPos - cBox);
-					if(minDistance == 100000 || distance > minDistance) {
-						minDistance = distance;
-						*collisionVoxel = cBox;
+					if(checkDistance) {
+						Vec3 cBox = voxelToVoxelCoord(coord);
+						float distance = lenVec3(boxPos - cBox);
+						if(*minDistance == 100000 || distance > *minDistance) {
+							*minDistance = distance;
+							*collisionVoxel = cBox;
+						}
 					}
+
 					collision = true;
 				}
 			}
 		}
 	}
-
-	*shortestDistance = minDistance;
 
 	return collision;
 }
