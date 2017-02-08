@@ -351,6 +351,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 		wSettings->style = (WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU  | WS_MINIMIZEBOX  | WS_VISIBLE);
 		initSystem(systemData, windowsData, 0, 0,0,0,0);
 
+		SetFocus(systemData->windowHandle);
+
+		wSettings->currentRes = vec2i(2000,2000);
+		wSettings->aspectRatio = 1;
+
+		ad->updateFrameBuffers = true;
+
 		// DEVMODE devMode;
 		// int index = 0;
 		// int dW = 0, dH = 0;
@@ -458,6 +465,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 			ad->treeNoise[index.y*VOXEL_X + index.x] = 1;
 		}
 		free(noiseSamples);
+
+		treeNoise = ad->treeNoise;
+
+		for(int i = 0; i < 8; i++) {
+			voxelCache[i] = ad->voxelCache[i];
+			voxelLightingCache[i] = ad->voxelLightingCache[i];
+		}
+
 
 		ad->bombFireInterval = 0.1f;
 		ad->bombButtonDown = false;
@@ -589,7 +604,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-		return; // window operations only work after first frame?
+
+		// @BUG: Window operations only work after the first frame?
+
+		// return; 
 	}
 
 	if(second) {
@@ -600,7 +618,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		setWindowProperties(windowHandle, wSettings->res.w, wSettings->res.h, 300, 300);
 		setWindowMode(windowHandle, wSettings, WINDOW_MODE_WINDOWED);
-
 
 		ad->updateFrameBuffers = true;
 	}
@@ -618,7 +635,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	LARGE_INTEGER frequency;
 	QueryPerformanceFrequency(&frequency); 
 
-	if(second) {
+	if(init) {
 		QueryPerformanceCounter(&counter);
 		ad->lastTimeStamp = counter.QuadPart;
 		ad->dt = 1/(float)60;
@@ -931,7 +948,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 	// make sure the meshs around the player are loaded at startup
-	if(second) {
+	if(init) {
 		// Vec2i pPos = coordToMesh(ad->activeCam.pos);
 		Vec2i pPos = coordToMesh(ad->player->pos);
 		// for(int i = 0; i < 2; i++) {

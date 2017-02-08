@@ -571,7 +571,7 @@ void setWindowMode(HWND hwnd, WindowSettings* wSettings, int mode) {
 	} else if(mode == WINDOW_MODE_WINDOWED && wSettings->fullscreen) {
 		setWindowStyle(hwnd, wSettings->style);
 		SetWindowPlacement(hwnd, &wSettings->g_wpPrev);
-		SetWindowPos(hwnd, NULL, 0,0, wSettings->res.w, wSettings->res.h, SWP_NOZORDER | SWP_NOMOVE |SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+		SetWindowPos(hwnd, NULL, 0,0, wSettings->res.w, wSettings->res.h, SWP_NOZORDER | SWP_NOMOVE | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
 
 		wSettings->fullscreen = false;
 	}
