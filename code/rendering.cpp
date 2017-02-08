@@ -871,20 +871,17 @@ enum CubeMapIds {
 	// CUBEMAP_2,
 	// CUBEMAP_3,
 	// CUBEMAP_4,
+	// CUBEMAP_5,
 	CUBEMAP_5 = 0,
-	// CUBEMAP_6,
-	// CUBEMAP_7,
 	CUBEMAP_SIZE,
 };
 
-const char* cubeMapPaths[] = {
-		 					// "..\\data\\skybox\\sb1.png",
-							// "..\\data\\skybox\\sb2.png", 
-							// "..\\data\\skybox\\sb3.jpg", 
-							// "..\\data\\skybox\\sb4.png", 
+char* cubeMapPaths[] = {
+		 					// "..\\data\\Textures\\Skyboxes\\sb1.png",
+							// "..\\data\\Textures\\Skyboxes\\sb2.png", 
+							// "..\\data\\Textures\\Skyboxes\\sb3.jpg", 
+							// "..\\data\\Textures\\Skyboxes\\sb4.png", 
 							"..\\data\\Textures\\Skyboxes\\xoGVD3X.jpg",
-							// "..\\data\\skybox\\xoGVD3X.jpg", 
-							// "C:\\Projects\\Hmm\\data\\skybox\\xoGVD3X.jpg", 
 						  };
 
 // enum TextureType {

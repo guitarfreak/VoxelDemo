@@ -978,7 +978,7 @@ void drawVoxelMesh(VoxelMesh* m, int drawMode = 0) {
 }
 
 
-void loadVoxelTextures(char* folderPath, int internalFormat, bool reload = false) {
+void loadVoxelTextures(char* folderPath, int internalFormat, bool reload = false, int levelToReload = 0) {
 
 	const int mipMapCount = 5;
 	char* p = getTString(34);
@@ -987,10 +987,14 @@ void loadVoxelTextures(char* folderPath, int internalFormat, bool reload = false
 
 	Texture* texture = globalGraphicsState->textures3d + 0;
 
-	glCreateTextures(GL_TEXTURE_2D_ARRAY, 2, &texture->id);
-	glTextureStorage3D(texture->id, mipMapCount, internalFormat, 32, 32, BX_Size);
+	if(!reload) {
+		glCreateTextures(GL_TEXTURE_2D_ARRAY, 2, &texture->id);
+		glTextureStorage3D(texture->id, mipMapCount, internalFormat, 32, 32, BX_Size);
+	}
 
 	for(int layerIndex = 0; layerIndex < BX_Size; layerIndex++) {
+		if(reload && layerIndex != levelToReload) continue;
+
 		int x,y,n;
 		unsigned char* stbData = stbi_load(textureFilePaths[layerIndex], &x, &y, &n, 4);
 
@@ -1013,8 +1017,10 @@ void loadVoxelTextures(char* folderPath, int internalFormat, bool reload = false
 
 	glGenerateTextureMipmap(texture->id);
 
+
 	// Adjust mipmap alpha levels for tree textures.
 
+	if(!reload || (reload && levelToReload == BX_Leaves))
 	{
 		int textureId = globalGraphicsState->textures3d[0].id;
 
@@ -1059,10 +1065,14 @@ void loadVoxelTextures(char* folderPath, int internalFormat, bool reload = false
 
 	texture = globalGraphicsState->textures3d + 1;
 
-	glCreateTextures(GL_TEXTURE_2D_ARRAY, 2, &texture->id);
-	glTextureStorage3D(texture->id, 1, internalFormat, 32, 32, BX2_Size);
+	if(!reload) {
+		glCreateTextures(GL_TEXTURE_2D_ARRAY, 2, &texture->id);
+		glTextureStorage3D(texture->id, 1, internalFormat, 32, 32, BX2_Size);
+	}
 
 	for(int layerIndex = 0; layerIndex < BX2_Size; layerIndex++) {
+		if(reload && layerIndex != levelToReload) continue;
+
 		int x,y,n;
 		unsigned char* stbData = stbi_load(textureFilePaths2[layerIndex], &x, &y, &n, 4);
 		
