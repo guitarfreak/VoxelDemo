@@ -231,9 +231,6 @@ struct AppData {
 
 	bool reloadWorld;
 
-	GLuint voxelSamplers[3];
-	GLuint voxelTextures[3];
-
 	GLuint testBufferId;
 	char* testBuffer;
 	int testBufferSize;
@@ -289,6 +286,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	globalThreadQueue = threadQueue;
 	globalGraphicsState = &ad->graphicsState;
+	GraphicsState* gs = &ad->graphicsState;
 	threadData = ad->threadData;
 
 	DebugState* ds = (DebugState*)globalMemory->pDebugMemory->data;
@@ -480,115 +478,22 @@ extern "C" APPMAINFUNCTION(appMain) {
 		//
 
 		for(int i = 0; i < TEXTURE_SIZE; i++) {
-			loadTextureFromFile(globalGraphicsState->textures + i, texturePaths[i], -1, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE);
+			loadTextureFromFile(gs->textures + i, texturePaths[i], -1, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE);
 		}
+
+		for(int i = 0; i < CUBEMAP_SIZE; i++) {
+			loadCubeMapFromFile(gs->cubeMaps + i, (char*)cubeMapPaths[i], 5, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE);
+		}
+
+		loadVoxelTextures((char*)minecraftTextureFolderPath, INTERNAL_TEXTURE_FORMAT);
 
 		//
-		// Setup Cubemaps.
+		// Setup shaders and uniforms.
 		//
 
-		for(int textureIndex = 0; textureIndex < CUBEMAP_SIZE; textureIndex++) {
-			loadCubeMapFromFile(globalGraphicsState->cubeMaps + textureIndex, (char*)cubeMapPaths[textureIndex], 5, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE);
-		}
-
-		// 
-		// Setup Voxel Textures.
-		//
-
-		ad->voxelSamplers[0] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_NEAREST, GL_NEAREST_MIPMAP_LINEAR);
-		ad->voxelSamplers[1] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_NEAREST, GL_NEAREST_MIPMAP_LINEAR);
-		ad->voxelSamplers[2] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
-
-		glCreateTextures(GL_TEXTURE_2D_ARRAY, 2, ad->voxelTextures);
-
-		ad->samplers[0] = createSampler(16.0f, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
-
-
-		const int mipMapCount = 5;
-		char* p = getTString(34);
-		strClear(p);
-		strAppend(p, (char*)minecraftTextureFolderPath);
-
-		char* fullPath = getTString(234);
-		glTextureStorage3D(ad->voxelTextures[0], mipMapCount, INTERNAL_TEXTURE_FORMAT, 32, 32, BX_Size);
-
-		for(int layerIndex = 0; layerIndex < BX_Size; layerIndex++) {
-			int x,y,n;
-			unsigned char* stbData = stbi_load(textureFilePaths[layerIndex], &x, &y, &n, 4);
-
-			if(layerIndex == BX_Water) {
-				uint* data = (uint*)stbData;
-				for(int x = 0; x < 32; x++) {
-					for(int y = 0; y < 32; y++) {
-						Vec4 c;
-						colorGetRGBA(data[y*32 + x], c.e);
-						c.r = waterAlpha;
-						data[y*32 + x] = mapRGBA(c.e);
-					}
-				}
-			}
-
-			glTextureSubImage3D(ad->voxelTextures[0], 0, 0, 0, layerIndex, x, y, 1, GL_RGBA, GL_UNSIGNED_BYTE, stbData);
-
-			stbi_image_free(stbData);
-		}
-		glGenerateTextureMipmap(ad->voxelTextures[0]);
-
-
-		float alphaCoverage[mipMapCount] = {};
-		int size = 32;
-		Vec4* pixels = (Vec4*)getTMemory(sizeof(Vec4)*size*size);
-		for(int i = 0; i < mipMapCount; i++) {
-			glGetTextureSubImage(ad->voxelTextures[0], i, 0,0,BX_Leaves, size, size, 1, GL_RGBA, GL_FLOAT, size*size*sizeof(Vec4), &pixels[0]);
-
-			for(int y = 0; y < size; y++) {
-				for(int x = 1; x < size; x++) {
-					alphaCoverage[i] += pixels[y*size + x].a;
-				}
-			}
-		
-			alphaCoverage[i] = alphaCoverage[i] / (size*size);
-			size /= 2;
-		}
-
-		float alphaCoverage2[mipMapCount] = {};
-		size = 16;
-		for(int i = 1; i < mipMapCount; i++) {
-			glGetTextureSubImage(ad->voxelTextures[0], i, 0,0,BX_Leaves, size, size, 1, GL_RGBA, GL_FLOAT, size*size*sizeof(Vec4), &pixels[0]);
-
-			// float alphaScale = (size*size*alphaCoverage[0]) / (alphaCoverage[i]*size*size);
-			float alphaScale = (alphaCoverage[0]) / (alphaCoverage[i]);
-
-			for(int y = 0; y < size; y++) {
-				for(int x = 1; x < size; x++) {
-					pixels[y*size + x].a *= alphaScale;
-					alphaCoverage2[i] += pixels[y*size + x].a;
-				}
-			}
-		
-			glTextureSubImage3D(ad->voxelTextures[0], i, 0, 0, BX_Leaves, size, size, 1, GL_RGBA, GL_FLOAT, pixels);
-
-			alphaCoverage2[i] = alphaCoverage2[i] / (size*size);
-			size /= 2;
-		}
-
-
-		glTextureStorage3D(ad->voxelTextures[1], 1, INTERNAL_TEXTURE_FORMAT, 32, 32, BX2_Size);
-
-		for(int layerIndex = 0; layerIndex < BX2_Size; layerIndex++) {
-			int x,y,n;
-			unsigned char* stbData = stbi_load(textureFilePaths2[layerIndex], &x, &y, &n, 4);
-			
-			glTextureSubImage3D(ad->voxelTextures[1], 0, 0, 0, layerIndex, x, y, 1, GL_RGBA, GL_UNSIGNED_BYTE, stbData);
-			stbi_image_free(stbData);
-		}
-
-
-
-		// setup shaders and uniforms
 		for(int i = 0; i < SHADER_SIZE; i++) {
 			MakeShaderInfo* info = makeShaderInfo + i; 
-			Shader* s = globalGraphicsState->shaders + i;
+			Shader* s = gs->shaders + i;
 
 			s->program = createShader(info->vertexString, info->fragmentString, &s->vertex, &s->fragment);
 			s->uniformCount = info->uniformCount;
@@ -602,8 +507,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 			}
 		}
 
+		//
+		// Setup Meshs.
+		//
 
-		// setup meshs
 		for(int i = 0; i < MESH_SIZE; i++) {
 			Mesh* mesh = getMesh(i);
 
@@ -622,6 +529,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
+		gs->samplers[SAMPLER_VOXEL_1] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_NEAREST, GL_NEAREST_MIPMAP_LINEAR);
+		gs->samplers[SAMPLER_VOXEL_2] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_NEAREST, GL_NEAREST_MIPMAP_LINEAR);
+		gs->samplers[SAMPLER_VOXEL_3] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
+
+		ad->samplers[0] = createSampler(16.0f, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
 
 
 
@@ -724,7 +636,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 		for(int i = 0; i < CUBEMAP_SIZE; i++) {
 			loadCubeMapFromFile(globalGraphicsState->cubeMaps + i, (char*)cubeMapPaths[i], 5, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE, true);
 		}
+	}
 
+	else if(fileStatus == WAIT_OBJECT_0 + 2) {
+		FindNextChangeNotification(systemData->folderHandles[2]);
+		
+		loadVoxelTextures((char*)minecraftTextureFolderPath, INTERNAL_TEXTURE_FORMAT, trued);
 	}
 
 	#endif
@@ -1650,11 +1567,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 	viewMatrix(&view, ad->activeCam.pos, -ad->activeCam.look, ad->activeCam.up, ad->activeCam.right);
 	projMatrix(&proj, degreeToRadian(ad->fieldOfView), ad->aspectRatio, ad->nearPlane, ad->farPlane);
 
-	globalGraphicsState->textureUnits[0] = ad->voxelTextures[0];
-	globalGraphicsState->textureUnits[1] = ad->voxelTextures[1];
-	globalGraphicsState->samplerUnits[0] = ad->voxelSamplers[0];
-	globalGraphicsState->samplerUnits[1] = ad->voxelSamplers[1];
-	globalGraphicsState->samplerUnits[2] = ad->voxelSamplers[2];
+	globalGraphicsState->textureUnits[0] = gs->textures3d[0].id;
+	globalGraphicsState->textureUnits[1] = gs->textures3d[1].id;
+	globalGraphicsState->samplerUnits[0] = gs->samplers[SAMPLER_VOXEL_1];
+	globalGraphicsState->samplerUnits[1] = gs->samplers[SAMPLER_VOXEL_2];
+	globalGraphicsState->samplerUnits[2] = gs->samplers[SAMPLER_VOXEL_3];
 
 	setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, fogColor);
 
@@ -2416,7 +2333,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			// dcRect({rectCenDim(pos, iconSize*1.2f*iconOff), rect(0,0,1,1), vec4(vec3(0.1f),trans), 1});
 			dcRect(rectCenDim(pos, iconSize*1.2f*iconOff), rect(0,0,1,1), vec4(0,0,0,0.85f), 1);
 
-			uint textureId = ad->voxelTextures[0];
+			uint textureId = gs->textures3d[0].id;
 			dcRect(rectCenDim(pos, iconSize*iconOff), rect(0,0,1,1), color, (int)textureId, texture1Faces[i+1][0]+1);
 		}
 

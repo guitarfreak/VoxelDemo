@@ -1064,11 +1064,22 @@ struct Mesh {
 	int elementCount;
 };
 
+enum SamplerType {
+	SAMPLER_NORMAL = 0,
+	SAMPLER_VOXEL_1,
+	SAMPLER_VOXEL_2,
+	SAMPLER_VOXEL_3,
+	SAMPLER_SIZE,
+};
+
 struct GraphicsState {
 	Shader shaders[SHADER_SIZE];
 	Texture textures[TEXTURE_SIZE];
 
 	Texture cubeMaps[CUBEMAP_SIZE];
+
+	Texture textures3d[2];
+	GLuint samplers[SAMPLER_SIZE];
 
 	Font fonts[FONT_SIZE];
 

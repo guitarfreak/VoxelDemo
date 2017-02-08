@@ -976,3 +976,100 @@ void drawVoxelMesh(VoxelMesh* m, int drawMode = 0) {
 		glDrawArrays(GL_QUADS, 0, m->quadCountTrans*4);
 	}
 }
+
+
+void loadVoxelTextures(char* folderPath, int internalFormat, bool reload = false) {
+
+	const int mipMapCount = 5;
+	char* p = getTString(34);
+	strClear(p);
+	strAppend(p, (char*)folderPath);
+
+	Texture* texture = globalGraphicsState->textures3d + 0;
+
+	glCreateTextures(GL_TEXTURE_2D_ARRAY, 2, &texture->id);
+	glTextureStorage3D(texture->id, mipMapCount, internalFormat, 32, 32, BX_Size);
+
+	for(int layerIndex = 0; layerIndex < BX_Size; layerIndex++) {
+		int x,y,n;
+		unsigned char* stbData = stbi_load(textureFilePaths[layerIndex], &x, &y, &n, 4);
+
+		if(layerIndex == BX_Water) {
+			uint* data = (uint*)stbData;
+			for(int x = 0; x < 32; x++) {
+				for(int y = 0; y < 32; y++) {
+					Vec4 c;
+					colorGetRGBA(data[y*32 + x], c.e);
+					c.r = waterAlpha;
+					data[y*32 + x] = mapRGBA(c.e);
+				}
+			}
+		}
+
+		glTextureSubImage3D(texture->id, 0, 0, 0, layerIndex, x, y, 1, GL_RGBA, GL_UNSIGNED_BYTE, stbData);
+
+		stbi_image_free(stbData);
+	}
+
+	glGenerateTextureMipmap(texture->id);
+
+	// Adjust mipmap alpha levels for tree textures.
+
+	{
+		int textureId = globalGraphicsState->textures3d[0].id;
+
+		float alphaCoverage[mipMapCount] = {};
+		int size = 32;
+		Vec4* pixels = (Vec4*)getTMemory(sizeof(Vec4)*size*size);
+		for(int i = 0; i < mipMapCount; i++) {
+			glGetTextureSubImage(textureId, i, 0,0,BX_Leaves, size, size, 1, GL_RGBA, GL_FLOAT, size*size*sizeof(Vec4), &pixels[0]);
+
+			for(int y = 0; y < size; y++) {
+				for(int x = 1; x < size; x++) {
+					alphaCoverage[i] += pixels[y*size + x].a;
+				}
+			}
+		
+			alphaCoverage[i] = alphaCoverage[i] / (size*size);
+			size /= 2;
+		}
+
+		float alphaCoverage2[mipMapCount] = {};
+		size = 16;
+		for(int i = 1; i < mipMapCount; i++) {
+			glGetTextureSubImage(textureId, i, 0,0,BX_Leaves, size, size, 1, GL_RGBA, GL_FLOAT, size*size*sizeof(Vec4), &pixels[0]);
+
+			// float alphaScale = (size*size*alphaCoverage[0]) / (alphaCoverage[i]*size*size);
+			float alphaScale = (alphaCoverage[0]) / (alphaCoverage[i]);
+
+			for(int y = 0; y < size; y++) {
+				for(int x = 1; x < size; x++) {
+					pixels[y*size + x].a *= alphaScale;
+					alphaCoverage2[i] += pixels[y*size + x].a;
+				}
+			}
+		
+			glTextureSubImage3D(textureId, i, 0, 0, BX_Leaves, size, size, 1, GL_RGBA, GL_FLOAT, pixels);
+
+			alphaCoverage2[i] = alphaCoverage2[i] / (size*size);
+			size /= 2;
+		}
+	}
+
+
+	texture = globalGraphicsState->textures3d + 1;
+
+	glCreateTextures(GL_TEXTURE_2D_ARRAY, 2, &texture->id);
+	glTextureStorage3D(texture->id, 1, internalFormat, 32, 32, BX2_Size);
+
+	for(int layerIndex = 0; layerIndex < BX2_Size; layerIndex++) {
+		int x,y,n;
+		unsigned char* stbData = stbi_load(textureFilePaths2[layerIndex], &x, &y, &n, 4);
+		
+		glTextureSubImage3D(texture->id, 0, 0, 0, layerIndex, x, y, 1, GL_RGBA, GL_UNSIGNED_BYTE, stbData);
+		stbi_image_free(stbData);
+	}
+
+	glGenerateTextureMipmap(texture->id);
+
+}
