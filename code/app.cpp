@@ -720,7 +720,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	#endif
 
-	dcRect(rectCenDim(400,-400,200,200), rect(0,0,1,1), vec4(1,1,1,1), getTexture(TEXTURE_RECT)->id, -1, &ad->commandList2d);
 
 
 
@@ -951,8 +950,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// }
 	}	
 
-	// @update entities
 	// TIMER_BLOCK_BEGIN_NAMED(entities, "Upd Entities");
+	// @update entities
 	for(int i = 0; i < ad->entityList.size; i++) {
 		Entity* e = &ad->entityList.e[i];
 		if(!e->init) continue;
@@ -1032,34 +1031,38 @@ extern "C" APPMAINFUNCTION(appMain) {
 					bool collision = true;
 					while(collision) {
 
-						// get mesh coords that touch the player box
-						Rect3 box = rect3CenDim(nPos, pSize);
-						Vec3i voxelMin = coordToVoxel(box.min);
-						Vec3i voxelMax = coordToVoxel(box.max+1);
+						// // get mesh coords that touch the player box
+						// Rect3 box = rect3CenDim(nPos, pSize);
+						// Vec3i voxelMin = coordToVoxel(box.min);
+						// Vec3i voxelMax = coordToVoxel(box.max+1);
 
+						// Vec3 collisionBox;
+						// collision = false;
+						// float minDistance = 100000;
+
+						// // check collision with the voxel thats closest
+						// for(int x = voxelMin.x; x < voxelMax.x; x++) {
+						// 	for(int y = voxelMin.y; y < voxelMax.y; y++) {
+						// 		for(int z = voxelMin.z; z < voxelMax.z; z++) {
+						// 			Vec3i coord = vec3i(x,y,z);
+						// 			uchar* block = getBlockFromVoxel(ad->voxelHash, ad->voxelHashSize, coord);
+
+						// 			if(*block > 0) {
+						// 				Vec3 cBox = voxelToVoxelCoord(coord);
+						// 				float distance = lenVec3(nPos - cBox);
+						// 				if(minDistance == 100000 || distance > minDistance) {
+						// 					minDistance = distance;
+						// 					collisionBox = cBox;
+						// 				}
+						// 				collision = true;
+						// 			}
+						// 		}
+						// 	}
+						// }
+
+						float minDistance;
 						Vec3 collisionBox;
-						collision = false;
-						float minDistance = 100000;
-
-							// check collision with the voxel thats closest
-						for(int x = voxelMin.x; x < voxelMax.x; x++) {
-							for(int y = voxelMin.y; y < voxelMax.y; y++) {
-								for(int z = voxelMin.z; z < voxelMax.z; z++) {
-									Vec3i coord = vec3i(x,y,z);
-									uchar* block = getBlockFromVoxel(ad->voxelHash, ad->voxelHashSize, coord);
-
-									if(*block > 0) {
-										Vec3 cBox = voxelToVoxelCoord(coord);
-										float distance = lenVec3(nPos - cBox);
-										if(minDistance == 100000 || distance > minDistance) {
-											minDistance = distance;
-											collisionBox = cBox;
-										}
-										collision = true;
-									}
-								}
-							}
-						}
+						collision = collisionVoxelWidthBox(ad->voxelHash, ad->voxelHashSize, nPos, pSize, &minDistance, &collisionBox);
 
 						if(collision) {
 							collisionCount++;

@@ -1083,3 +1083,41 @@ void loadVoxelTextures(char* folderPath, int internalFormat, bool reload = false
 	glGenerateTextureMipmap(texture->id);
 
 }
+
+
+bool collisionVoxelWidthBox(VoxelNode** voxelHash, int voxelHashSize, Vec3 boxPos, Vec3 boxSize, float* shortestDistance, Vec3* collisionVoxel) {
+
+	// First get the mesh coords that touch the player box.
+
+	Rect3 box = rect3CenDim(boxPos, boxSize);
+	Vec3i voxelMin = coordToVoxel(box.min);
+	Vec3i voxelMax = coordToVoxel(box.max+1);
+
+	bool collision = false;
+	float minDistance = 100000; // @Cleanup: Replace with FLT_MAX or something.
+
+	// Check collision with the voxel that's closest.
+
+	for(int x = voxelMin.x; x < voxelMax.x; x++) {
+		for(int y = voxelMin.y; y < voxelMax.y; y++) {
+			for(int z = voxelMin.z; z < voxelMax.z; z++) {
+				Vec3i coord = vec3i(x,y,z);
+				uchar* block = getBlockFromVoxel(voxelHash, voxelHashSize, coord);
+
+				if(*block > 0) {
+					Vec3 cBox = voxelToVoxelCoord(coord);
+					float distance = lenVec3(boxPos - cBox);
+					if(minDistance == 100000 || distance > minDistance) {
+						minDistance = distance;
+						*collisionVoxel = cBox;
+					}
+					collision = true;
+				}
+			}
+		}
+	}
+
+	*shortestDistance = minDistance;
+
+	return collision;
+}
