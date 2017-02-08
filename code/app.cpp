@@ -601,16 +601,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 			strCpy(asset->filePath, path);
 		}
 
-
-
-
-
-		// @BUG: Window operations only work after the first frame?
-
-		// return; 
 	}
 
 	if(second) {
+		// @BUG: Window operations only work after the first frame?
+		
 		// setWindowProperties(windowHandle, wSettings->res.w, wSettings->res.h, -1920, 0);
 		// setWindowProperties(windowHandle, wSettings->res.w, wSettings->res.h, 0, 0);
 		setWindowStyle(windowHandle, wSettings->style);
