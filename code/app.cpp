@@ -147,11 +147,7 @@ Changing course for now:
 
 #define USE_SRGB 1
 
-#if USE_SRGB 
-const int INTERNAL_TEXTURE_FORMAT = GL_SRGB8_ALPHA8;
-#else 
-const int INTERNAL_TEXTURE_FORMAT = GL_RGBA;
-#endif
+const int INTERNAL_TEXTURE_FORMAT = USE_SRGB ? GL_SRGB8_ALPHA8 : GL_RGBA8;
 
 
 ThreadQueue* globalThreadQueue;
@@ -163,7 +159,6 @@ DebugState* globalDebugState;
 const char* miscTextureFolderPath = "..\\data\\Textures\\Misc\\";
 const char* cubeMapFolderPath = "..\\data\\Textures\\Skyboxes\\";
 const char* minecraftTextureFolderPath = "..\\data\\Textures\\Minecraft\\";
-
 
 const int currentSkybox = CUBEMAP_5;
 
@@ -381,11 +376,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-		// const char* minecraftTextureFolder = "..data\\Textures\\Minecraft\\";
-		// const char* miscTextureFolder = "..data\\Textures\\Misc\\";
-		// const char* SkyboxesTextureFolder = "..data\\Textures\\Skyboxes\\";
-
-
 		//
 		// Init Folder Handles.
 		//
@@ -400,7 +390,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			systemData->folderHandles[i] = fileChangeHandle;
 		}
-
 
 		//
 		// @setup
@@ -521,11 +510,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		strAppend(p, (char*)minecraftTextureFolderPath);
 
 		char* fullPath = getTString(234);
-		#ifdef USE_SRGB
-			glTextureStorage3D(ad->voxelTextures[0], mipMapCount, GL_SRGB8_ALPHA8, 32, 32, BX_Size);
-		#else 
-			glTextureStorage3D(ad->voxelTextures[0], mipMapCount, GL_RGBA8, 32, 32, BX_Size);
-		#endif 
+		glTextureStorage3D(ad->voxelTextures[0], mipMapCount, INTERNAL_TEXTURE_FORMAT, 32, 32, BX_Size);
 
 		for(int layerIndex = 0; layerIndex < BX_Size; layerIndex++) {
 			int x,y,n;
@@ -588,11 +573,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 
 
-		#ifdef USE_SRGB 
-			glTextureStorage3D(ad->voxelTextures[1], 1, GL_SRGB8_ALPHA8, 32, 32, BX2_Size);
-		#else 
-			glTextureStorage3D(ad->voxelTextures[1], 1, GL_RGBA8, 32, 32, BX2_Size);
-		#endif
+		glTextureStorage3D(ad->voxelTextures[1], 1, INTERNAL_TEXTURE_FORMAT, 32, 32, BX2_Size);
 
 		for(int layerIndex = 0; layerIndex < BX2_Size; layerIndex++) {
 			int x,y,n;
@@ -2943,7 +2924,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-		#ifdef USE_SRGB 
+		#if USE_SRGB 
 			glEnable(GL_FRAMEBUFFER_SRGB);
 		#endif 
 
@@ -2953,7 +2934,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		drawRect(rect(0, -wSettings->currentRes.h, wSettings->currentRes.w, 0), rect(0,1,1,0), vec4(1), ad->frameBufferTextures[4]);
 
-		#ifdef USE_SRGB
+		#if USE_SRGB
 			glDisable(GL_FRAMEBUFFER_SRGB);
 		#endif
 

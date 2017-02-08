@@ -935,20 +935,6 @@ void loadTextureFromFile(Texture* texture, char* path, int mipLevels, int intern
 	stbi_image_free(stbData);
 }
 
-// Texture* getTexture(int textureId);
-// void reloadTextureFile(int textureIndex, int mipLevels, int internalFormat, int channelType, int channelFormat) {
-// 	Texture* texture = getTexture(textureIndex);
-// 	const char* path = texturePaths[textureIndex];
-
-// 	int x,y,n;
-// 	unsigned char* stbData = stbi_load(path, &x, &y, &n, 0);
-
-// 	glTextureSubImage2D(texture->id, 0, 0, 0, x, y, channelType, channelFormat, stbData);
-// 	glGenerateTextureMipmap(texture->id);
-
-// 	stbi_image_free(stbData);	
-// }
-
 void loadCubeMapFromFile(Texture* texture, char* filePath, int mipLevels, int internalFormat, int channelType, int channelFormat, bool reload = false) {
 	int texWidth, texHeight, n;
 	uint* stbData = (uint*)stbi_load(filePath, &texWidth, &texHeight, &n, 4);
