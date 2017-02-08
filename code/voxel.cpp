@@ -107,22 +107,22 @@ enum BlockTextures {
 };
 
 const char* textureFilePaths[BX_Size] = {
-	"..\\data\\minecraft textures\\none.png",
-	"..\\data\\minecraft textures\\water.png",
-	"..\\data\\minecraft textures\\sand.png",
-	"..\\data\\minecraft textures\\grass_top.png",
-	"..\\data\\minecraft textures\\grass_side.png",
-	"..\\data\\minecraft textures\\grass_bottom.png",
-	"..\\data\\minecraft textures\\stone.png",
-	"..\\data\\minecraft textures\\snow.png",
-	"..\\data\\minecraft textures\\tree_log_top.png",
-	"..\\data\\minecraft textures\\tree_log_side.png",
-	"..\\data\\minecraft textures\\leaves.png",
-	"..\\data\\minecraft textures\\glass.png",
-	"..\\data\\minecraft textures\\glowstone.png",
-	"..\\data\\minecraft textures\\pumpkin_top.png",
-	"..\\data\\minecraft textures\\pumpkin_side.png",
-	"..\\data\\minecraft textures\\pumpkin_bottom.png",
+	"..\\data\\Textures\\Minecraft\\none.png",
+	"..\\data\\Textures\\Minecraft\\water.png",
+	"..\\data\\Textures\\Minecraft\\sand.png",
+	"..\\data\\Textures\\Minecraft\\grass_top.png",
+	"..\\data\\Textures\\Minecraft\\grass_side.png",
+	"..\\data\\Textures\\Minecraft\\grass_bottom.png",
+	"..\\data\\Textures\\Minecraft\\stone.png",
+	"..\\data\\Textures\\Minecraft\\snow.png",
+	"..\\data\\Textures\\Minecraft\\tree_log_top.png",
+	"..\\data\\Textures\\Minecraft\\tree_log_side.png",
+	"..\\data\\Textures\\Minecraft\\leaves.png",
+	"..\\data\\Textures\\Minecraft\\glass.png",
+	"..\\data\\Textures\\Minecraft\\glowstone.png",
+	"..\\data\\Textures\\Minecraft\\pumpkin_top.png",
+	"..\\data\\Textures\\Minecraft\\pumpkin_side.png",
+	"..\\data\\Textures\\Minecraft\\pumpkin_bottom.png",
 };
 
 enum BlockTextures2 {
@@ -133,8 +133,8 @@ enum BlockTextures2 {
 };
 
 const char* textureFilePaths2[BX2_Size] = {
-	"..\\data\\minecraft textures\\none.png",
-	"..\\data\\minecraft textures\\leaves.png",
+	"..\\data\\Textures\\Minecraft\\none.png",
+	"..\\data\\Textures\\Minecraft\\leaves.png",
 };
 
 

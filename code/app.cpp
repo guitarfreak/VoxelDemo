@@ -128,7 +128,6 @@ Changing course for now:
 #define STBVOX_CONFIG_MODE 1
 #include "stb_voxel_render.h"
 
-#define USE_SRGB 1
  
 // #pragma optimize( "", off )
 // #pragma optimize( "", on )
@@ -144,11 +143,30 @@ Changing course for now:
 #include "voxel.cpp"
 
 
+
+
+#define USE_SRGB 1
+
+#if USE_SRGB 
+const int INTERNAL_TEXTURE_FORMAT = GL_SRGB8_ALPHA8;
+#else 
+const int INTERNAL_TEXTURE_FORMAT = GL_RGBA;
+#endif
+
+
 ThreadQueue* globalThreadQueue;
 GraphicsState* globalGraphicsState;
 DrawCommandList* globalCommandList;
 MemoryBlock* globalMemory;
 DebugState* globalDebugState;
+
+const char* miscTextureFolderPath = "..\\data\\Textures\\Misc\\";
+const char* cubeMapFolderPath = "..\\data\\Textures\\Skyboxes\\";
+const char* minecraftTextureFolderPath = "..\\data\\Textures\\Minecraft\\";
+
+
+const int currentSkybox = CUBEMAP_5;
+
 
 
 
@@ -157,11 +175,6 @@ struct AppData {
 	bool showHud;
 	bool updateFrameBuffers;
 	float guiAlpha;
-
-	uint cubemapTextureId[16];
-	uint cubemapSamplerId;
-	int cubeMapCount;
-	int cubeMapDrawIndex;
 
 	SystemData systemData;
 	Input input;
@@ -367,15 +380,31 @@ extern "C" APPMAINFUNCTION(appMain) {
 		int interval = wglGetSwapIntervalEXT();
 
 
-		HANDLE fileChangeHandle = FindFirstChangeNotification("..\\data\\Textures", false, FILE_NOTIFY_CHANGE_LAST_WRITE);
-		if(fileChangeHandle == INVALID_HANDLE_VALUE) {
-			printf("Could not set folder change notification.");
+
+		// const char* minecraftTextureFolder = "..data\\Textures\\Minecraft\\";
+		// const char* miscTextureFolder = "..data\\Textures\\Misc\\";
+		// const char* SkyboxesTextureFolder = "..data\\Textures\\Skyboxes\\";
+
+
+		//
+		// Init Folder Handles.
+		//
+
+		const char* watchFolderPaths[] = {miscTextureFolderPath, cubeMapFolderPath, minecraftTextureFolderPath};
+		for(int i = 0; i < 3; i++) {
+			HANDLE fileChangeHandle = FindFirstChangeNotification(watchFolderPaths[i], false, FILE_NOTIFY_CHANGE_LAST_WRITE);
+
+			if(fileChangeHandle == INVALID_HANDLE_VALUE) {
+				printf("Could not set folder change notification.\n");
+			}
+
+			systemData->folderHandles[i] = fileChangeHandle;
 		}
-		systemData->folderHandle = fileChangeHandle;
 
 
-
+		//
 		// @setup
+		//
 
 		// ad->fieldOfView = 55;
 		ad->fieldOfView = 60;
@@ -462,60 +491,19 @@ extern "C" APPMAINFUNCTION(appMain) {
 		//
 
 		for(int i = 0; i < TEXTURE_SIZE; i++) {
-			#ifdef USE_SRGB 
-				globalGraphicsState->textures[i] = loadTextureFile(texturePaths[i], -1, GL_SRGB8_ALPHA8, GL_RGBA, GL_UNSIGNED_BYTE);
-			#else 
-				globalGraphicsState->textures[i] = loadTextureFile(texturePaths[i], -1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
-			#endif
+			loadTextureFromFile(globalGraphicsState->textures + i, texturePaths[i], -1, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE);
 		}
 
 		//
-		// Load Cubemaps.
+		// Setup Cubemaps.
 		//
 
-		glCreateTextures(GL_TEXTURE_CUBE_MAP_ARRAY, arrayCount(ad->cubemapTextureId), &ad->cubemapTextureId[0]);
-
-		char* texturePaths[] = {
-			 					// "..\\data\\skybox\\sb1.png",
-								// "..\\data\\skybox\\sb2.png", 
-								// "..\\data\\skybox\\sb3.jpg", 
-								// "..\\data\\skybox\\sb4.png", 
-								"..\\data\\skybox\\xoGVD3X.jpg", 
-								// "..\\data\\skybox\\xoGVD3X.jpg", 
-								// "C:\\Projects\\Hmm\\data\\skybox\\xoGVD3X.jpg", 
-								};
-
-		ad->cubeMapCount = arrayCount(texturePaths);
-
-		// for(int textureIndex = 0; textureIndex < arrayCount(ad->cubemapTextureId); textureIndex++) {
-		for(int textureIndex = 0; textureIndex < arrayCount(texturePaths); textureIndex++) {
-			int texWidth, texHeight, n;
-			uint* stbData = (uint*)stbi_load(texturePaths[textureIndex], &texWidth, &texHeight, &n, 4);
-
-			int skySize = texWidth/(float)4;
-
-			glTextureStorage3D(ad->cubemapTextureId[textureIndex], 5, GL_SRGB8_ALPHA8, skySize, skySize, 6);
-
-			uint* skyTex = getTArray(uint, skySize*skySize);
-			Vec2i texOffsets[] = {{2,1}, {0,1}, {1,0}, {1,2}, {1,1}, {3,1}};
-			for(int i = 0; i < 6; i++) {
-				Vec2i offset = texOffsets[i] * skySize;
-
-				for(int x = 0; x < skySize; x++) {
-					for(int y = 0; y < skySize; y++) {
-						skyTex[y*skySize + x] = stbData[(offset.y+y)*texWidth + (offset.x+x)];
-					}
-				}
-
-				glTextureSubImage3D(ad->cubemapTextureId[textureIndex], 0, 0, 0, i, skySize, skySize, 1, GL_RGBA, GL_UNSIGNED_BYTE, skyTex);
-			}
-			// glGenerateTextureMipmap(ad->cubemapTextureId);
-
-			stbi_image_free(stbData);
+		for(int textureIndex = 0; textureIndex < CUBEMAP_SIZE; textureIndex++) {
+			loadCubeMapFromFile(globalGraphicsState->cubeMaps + textureIndex, (char*)cubeMapPaths[textureIndex], 5, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE);
 		}
 
 		// 
-		// Voxel Textures.
+		// Setup Voxel Textures.
 		//
 
 		ad->voxelSamplers[0] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_NEAREST, GL_NEAREST_MIPMAP_LINEAR);
@@ -530,7 +518,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		const int mipMapCount = 5;
 		char* p = getTString(34);
 		strClear(p);
-		strAppend(p, "..\\data\\minecraft textures\\");
+		strAppend(p, (char*)minecraftTextureFolderPath);
 
 		char* fullPath = getTString(234);
 		#ifdef USE_SRGB
@@ -719,19 +707,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 	drawCommandListInit(&ad->commandList2d, (char*)getTMemory(clSize), clSize);
 	globalCommandList = &ad->commandList3d;
 
-
-	DWORD fileStatus = WaitForMultipleObjects(1, &systemData->folderHandle, false, 0);
+	#if 1
+	DWORD fileStatus = WaitForMultipleObjects(arrayCount(systemData->folderHandles), systemData->folderHandles, false, 0);
 	if(fileStatus == WAIT_OBJECT_0) {
-		FindNextChangeNotification(systemData->folderHandle);
+		FindNextChangeNotification(systemData->folderHandles[0]);
 
 		// Right now we will reload every texture on every change to the Texture folder.
 
 		for(int i = 0; i < TEXTURE_SIZE; i++) {
-			#ifdef USE_SRGB 
-				reloadTextureFile(i, -1, GL_SRGB8_ALPHA8, GL_RGBA, GL_UNSIGNED_BYTE);
-			#else 
-				reloadTextureFile(i, -1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
-			#endif
+			loadTextureFromFile(globalGraphicsState->textures + i, texturePaths[i], -1, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE, true);
 		}
 
 		// Todo: Get ReadDirectoryChangesW to work instead of FindNextChangeNotification.
@@ -752,6 +736,17 @@ extern "C" APPMAINFUNCTION(appMain) {
 		CloseHandle(directory);
 		*/
 	}
+
+	else if(fileStatus == WAIT_OBJECT_0 + 1) {
+		FindNextChangeNotification(systemData->folderHandles[1]);
+		
+		for(int i = 0; i < CUBEMAP_SIZE; i++) {
+			loadCubeMapFromFile(globalGraphicsState->cubeMaps + i, (char*)cubeMapPaths[i], 5, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE, true);
+		}
+
+	}
+
+	#endif
 
 	dcRect(rectCenDim(400,-400,200,200), rect(0,0,1,1), vec4(1,1,1,1), getTexture(TEXTURE_RECT)->id, -1, &ad->commandList2d);
 
@@ -1687,7 +1682,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// draw cubemap
 	bindShader(SHADER_CUBEMAP);
 	glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
-	glBindTextures(0, 1, &ad->cubemapTextureId[ad->cubeMapDrawIndex]);
+	glBindTextures(0, 1, &getCubemap(currentSkybox)->id);
 	glBindSamplers(0, 1, ad->samplers);
 
 	Vec3 skyBoxRot;
@@ -2005,7 +2000,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				// draw cubemap reflection
 				bindShader(SHADER_CUBEMAP);
 				glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
-				glBindTextures(0, 1, &ad->cubemapTextureId[ad->cubeMapDrawIndex]);
+				glBindTextures(0, 1, &getCubemap(currentSkybox)->id);
 				glBindSamplers(0, 1, ad->samplers);
 
 				Vec3 skyBoxRot;
@@ -2551,8 +2546,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 				if(gui->beginSection("World", &sectionWorld)) { 
 					if(gui->button("Reload World") || input->keysPressed[KEYCODE_TAB]) ad->reloadWorld = true;
 					
-					gui->div(vec2(0,0)); gui->label("CubeMap", 0); gui->slider(&ad->cubeMapDrawIndex, 0, ad->cubeMapCount);
-
 					gui->div(vec2(0,0)); gui->label("RefAlpha", 0); gui->slider(&reflectionAlpha, 0, 1);
 					gui->div(vec2(0,0)); gui->label("Light", 0); gui->slider(&globalLumen, 0, 255);
 					gui->div(0,0,0); gui->label("MinMax", 0); gui->slider(&WORLD_MIN, 0, 255); gui->slider(&WORLD_MAX, 0, 255);

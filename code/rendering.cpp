@@ -860,11 +860,36 @@ enum TextureId {
 };
 
 char* texturePaths[] = {
-	"..\\data\\Textures\\white.png",
-	"..\\data\\Textures\\rect.png",
-	"..\\data\\Textures\\circle.png",
-	"..\\data\\Textures\\test.png",
+	"..\\data\\Textures\\Misc\\white.png",
+	"..\\data\\Textures\\Misc\\rect.png",
+	"..\\data\\Textures\\Misc\\circle.png",
+	"..\\data\\Textures\\Misc\\test.png",
 };
+
+enum CubeMapIds {
+	// CUBEMAP_1 = 0,
+	// CUBEMAP_2,
+	// CUBEMAP_3,
+	// CUBEMAP_4,
+	CUBEMAP_5 = 0,
+	// CUBEMAP_6,
+	// CUBEMAP_7,
+	CUBEMAP_SIZE,
+};
+
+const char* cubeMapPaths[] = {
+		 					// "..\\data\\skybox\\sb1.png",
+							// "..\\data\\skybox\\sb2.png", 
+							// "..\\data\\skybox\\sb3.jpg", 
+							// "..\\data\\skybox\\sb4.png", 
+							"..\\data\\Textures\\Skyboxes\\xoGVD3X.jpg",
+							// "..\\data\\skybox\\xoGVD3X.jpg", 
+							// "C:\\Projects\\Hmm\\data\\skybox\\xoGVD3X.jpg", 
+						  };
+
+// enum TextureType {
+// 	TEXTURE_TYPE_
+// };
 
 struct Texture {
 	// char* name;
@@ -874,50 +899,87 @@ struct Texture {
 	int levels;
 };
 
-Texture loadTexture(unsigned char* buffer, int w, int h, int mipLevels, int internalFormat, int channelType, int channelFormat) {
-	uint textureId;
-	glCreateTextures(GL_TEXTURE_2D, 1, &textureId);
-	glTextureStorage2D(textureId, mipLevels, internalFormat, w, h);
-	glTextureSubImage2D(textureId, 0, 0, 0, w, h, channelType, channelFormat, buffer);
-	glGenerateTextureMipmap(textureId);
+int getMaximumMipmapsFromSize(int size) {
+	int mipLevels = 1;
+	while(size >= 2) {
+		size /= 2;
+		mipLevels++;
+	}
 
-	Texture tex = {textureId, vec2i(w,h), 4, 1};
-
-	return tex;
+	return mipLevels;
 }
 
-Texture loadTextureFile(char* path, int mipLevels, int internalFormat, int channelType, int channelFormat) {
+void loadTexture(Texture* texture, unsigned char* buffer, int w, int h, int mipLevels, int internalFormat, int channelType, int channelFormat, bool reload = false) {
+
+	if(!reload) {
+		glCreateTextures(GL_TEXTURE_2D, 1, &texture->id);
+		glTextureStorage2D(texture->id, mipLevels, internalFormat, w, h);
+
+		texture->dim = vec2i(w,h);
+		texture->channels = 4;
+		texture->levels = mipLevels;
+	}	
+
+	glTextureSubImage2D(texture->id, 0, 0, 0, w, h, channelType, channelFormat, buffer);
+	glGenerateTextureMipmap(texture->id);
+}
+
+void loadTextureFromFile(Texture* texture, char* path, int mipLevels, int internalFormat, int channelType, int channelFormat, bool reload = false) {
 	int x,y,n;
 	unsigned char* stbData = stbi_load(path, &x, &y, &n, 0);
 
-	if(mipLevels == -1) {
-		int levelCount = 1;
-		int size = min(x, y);
-		while(size >= 2) {
-			size /= 2;
-			levelCount++;
-		}
-		mipLevels = levelCount;
-	}
-	Texture tex = loadTexture(stbData, x, y, mipLevels, internalFormat, channelType, channelFormat);
+	if(mipLevels == -1) mipLevels = getMaximumMipmapsFromSize(min(x,y));
+	
+	loadTexture(texture, stbData, x, y, mipLevels, internalFormat, channelType, channelFormat, reload);
 
 	stbi_image_free(stbData);
-
-	return tex;
 }
 
-Texture* getTexture(int textureId);
-void reloadTextureFile(int textureIndex, int mipLevels, int internalFormat, int channelType, int channelFormat) {
-	Texture* texture = getTexture(textureIndex);
-	const char* path = texturePaths[textureIndex];
+// Texture* getTexture(int textureId);
+// void reloadTextureFile(int textureIndex, int mipLevels, int internalFormat, int channelType, int channelFormat) {
+// 	Texture* texture = getTexture(textureIndex);
+// 	const char* path = texturePaths[textureIndex];
 
-	int x,y,n;
-	unsigned char* stbData = stbi_load(path, &x, &y, &n, 0);
+// 	int x,y,n;
+// 	unsigned char* stbData = stbi_load(path, &x, &y, &n, 0);
 
-	glTextureSubImage2D(texture->id, 0, 0, 0, x, y, channelType, channelFormat, stbData);
-	glGenerateTextureMipmap(texture->id);
+// 	glTextureSubImage2D(texture->id, 0, 0, 0, x, y, channelType, channelFormat, stbData);
+// 	glGenerateTextureMipmap(texture->id);
 
-	stbi_image_free(stbData);	
+// 	stbi_image_free(stbData);	
+// }
+
+void loadCubeMapFromFile(Texture* texture, char* filePath, int mipLevels, int internalFormat, int channelType, int channelFormat, bool reload = false) {
+	int texWidth, texHeight, n;
+	uint* stbData = (uint*)stbi_load(filePath, &texWidth, &texHeight, &n, 4);
+
+	int skySize = texWidth/(float)4;
+
+	if(!reload) {
+		texture->dim = vec2i(skySize, skySize);
+		texture->channels = 4;
+		texture->levels = 6;
+
+		glCreateTextures(GL_TEXTURE_CUBE_MAP_ARRAY, CUBEMAP_SIZE, &texture->id);
+		glTextureStorage3D(texture->id, mipLevels, internalFormat, skySize, skySize, 6);
+	}
+
+	uint* skyTex = getTArray(uint, skySize*skySize);
+	Vec2i texOffsets[] = {{2,1}, {0,1}, {1,0}, {1,2}, {1,1}, {3,1}};
+	for(int i = 0; i < 6; i++) {
+		Vec2i offset = texOffsets[i] * skySize;
+
+		for(int x = 0; x < skySize; x++) {
+			for(int y = 0; y < skySize; y++) {
+				skyTex[y*skySize + x] = stbData[(offset.y+y)*texWidth + (offset.x+x)];
+			}
+		}
+
+		glTextureSubImage3D(texture->id, 0, 0, 0, i, skySize, skySize, 1, channelType, channelFormat, skyTex);
+	}
+	// glGenerateTextureMipmap(ad->cubemapTextureId);
+
+	stbi_image_free(stbData);
 }
 
 
@@ -1019,6 +1081,9 @@ struct Mesh {
 struct GraphicsState {
 	Shader shaders[SHADER_SIZE];
 	Texture textures[TEXTURE_SIZE];
+
+	Texture cubeMaps[CUBEMAP_SIZE];
+
 	Font fonts[FONT_SIZE];
 
 	Mesh meshs[MESH_SIZE];
@@ -1039,6 +1104,11 @@ Mesh* getMesh(int meshId) {
 
 Texture* getTexture(int textureId) {
 	Texture* t = globalGraphicsState->textures + textureId;
+	return t;
+}
+
+Texture* getCubemap(int textureId) {
+	Texture* t = globalGraphicsState->cubeMaps + textureId;
 	return t;
 }
 
@@ -1075,7 +1145,7 @@ Font* getFont(int fontId, int height) {
 		}
 
 		Texture tex;
-		tex = loadTexture(fontBitmap, size.w, size.h, 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+		loadTexture(&tex, fontBitmap, size.w, size.h, 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
 		font.tex = tex;
 
 		globalGraphicsState->fonts[fontId] = font;
