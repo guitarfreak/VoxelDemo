@@ -64,8 +64,6 @@ Changing course for now:
  - 3d animation system. (Search Opengl vertex skinning)
  - Sound perturbation (Whatever that is). 
 
- - Spawn player on the ground.
-
 
 //-------------------------------------
 //               BUGS
