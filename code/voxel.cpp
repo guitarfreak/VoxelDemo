@@ -222,8 +222,8 @@ void buildColorPalette() {
 // #define VIEW_DISTANCE 2048 // 32
 // #define VIEW_DISTANCE 1024 // 16
 // #define VIEW_DISTANCE 512  // 8
-// #define VIEW_DISTANCE 256 // 4
-#define VIEW_DISTANCE 128 // 2
+#define VIEW_DISTANCE 256 // 4
+// #define VIEW_DISTANCE 128 // 2
 
 #define USE_MALLOC 0
 
@@ -377,7 +377,7 @@ float modOffset = 0.1f;
 float heightLevels[4] = {0.4, 0.6, 0.8, 1.0f};
 float worldPowCurve = 4;
 
-#define THREADING 0
+#define THREADING 1
 
 bool* treeNoise;
 

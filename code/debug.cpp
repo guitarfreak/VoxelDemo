@@ -1,5 +1,7 @@
 
 struct DebugState {
+	bool showHud;
+
 	DrawCommandList commandListDebug;
 	Input* input;
 

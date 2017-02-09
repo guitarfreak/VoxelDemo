@@ -82,6 +82,9 @@ Changing course for now:
 - release build takes forever
 - threadQueueComplete(ThreadQueue* queue) doesnt work
 - threadqueue do next work from main thread bug
+
+- Water lags behind one frame when drawing. Noticeable when pushing lower FPS on higher view distances. 
+
 */
 
 /*
@@ -178,7 +181,6 @@ struct AppData {
 	int assetCount;
 
 	bool captureMouse;
-	bool showHud;
 	bool updateFrameBuffers;
 	float guiAlpha;
 
@@ -334,6 +336,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		ds->input = getPStructDebug(Input);
 
+		ds->showHud = false;
+
 
 
 		getPMemory(sizeof(AppData));
@@ -419,7 +423,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->nearPlane = 0.1f;
 		// ad->farPlane = 2000;
 		ad->farPlane = 3000;
-		ad->showHud = true;
 
 		ad->guiAlpha = 0.95f;
 
@@ -740,8 +743,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 	{
-		// @NOTE: cant use f10 or f12 while debugging...
-
 		if(ds->recordingInput) {
 			memCpy(ds->recordedInput + ds->inputIndex, &ad->input, sizeof(Input));
 			ds->inputIndex++;
@@ -2457,9 +2458,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 
 		{			
-			if(input->keysPressed[KEYCODE_F5]) ad->showHud = !ad->showHud;
+			if(input->keysPressed[KEYCODE_F5]) ds->showHud = !ds->showHud;
 
-			if(ad->showHud) {
+			if(ds->showHud) {
 				int fontSize = 18;
 
 				bool initSections = false;
@@ -2625,136 +2626,256 @@ extern "C" APPMAINFUNCTION(appMain) {
 			endStatistic(stat);
 		}
 
-		Font* debugFont = getFont(FONT_CALIBRI, 18);
-
-		// draw timing info
-		float cyclesPerFrame = (float)((3*((float)1/60))*1024*1024*1024);
-		fontHeight = 18;
-		Vec2 textPos = vec2(550, -fontHeight);
-		int infoCount = ds->timerInfoCount;
-
-		bool initSections = false;
-
-		GuiInput gInput = { vec2(input->mousePos), input->mouseWheel, input->mouseButtonPressed[0], input->mouseButtonDown[0], 
-							input->keysPressed[KEYCODE_ESCAPE], input->keysPressed[KEYCODE_RETURN], input->keysPressed[KEYCODE_SPACE], input->keysPressed[KEYCODE_BACKSPACE], input->keysPressed[KEYCODE_DEL], input->keysPressed[KEYCODE_HOME], input->keysPressed[KEYCODE_END], 
-							input->keysPressed[KEYCODE_LEFT], input->keysPressed[KEYCODE_RIGHT], input->keysPressed[KEYCODE_UP], input->keysPressed[KEYCODE_DOWN], 
-							input->keysDown[KEYCODE_SHIFT], input->keysDown[KEYCODE_CTRL], input->inputCharacters, input->inputCharacterCount};
-		Gui* gui = ds->gui2;
-		gui->start(gInput, getFont(FONT_CALIBRI, fontHeight), wSettings->currentRes);
-
-		static bool statsSection = false;
-		static bool graphSection = false;
-		gui->div(0.2f,0.2f,0); gui->switcher("Stats", &statsSection); gui->switcher("Graph", &graphSection); gui->empty();
+		//
+		// Draw timing info.
+		//
 
 
-		if(statsSection) {
-			int barWidth = 1;
-			int barCount = arrayCount(ds->timings);
-			float sectionWidths[] = {0,0,0,0,0,0,0,0, barWidth*barCount};
+		if(ds->showHud) 
+		{
 
-			char* headers[] = {"File", "Function", "Description", "Cycles", "Hits", "C/H", "Avg. Cycl.", "Total Time", ""};
-			gui->div(sectionWidths, arrayCount(sectionWidths));
-			for(int i = 0; i < arrayCount(sectionWidths); i++) gui->label(headers[i],1);
+			float cyclesPerFrame = (float)((3*((float)1/60))*1024*1024*1024);
+			fontHeight = 18;
+			Vec2 textPos = vec2(550, -fontHeight);
+			int infoCount = ds->timerInfoCount;
 
-			for(int i = 0; i < infoCount; i++) {
-				TimerInfo* tInfo = ds->timerInfos + i;
-				Timings* timing = timings + i;
+			GuiInput gInput = { vec2(input->mousePos), input->mouseWheel, input->mouseButtonPressed[0], input->mouseButtonDown[0], 
+								input->keysPressed[KEYCODE_ESCAPE], input->keysPressed[KEYCODE_RETURN], input->keysPressed[KEYCODE_SPACE], input->keysPressed[KEYCODE_BACKSPACE], input->keysPressed[KEYCODE_DEL], input->keysPressed[KEYCODE_HOME], input->keysPressed[KEYCODE_END], 
+								input->keysPressed[KEYCODE_LEFT], input->keysPressed[KEYCODE_RIGHT], input->keysPressed[KEYCODE_UP], input->keysPressed[KEYCODE_DOWN], 
+								input->keysDown[KEYCODE_SHIFT], input->keysDown[KEYCODE_CTRL], input->inputCharacters, input->inputCharacterCount};
+			Gui* gui = ds->gui2;
+			gui->start(gInput, getFont(FONT_CALIBRI, fontHeight), wSettings->currentRes);
 
-				float cycleCountPercent = (float)timing->cycles/cyclesPerFrame;
-				char * percentString = getTStringDebug(50);
-				percentString = floatToStr(percentString, cycleCountPercent*100, 3);
+			static bool statsSection = false;
+			static bool graphSection = false;
+			gui->div(0.2f,0.2f,0); gui->switcher("Stats", &statsSection); gui->switcher("Graph", &graphSection); gui->empty();
 
-				int debugStringSize = 50;
-				char* buffer = 0;
 
-				gui->div(sectionWidths, arrayCount(sectionWidths)); 
+			if(statsSection) {
+				int barWidth = 1;
+				int barCount = arrayCount(ds->timings);
+				float sectionWidths[] = {0,0,0,0,0,0,0,0, barWidth*barCount};
 
-				buffer = getTStringDebug(debugStringSize);
-				_snprintf_s(buffer, debugStringSize, debugStringSize, "%s", tInfo->file + 21);
-				gui->label(buffer,0);
+				char* headers[] = {"File", "Function", "Description", "Cycles", "Hits", "C/H", "Avg. Cycl.", "Total Time", ""};
+				gui->div(sectionWidths, arrayCount(sectionWidths));
+				for(int i = 0; i < arrayCount(sectionWidths); i++) gui->label(headers[i],1);
 
-				debugStringSize = 30;
-				buffer = getTStringDebug(debugStringSize);
-				_snprintf_s(buffer, debugStringSize, debugStringSize, "%s", tInfo->function);
-				gui->label(buffer,0);
+				for(int i = 0; i < infoCount; i++) {
+					TimerInfo* tInfo = ds->timerInfos + i;
+					Timings* timing = timings + i;
 
-				debugStringSize = 30;
-				buffer = getTStringDebug(debugStringSize);
-				_snprintf_s(buffer, debugStringSize, debugStringSize, "%s", tInfo->name);
-				gui->label(buffer,0);
+					float cycleCountPercent = (float)timing->cycles/cyclesPerFrame;
+					char * percentString = getTStringDebug(50);
+					percentString = floatToStr(percentString, cycleCountPercent*100, 3);
 
-				debugStringSize = 30;
-				buffer = getTStringDebug(debugStringSize);
-				_snprintf_s(buffer, debugStringSize, debugStringSize, "%I64uc", timing->cycles);
-				gui->label(buffer,2);
+					int debugStringSize = 50;
+					char* buffer = 0;
 
-				debugStringSize = 30;
-				buffer = getTStringDebug(debugStringSize);
-				_snprintf_s(buffer, debugStringSize, debugStringSize, "%u", timing->hits);
-				gui->label(buffer,2);
+					gui->div(sectionWidths, arrayCount(sectionWidths)); 
 
-				debugStringSize = 30;
-				buffer = getTStringDebug(debugStringSize);
-				_snprintf_s(buffer, debugStringSize, debugStringSize, "%I64u", timing->cyclesOverHits);
-				gui->label(buffer,2);
+					buffer = getTStringDebug(debugStringSize);
+					_snprintf_s(buffer, debugStringSize, debugStringSize, "%s", tInfo->file + 21);
+					gui->label(buffer,0);
 
-				debugStringSize = 30;
-				buffer = getTStringDebug(debugStringSize);
-				_snprintf_s(buffer, debugStringSize, debugStringSize, "%.0fc", statistics[i].avg);
-				gui->label(buffer,2);
+					debugStringSize = 30;
+					buffer = getTStringDebug(debugStringSize);
+					_snprintf_s(buffer, debugStringSize, debugStringSize, "%s", tInfo->function);
+					gui->label(buffer,0);
 
-				debugStringSize = 30;
-				buffer = getTStringDebug(debugStringSize);
-				_snprintf_s(buffer, debugStringSize, debugStringSize, "%s%%", percentString);
-				gui->label(buffer,2);
+					debugStringSize = 30;
+					buffer = getTStringDebug(debugStringSize);
+					_snprintf_s(buffer, debugStringSize, debugStringSize, "%s", tInfo->name);
+					gui->label(buffer,0);
 
-				gui->empty();
-				Rect r = gui->getCurrentRegion();
-				float rheight = gui->getDefaultHeight();
+					debugStringSize = 30;
+					buffer = getTStringDebug(debugStringSize);
+					_snprintf_s(buffer, debugStringSize, debugStringSize, "%I64uc", timing->cycles);
+					gui->label(buffer,2);
 
-				float xOffset = 0;
-				for(int statIndex = 0; statIndex < barCount; statIndex++) {
-					Statistic* stat = statistics + i;
-					u64 coh = ds->timings[statIndex][i].cyclesOverHits;
+					debugStringSize = 30;
+					buffer = getTStringDebug(debugStringSize);
+					_snprintf_s(buffer, debugStringSize, debugStringSize, "%u", timing->hits);
+					gui->label(buffer,2);
 
-					float height = mapRangeClamp(coh, stat->min, stat->max, 1, rheight);
-					Vec2 rmin = r.min + vec2(xOffset,-2);
-					float colorOffset = mapRange(coh, stat->min, stat->max, 0, 1);
-					// dcRect(rectMinDim(rmin, vec2(barWidth, height)), vec4(colorOffset,0,1-colorOffset,1));
-					dcRect(rectMinDim(rmin, vec2(barWidth, height)), vec4(colorOffset,1-colorOffset,0,1));
+					debugStringSize = 30;
+					buffer = getTStringDebug(debugStringSize);
+					_snprintf_s(buffer, debugStringSize, debugStringSize, "%I64u", timing->cyclesOverHits);
+					gui->label(buffer,2);
 
-					xOffset += barWidth;
+					debugStringSize = 30;
+					buffer = getTStringDebug(debugStringSize);
+					_snprintf_s(buffer, debugStringSize, debugStringSize, "%.0fc", statistics[i].avg);
+					gui->label(buffer,2);
+
+					debugStringSize = 30;
+					buffer = getTStringDebug(debugStringSize);
+					_snprintf_s(buffer, debugStringSize, debugStringSize, "%s%%", percentString);
+					gui->label(buffer,2);
+
+					gui->empty();
+					Rect r = gui->getCurrentRegion();
+					float rheight = gui->getDefaultHeight();
+
+					float xOffset = 0;
+					for(int statIndex = 0; statIndex < barCount; statIndex++) {
+						Statistic* stat = statistics + i;
+						u64 coh = ds->timings[statIndex][i].cyclesOverHits;
+
+						float height = mapRangeClamp(coh, stat->min, stat->max, 1, rheight);
+						Vec2 rmin = r.min + vec2(xOffset,-2);
+						float colorOffset = mapRange(coh, stat->min, stat->max, 0, 1);
+						// dcRect(rectMinDim(rmin, vec2(barWidth, height)), vec4(colorOffset,0,1-colorOffset,1));
+						dcRect(rectMinDim(rmin, vec2(barWidth, height)), vec4(colorOffset,1-colorOffset,0,1));
+
+						xOffset += barWidth;
+					}
 				}
 			}
+
+			// gui->button("asddsf");
+
+			// float xOffset = 0;
+			// for(int statIndex = 0; statIndex < bufferIndex; statIndex++) {
+			// 	Statistic* stat = statistics + ds->cycleIndex;
+			// 	u64 coh = ds->timings[statIndex][ds->cycleIndex].cyclesOverHits;
+
+			// 	int debugStringSize = 30;
+			// 	char* buffer = &ds->stringMemory[ds->stringMemoryIndex]; ds->stringMemoryIndex += debugStringSize+1;
+			// 	_snprintf_s(buffer, debugStringSize, debugStringSize, "%I64uc ", coh);
+			// 	gui->label(buffer,0);
+
+			// 	// float height = mapRangeClamp(coh, stat->min, stat->max, 1, rheight);
+			// 	// Vec2 rmin = r.min + vec2(xOffset,-2);
+			// 	// float colorOffset = mapRange(coh, stat->min, stat->max, 0, 1);
+			// 	// dcRect(rectMinDim(rmin, vec2(barWidth, height)), vec4(colorOffset,0,1-colorOffset,1));
+			// 	// dcRect(rectMinDim(rmin, vec2(barWidth, height)), vec4(colorOffset,1-colorOffset,0,1));
+
+			// 	// xOffset += barWidth;
+			// }
+
+
+
+			if(graphSection) {
+				static Vec2 trans = vec2(10,0);
+				static float zoom = 1;
+
+				gui->div(vec2(0.1f,0)); 
+				if(gui->button("Reset")) {
+					trans = vec2(10,0);
+					zoom = 1;
+				}
+				gui->empty();
+				gui->heightPush(3);
+				gui->empty();
+				
+				Rect bgRect = gui->getCurrentRegion();
+				Vec2 dragDelta = vec2(0,0);
+				gui->drag(bgRect, &dragDelta, vec4(0,0,0,0));
+
+				trans.x += dragDelta.x;
+				// trans.x = clampMax(trans.x, 10);
+				gui->heightPop();
+
+				if(gui->input.mouseWheel) {
+					zoom *= 1 + gui->input.mouseWheel*0.1f;
+					// zoom += gui->input.mouseWheel*10;
+				}
+
+
+				Timings* graphTimings = timings;
+				TimerSlot* graphTimerBuffer = ds->timerBuffer;
+				u64 graphBufferIndex = bufferIndex;
+
+				if(ds->frozenGraph) {
+					graphTimings = ds->savedTimings;
+					graphTimerBuffer = ds->savedTimerBuffer;
+					graphBufferIndex = ds->savedBufferIndex;
+				}
+
+				float graphWidth = rectGetDim(bgRect).w;
+				Vec2 startPos = rectGetUL(bgRect);
+
+				if(true) {
+					u64 baseCycleCount = graphTimerBuffer[0].cycles;
+					u64 startCycleCount = 0;
+					u64 endCycleCount = cyclesPerFrame;
+
+					float orthoLeft = 0 + trans.x;
+					float orthoRight = graphWidth*zoom + trans.x;
+
+					Rect bgRect = rectULDim(startPos, vec2(graphWidth, fontHeight*3));
+					dcRect(bgRect, vec4(1,1,1,0.2f));
+
+					float lineWidth = 1;
+					int lineCount = 10;
+					for(int i = 0; i < lineCount+1; i++) {
+						float linePos = ((graphWidth-20)/(float)lineCount) * i;
+						linePos *= zoom;
+						linePos += trans.x;
+						linePos += bgRect.min.x;
+						Vec4 color = vec4(0.7f,0.7f,0.7f,1);
+						float lw = lineWidth;
+						if(i == 0 || i == lineCount) {
+							color = vec4(1,1,1,1);
+							lw = lineWidth * 3;
+						}
+						dcRect(rect(linePos, bgRect.min.y, linePos+lw, bgRect.max.y), color);
+					} 
+
+					startPos -= vec2(0, fontHeight);
+					index = 0;
+					for(int i = 0; i < graphBufferIndex; ++i) {
+						TimerSlot* slot = graphTimerBuffer + i;
+
+						if(slot->type == TIMER_TYPE_BEGIN) {
+
+							Timings* t = graphTimings + slot->timerIndex;
+							TimerInfo* tInfo = ds->timerInfos + slot->timerIndex;
+
+							float xoff = mapRange(slot->cycles - baseCycleCount, startCycleCount, endCycleCount, orthoLeft, orthoRight);
+							float barWidth = mapRange(t->cycles, startCycleCount, endCycleCount, 0, graphWidth*zoom);
+							Vec2 pos = startPos + vec2(xoff,index*-fontHeight);
+							// Vec2 pos = startPos + vec2(xoff,0);
+							
+							Rect r = rect(pos, pos + vec2(barWidth,fontHeight));
+							float cOff = slot->timerIndex/(float)ds->timerInfoCount;
+							Vec4 c = vec4(1-cOff, 0, cOff, 1);
+
+							int debugStringSize = 50;
+							char* buffer = getTStringDebug(debugStringSize);
+							_snprintf_s(buffer, debugStringSize, debugStringSize, "%s %s", tInfo->function, tInfo->name);
+
+							gui->drawRect(r, vec4(0,0,0,1));
+							gui->drawTextBox(rect(r.min+vec2(1,1), r.max-vec2(1,1)), buffer, c);
+
+							index++;
+						}
+
+						if(slot->type == TIMER_TYPE_END) {
+							index--;
+						}
+					}
+
+				}
+			}
+
+			gui->end();
+
 		}
 
-		// gui->button("asddsf");
+		//
+		// Draw Super Dropdown Console.
+		//
 
-		// float xOffset = 0;
-		// for(int statIndex = 0; statIndex < bufferIndex; statIndex++) {
-		// 	Statistic* stat = statistics + ds->cycleIndex;
-		// 	u64 coh = ds->timings[statIndex][ds->cycleIndex].cyclesOverHits;
+		{
+			
+		}
 
-		// 	int debugStringSize = 30;
-		// 	char* buffer = &ds->stringMemory[ds->stringMemoryIndex]; ds->stringMemoryIndex += debugStringSize+1;
-		// 	_snprintf_s(buffer, debugStringSize, debugStringSize, "%I64uc ", coh);
-		// 	gui->label(buffer,0);
-
-		// 	// float height = mapRangeClamp(coh, stat->min, stat->max, 1, rheight);
-		// 	// Vec2 rmin = r.min + vec2(xOffset,-2);
-		// 	// float colorOffset = mapRange(coh, stat->min, stat->max, 0, 1);
-		// 	// dcRect(rectMinDim(rmin, vec2(barWidth, height)), vec4(colorOffset,0,1-colorOffset,1));
-		// 	// dcRect(rectMinDim(rmin, vec2(barWidth, height)), vec4(colorOffset,1-colorOffset,0,1));
-
-		// 	// xOffset += barWidth;
-		// }
-
-
-
-
-
+		//
 		// save timer buffer
-		if(input->keysPressed[KEYCODE_F6]) {
+		//
+		
+		if(input->keysPressed[KEYCODE_F8]) {
 			if(!ds->frozenGraph) {
 				memCpy(ds->savedTimerBuffer, ds->timerBuffer, bufferIndex*sizeof(TimerSlot));
 				ds->savedBufferIndex = bufferIndex;
@@ -2764,112 +2885,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 			ds->frozenGraph = !ds->frozenGraph;
 		}
 
-
-		if(graphSection) {
-			static Vec2 trans = vec2(10,0);
-			static float zoom = 1;
-
-			gui->div(vec2(0.1f,0)); 
-			if(gui->button("Reset")) {
-				trans = vec2(10,0);
-				zoom = 1;
-			}
-			gui->empty();
-			gui->heightPush(3);
-			gui->empty();
-			
-			Rect bgRect = gui->getCurrentRegion();
-			Vec2 dragDelta = vec2(0,0);
-			gui->drag(bgRect, &dragDelta, vec4(0,0,0,0));
-
-			trans.x += dragDelta.x;
-			// trans.x = clampMax(trans.x, 10);
-			gui->heightPop();
-
-			if(gui->input.mouseWheel) {
-				zoom *= 1 + gui->input.mouseWheel*0.1f;
-				// zoom += gui->input.mouseWheel*10;
-			}
-
-
-			Timings* graphTimings = timings;
-			TimerSlot* graphTimerBuffer = ds->timerBuffer;
-			u64 graphBufferIndex = bufferIndex;
-
-			if(ds->frozenGraph) {
-				graphTimings = ds->savedTimings;
-				graphTimerBuffer = ds->savedTimerBuffer;
-				graphBufferIndex = ds->savedBufferIndex;
-			}
-
-			float graphWidth = rectGetDim(bgRect).w;
-			Vec2 startPos = rectGetUL(bgRect);
-
-			if(true) {
-				u64 baseCycleCount = graphTimerBuffer[0].cycles;
-				u64 startCycleCount = 0;
-				u64 endCycleCount = cyclesPerFrame;
-
-				float orthoLeft = 0 + trans.x;
-				float orthoRight = graphWidth*zoom + trans.x;
-
-				Rect bgRect = rectULDim(startPos, vec2(graphWidth, fontHeight*3));
-				dcRect(bgRect, vec4(1,1,1,0.2f));
-
-				float lineWidth = 1;
-				int lineCount = 10;
-				for(int i = 0; i < lineCount+1; i++) {
-					float linePos = ((graphWidth-20)/(float)lineCount) * i;
-					linePos *= zoom;
-					linePos += trans.x;
-					linePos += bgRect.min.x;
-					Vec4 color = vec4(0.7f,0.7f,0.7f,1);
-					float lw = lineWidth;
-					if(i == 0 || i == lineCount) {
-						color = vec4(1,1,1,1);
-						lw = lineWidth * 3;
-					}
-					dcRect(rect(linePos, bgRect.min.y, linePos+lw, bgRect.max.y), color);
-				} 
-
-				startPos -= vec2(0, fontHeight);
-				index = 0;
-				for(int i = 0; i < graphBufferIndex; ++i) {
-					TimerSlot* slot = graphTimerBuffer + i;
-
-					if(slot->type == TIMER_TYPE_BEGIN) {
-
-						Timings* t = graphTimings + slot->timerIndex;
-						TimerInfo* tInfo = ds->timerInfos + slot->timerIndex;
-
-						float xoff = mapRange(slot->cycles - baseCycleCount, startCycleCount, endCycleCount, orthoLeft, orthoRight);
-						float barWidth = mapRange(t->cycles, startCycleCount, endCycleCount, 0, graphWidth*zoom);
-						Vec2 pos = startPos + vec2(xoff,index*-fontHeight);
-						// Vec2 pos = startPos + vec2(xoff,0);
-						
-						Rect r = rect(pos, pos + vec2(barWidth,fontHeight));
-						float cOff = slot->timerIndex/(float)ds->timerInfoCount;
-						Vec4 c = vec4(1-cOff, 0, cOff, 1);
-
-						int debugStringSize = 50;
-						char* buffer = getTStringDebug(debugStringSize);
-						_snprintf_s(buffer, debugStringSize, debugStringSize, "%s %s", tInfo->function, tInfo->name);
-
-						gui->drawRect(r, vec4(0,0,0,1));
-						gui->drawTextBox(rect(r.min+vec2(1,1), r.max-vec2(1,1)), buffer, c);
-
-						index++;
-					}
-
-					if(slot->type == TIMER_TYPE_END) {
-						index--;
-					}
-				}
-
-			}
-		}
-
-		gui->end();
 	}
 
 
