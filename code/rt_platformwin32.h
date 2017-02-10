@@ -76,7 +76,8 @@ enum Keycode {
 
 struct Input {
 	bool firstFrame;
-	Vec2i mousePos;
+	Vec2 mousePos;
+	Vec2 mousePosNegative;
 	int mouseDeltaX, mouseDeltaY;
 	int mouseWheel;
 	bool mouseButtonPressed[8];
@@ -89,6 +90,8 @@ struct Input {
 
 	bool mShift, mCtrl, mAlt;
 };
+
+
 
 #define WIN_KEY_NUMERIC_START 0x30
 #define WIN_KEY_NUMERIC_END 0x39
@@ -447,6 +450,8 @@ void updateInput(Input* input, bool* isRunning, HWND windowHandle) {
     ScreenToClient(windowHandle, &point);
     input->mousePos.x = point.x;
     input->mousePos.y = point.y;
+
+    input->mousePosNegative = vec2(input->mousePos.x, -input->mousePos.y);
 
     input->firstFrame = false;
 }

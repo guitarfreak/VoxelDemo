@@ -84,6 +84,7 @@ Changing course for now:
 - threadqueue do next work from main thread bug
 
 - Water lags behind one frame when drawing. Noticeable when pushing lower FPS on higher view distances. 
+- Fonts look bad (Whatever that means).
 
 */
 
@@ -740,6 +741,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// TIMER_BLOCK_NAMED("Input");
 		updateInput(ds->input, isRunning, windowHandle);
 		ad->input = *ds->input;
+		if(ds->consoleActive) {
+			memSet(ad->input.keysPressed, 0, sizeof(ad->input.keysPressed));
+			memSet(ad->input.keysDown, 0, sizeof(ad->input.keysDown));
+		}
 	}
 
 	{
@@ -2427,6 +2432,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		input = ds->input;
 
+		ds->gInput = { input->mousePos, input->mouseWheel, input->mouseButtonPressed[0], input->mouseButtonDown[0], 
+						input->keysPressed[KEYCODE_ESCAPE], input->keysPressed[KEYCODE_RETURN], input->keysPressed[KEYCODE_SPACE], input->keysPressed[KEYCODE_BACKSPACE], input->keysPressed[KEYCODE_DEL], input->keysPressed[KEYCODE_HOME], input->keysPressed[KEYCODE_END], 
+						input->keysPressed[KEYCODE_LEFT], input->keysPressed[KEYCODE_RIGHT], input->keysPressed[KEYCODE_UP], input->keysPressed[KEYCODE_DOWN], 
+						input->keysDown[KEYCODE_SHIFT], input->keysDown[KEYCODE_CTRL], input->inputCharacters, input->inputCharacterCount};
+
 		{
 			int fontSize = 18;
 			int pi = 0;
@@ -2466,14 +2476,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 				bool initSections = false;
 
 				Gui* gui = ds->gui;
-				GuiInput gInput = { vec2(input->mousePos), input->mouseWheel, input->mouseButtonPressed[0], input->mouseButtonDown[0], 
-									input->keysPressed[KEYCODE_ESCAPE], input->keysPressed[KEYCODE_RETURN], input->keysPressed[KEYCODE_SPACE], input->keysPressed[KEYCODE_BACKSPACE], input->keysPressed[KEYCODE_DEL], input->keysPressed[KEYCODE_HOME], input->keysPressed[KEYCODE_END], 
-									input->keysPressed[KEYCODE_LEFT], input->keysPressed[KEYCODE_RIGHT], input->keysPressed[KEYCODE_UP], input->keysPressed[KEYCODE_DOWN], 
-									input->keysDown[KEYCODE_SHIFT], input->keysDown[KEYCODE_CTRL], input->inputCharacters, input->inputCharacterCount};
 				// gui->start(gInput, getFont(FONT_CONSOLAS, fontSize), wSettings->currentRes);
-				gui->start(gInput, getFont(FONT_CALIBRI, fontSize), wSettings->currentRes);
-
-
+				gui->start(ds->gInput, getFont(FONT_CALIBRI, fontSize), wSettings->currentRes);
 
 				if(gui->switcher("Record", &ds->recordingInput)) {
 					if(ds->recordingInput) {
@@ -2639,12 +2643,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 			Vec2 textPos = vec2(550, -fontHeight);
 			int infoCount = ds->timerInfoCount;
 
-			GuiInput gInput = { vec2(input->mousePos), input->mouseWheel, input->mouseButtonPressed[0], input->mouseButtonDown[0], 
-								input->keysPressed[KEYCODE_ESCAPE], input->keysPressed[KEYCODE_RETURN], input->keysPressed[KEYCODE_SPACE], input->keysPressed[KEYCODE_BACKSPACE], input->keysPressed[KEYCODE_DEL], input->keysPressed[KEYCODE_HOME], input->keysPressed[KEYCODE_END], 
-								input->keysPressed[KEYCODE_LEFT], input->keysPressed[KEYCODE_RIGHT], input->keysPressed[KEYCODE_UP], input->keysPressed[KEYCODE_DOWN], 
-								input->keysDown[KEYCODE_SHIFT], input->keysDown[KEYCODE_CTRL], input->inputCharacters, input->inputCharacterCount};
 			Gui* gui = ds->gui2;
-			gui->start(gInput, getFont(FONT_CALIBRI, fontHeight), wSettings->currentRes);
+			gui->start(ds->gInput, getFont(FONT_CALIBRI, fontHeight), wSettings->currentRes);
 
 			static bool statsSection = false;
 			static bool graphSection = false;
@@ -2868,13 +2868,135 @@ extern "C" APPMAINFUNCTION(appMain) {
 		//
 
 		{
-			
+
+			float closedPos = 0;
+			float smallPos = -wSettings->currentRes.y * CONSOLE_SMALL_PERCENT;
+			float bigPos = -wSettings->currentRes.y * CONSOLE_BIG_PERCENT;
+
+			if(second) {
+				ds->consolePos = 0;
+				ds->targetPos = smallPos;
+			}
+
+			if(input->keysPressed[KEYCODE_F6]) {
+				if(input->keysDown[KEYCODE_CTRL]) {
+					if(ds->targetPos == closedPos) {
+						ds->targetPos = bigPos;
+					} else if(ds->targetPos == smallPos) {
+						ds->targetPos = bigPos;
+					} else ds->targetPos = closedPos;
+				} else {
+					if(ds->targetPos == closedPos) {
+						ds->targetPos = smallPos;
+					} else if(ds->targetPos == bigPos) {
+						ds->targetPos = smallPos;
+					} else ds->targetPos = closedPos;
+				}
+			}
+
+			// Calculate smoothstep.
+
+			float consoleSpeed = 10;
+			float consoleMovement = consoleSpeed * ad->dt;
+
+			float distance = ds->consolePos - ds->targetPos;
+			if(abs(distance) > 0) {
+				ds->consolePos = lerp(consoleMovement, ds->consolePos, ds->targetPos);
+
+				// Clamp if we overstepped the target position.
+				float newDistance = ds->consolePos - ds->targetPos;
+				if(abs(newDistance) <= 1.0f) ds->consolePos = ds->targetPos;
+
+				// if(newDistance != 0 && (!sameSign(distance, newDistance))) {
+					// ds->consolePos = ds->targetPos;
+				// }
+			}
+
+			Vec2 res = vec2(wSettings->currentRes);
+			float consoleTotalHeight = CONSOLE_SMALL_PERCENT*res.h;
+			float consolePadding = 10;
+			float inputFontSize = 18;
+			float bodyFontSize = 23;
+			Font* inputFont = getFont(FONT_CONSOLAS, inputFontSize);
+			Font* bodyFont = getFont(FONT_ARIAL, bodyFontSize);
+			Vec4 inputFontColor = vec4(1,1,1,1);
+			Vec4 bodyFontColor = vec4(1,1,0,1);
+			Vec4 bodyColor = vec4(0.4f,0,0.6f,0.9f);
+			Vec4 inputColor = vec4(0.2f,0,0.6f,0.9f);
+			Vec4 cursorColor = vec4(0.2f,0,7.1f,0.9f);
+			float inputHeightPadding = 1.8;
+			float bodyFontHeightPadding = 1.0;
+
+			float inputHeight = inputFontSize * inputHeightPadding;
+			float bodyTextHeight = bodyFontSize * bodyFontHeightPadding;
+			float consoleBodyHeight = consoleTotalHeight - inputHeight;
+			Rect consoleBody = rectMinDim(vec2(0, ds->consolePos + inputHeight), vec2(res.w, consoleBodyHeight));
+			Rect consoleInput = rectMinDim(vec2(0, ds->consolePos), vec2(res.w, inputHeight));
+	
+			if(pointInRect(input->mousePosNegative, consoleInput)) {
+				inputColor.g += 0.2;
+
+				if(input->mouseButtonPressed[0]) {
+					ds->consoleActive = true;
+				}
+			} else {
+				if(input->mouseButtonPressed[0]) {
+					ds->consoleActive = false;
+					strClear(ds->inputBuffer);
+				}
+			}
+
+			// bool consoleActive = ds->consolePos != closedPos;
+			if(ds->consoleActive) {
+				inputColor.g += 0.2;
+
+				// Add input characters to input buffer.
+
+				if(input->inputCharacterCount + strLen(ds->inputBuffer) < arrayCount(ds->inputBuffer)) {
+					strAppend(ds->inputBuffer, input->inputCharacters, input->inputCharacterCount);
+				}
+
+				if(input->keysPressed[KEYCODE_BACKSPACE]) {
+					strRemove(ds->inputBuffer, strLen(ds->inputBuffer));
+				}
+
+				if(input->keysPressed[KEYCODE_RETURN]) {
+					// Copy over input buffer to console buffer.
+
+					char* newString = getPArrayDebug(char, strLen(ds->inputBuffer) + 1);
+					strCpy(newString, ds->inputBuffer);
+
+					ds->consoleBuffer[ds->consoleBufferSize] = newString;
+					ds->consoleBufferSize++;
+
+					strClear(ds->inputBuffer);
+				}
+
+			}
+
+			// cursorPos = 1;
+
+			dcRect(consoleBody, bodyColor);
+			dcRect(consoleInput, inputColor);
+
+			if(ds->consoleBufferSize > 0) {
+				float textPos = -bodyTextHeight/2;
+
+				for(int i = 0; i < ds->consoleBufferSize; i++) {
+					dcText(ds->consoleBuffer[i], bodyFont, vec2(consolePadding,textPos), bodyFontColor, 0, 1);
+					textPos -= bodyTextHeight;
+				}
+			}
+			dcText(ds->inputBuffer, inputFont, vec2(consolePadding, consoleInput.min.y + inputHeight/2), inputFontColor, 0, 1);
+			Rect cursorRect = rect(0,0,0,0);
+			// dcRect(cursorRect, );
+
 		}
 
 		//
 		// save timer buffer
 		//
-		
+
 		if(input->keysPressed[KEYCODE_F8]) {
 			if(!ds->frozenGraph) {
 				memCpy(ds->savedTimerBuffer, ds->timerBuffer, bufferIndex*sizeof(TimerSlot));

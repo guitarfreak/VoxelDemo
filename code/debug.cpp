@@ -1,6 +1,7 @@
 
 struct DebugState {
 	bool showHud;
+	bool showConsole;
 
 	DrawCommandList commandListDebug;
 	Input* input;
@@ -20,6 +21,7 @@ struct DebugState {
 	u64 savedBufferIndex;
 	Timings savedTimings[32];
 
+	GuiInput gInput;
 	Gui* gui;
 	Gui* gui2;
 
@@ -32,7 +34,25 @@ struct DebugState {
 	bool playbackInput;
 	int playbackIndex;
 	bool playbackSwapMemory;
+
+	// Console.
+
+	float consolePos;
+	float targetPos;
+	bool consoleActive;
+
+	char* consoleBuffer[256];
+	int consoleBufferSize;
+
+	char inputBuffer[256];
+	// int inputBufferSize;
+
+	int cursorPos;
 };
+
+#define CONSOLE_SMALL_PERCENT 0.3f
+#define CONSOLE_BIG_PERCENT 0.8f
+
 
 extern DebugState* globalDebugState;
 

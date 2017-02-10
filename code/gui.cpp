@@ -325,7 +325,7 @@ struct Gui {
 		drawText(text, align, region);
 	}
 
-	void start(GuiInput guiInput, Font* font, Vec2i res) {
+	void start(GuiInput guiInput, Font* font, Vec2i res, bool moveable = true, bool resizeable = true, bool clipToWindow = true) {
 		this->font = font;
 		fontHeight = font->height;
 		lastMousePos = input.mousePos;
@@ -349,12 +349,13 @@ struct Gui {
 		{
 			Vec2 dragDelta = vec2(0,0);
 			Vec2 oldPos = cornerPos;
-			if(!input.ctrl && drag(background, &dragDelta)) {
+			if(!input.ctrl && drag(background, &dragDelta) && moveable) {
 				cornerPos += dragDelta;
 			}
 
 			// clamp(&cornerPos, rect(0, -res.y, res.x - rectGetDim(background).w+1, 0.5f));
-			clamp(&cornerPos, rect(0, -res.y + rectGetDim(background).h, res.x - rectGetDim(background).w+1, 0.5f));
+			if(clipToWindow)
+				clamp(&cornerPos, rect(0, -res.y + rectGetDim(background).h, res.x - rectGetDim(background).w+1, 0.5f));
 			background = rectAddOffset(background, cornerPos - oldPos);
 		}
 
@@ -367,30 +368,27 @@ struct Gui {
 			float oldPanelWidth = panelStartDim.w;
 
 			if(input.ctrl) {
-				if(drag(background, &dragDelta)) {
+				if(drag(background, &dragDelta) && resizeable) {
 					panelStartDim.h += -dragDelta.y;
 					panelStartDim.w += dragDelta.x;
 				}
 			}
 			{
 				incrementId();
-				if(drag(resizeRegion, &dragDelta)) {
+				if(drag(resizeRegion, &dragDelta) && resizeable) {
 					panelStartDim.h += -dragDelta.y;
 					panelStartDim.w += dragDelta.x;
 				}
 			}
 
-
 			// garbage
-			if(dragDelta != vec2(0,0)) {
+			if(dragDelta != vec2(0,0) && resizeable) {
 				Rect screenRect = rect(0,-screenRes.h,screenRes.w,0);
 				dragDelta.x = clampMax(dragDelta.x, screenRect.max.x - background.max.x +1);
 				dragDelta.y = clampMin(dragDelta.y, screenRect.min.y - background.min.y);
 				panelStartDim.w = oldPanelWidth + dragDelta.x;
 				panelStartDim.h = oldMainScrollHeight - dragDelta.y;
 			}
-
-
 		
 			panelStartDim.h = clamp(panelStartDim.h, settings.minSize.y, screenRes.h+settings.border.h*2+1);
 			panelStartDim.w = clamp(panelStartDim.w, settings.minSize.x, screenRes.w-settings.border.w*2+1);
@@ -400,7 +398,8 @@ struct Gui {
 			resizeRegion = rectAddOffset(resizeRegion, dragAfterClamp);
 			background = rectExpand(background, 0, dragAfterClamp.y, dragAfterClamp.x, 0);
 
-			clamp(&cornerPos, rect(0, -res.y + rectGetDim(background).h, res.x - rectGetDim(background).w+1, 0.5f));
+			if(clipToWindow)
+				clamp(&cornerPos, rect(0, -res.y + rectGetDim(background).h, res.x - rectGetDim(background).w+1, 0.5f));
 		}
 
 		setScissor(true);
@@ -423,6 +422,7 @@ struct Gui {
 			beginScroll(mainScrollHeight, &mainScrollAmount);
 		}
 	}
+
 
 	void end() {
 		// terrible hack

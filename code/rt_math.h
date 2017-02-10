@@ -70,6 +70,14 @@ inline int maxReturnIndex(float a, float b, float c) {
 	return index;
 }
 
+inline float diff(float a, float b) {
+	return abs(a - b);
+}
+
+inline float sameSign(float a, float b) {
+	bool result = (a < 0 && b < 0) || (a > 0 && b > 0); 
+	return result;
+}
 
 
 // inline float clampMin(float min, float a) {
@@ -78,7 +86,7 @@ inline float clampMin(float a, float min) {
 }
 
 inline void clampMin(float* a, float min) {
-	*a < min ? min : *a;
+	if(*a < min) *a = min;
 }
 
 inline float clampMax(float a, float max) {
@@ -86,7 +94,7 @@ inline float clampMax(float a, float max) {
 }
 
 inline void clampMax(float* a, float max) {
-	*a > max ? max : *a;
+	if(*a > max) *a = max;
 }
 
 inline float clamp(float n, float min, float max) {
@@ -146,7 +154,7 @@ inline float mapRangeClamp(float value, float min, float max, float rangeMin, fl
 
 // 0 to 1
 float lerp(float percent, float min, float max) {
-	float result = mapRange(percent, 0, 1, min, max);
+	float result = min + percent * (max-min);
 	return result;
 }
 
