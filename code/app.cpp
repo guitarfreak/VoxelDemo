@@ -61,6 +61,7 @@ Changing course for now:
  * Split up main app.cpp into mutliple files.
  * Implement hotloading of text files -> shaders, textures, variables and so on.
  - Dropdown console.
+   - Make sure to clean it up once your satified with the functionality it.
  - 3d animation system. (Search Opengl vertex skinning)
  - Sound perturbation (Whatever that is). 
 

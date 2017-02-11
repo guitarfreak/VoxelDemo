@@ -18,6 +18,17 @@ struct Console {
 	int markerIndex;
 	float cursorTime;
 
+	/*
+		TODO's:
+		* Ctrl backspace, Ctrl Delete.
+		* Ctrl Left/Right not jumping multiple spaces.
+		- Command history.
+		- Scrollbar.
+		- Mouse selection.
+		- Clipboard.
+		- Selection Left/Right not working propberly.
+	*/
+
 	void init(float windowHeight) {
 		float smallPos = -windowHeight * CONSOLE_SMALL_PERCENT;
 		pos = smallPos;
@@ -98,7 +109,8 @@ struct Console {
 
 		// Font* bodyFont = getFont(FONT_SOURCESANS_PRO, bodyFontSize);
 		// Font* bodyFont = getFont(FONT_CALIBRI, bodyFontSize);
-		float bodyFontHeightPadding = 1.0;
+		float bodyFontHeightPadding = 1.0f;
+		float bodyFontHeightResultPadding = 1.2f;
 		float bodyFontSize = 22;
 		Font* bodyFont = getFont(FONT_SOURCESANS_PRO, bodyFontSize);
 		float inputFontSize = 16;
@@ -171,7 +183,7 @@ struct Console {
 
 							dcText(mainBuffer[i], bodyFont, vec2(consolePadding + getTextDim(pre, bodyFont).w,textPos), vec4(1,0,0,1), 0, 1);
 
-							textPos -= bodyTextHeight;
+							textPos -= bodyTextHeight * bodyFontHeightResultPadding;
 						}
 					}
 				}
@@ -180,47 +192,92 @@ struct Console {
 			}
 		}
 
-		// bool isActive = pos != closedPos;
 		if(isActive) {
-			inputColor.g += 0.2;
+			bool left = input->keysPressed[KEYCODE_LEFT];
+			bool right = input->keysPressed[KEYCODE_RIGHT];
+			bool up = input->keysPressed[KEYCODE_UP];
+			bool down = input->keysPressed[KEYCODE_DOWN];
+			
+			bool home = input->keysPressed[KEYCODE_HOME];
+			bool end = input->keysPressed[KEYCODE_END];
+			bool backspace = input->keysPressed[KEYCODE_BACKSPACE];
+			bool del = input->keysPressed[KEYCODE_DEL];
+			bool enter = input->keysPressed[KEYCODE_RETURN];
+
+			bool ctrl = input->keysDown[KEYCODE_CTRL];
+			bool shift = input->keysDown[KEYCODE_SHIFT];
 
 			int startCursorIndex = cursorIndex;
 
-			if(input->keysPressed[KEYCODE_LEFT]) {
-				if(input->keysDown[KEYCODE_CTRL]) {
-					if(cursorIndex > 0) {
-						cursorIndex = strFindBackwards(inputBuffer, ' ', cursorIndex-1);
-					}
-				} else cursorIndex--;
+			if(ctrl && backspace) {
+				shift = true;
+				left = true;
 			}
 
-			if(input->keysPressed[KEYCODE_RIGHT]) {
-				if(input->keysDown[KEYCODE_CTRL]) {
+			if(ctrl && del) {
+				shift = true;
+				right = true;
+			}
+
+			if(left) {
+				if(ctrl) {
+					if(cursorIndex > 0) {
+						while(inputBuffer[cursorIndex-1] == ' ') cursorIndex--;
+
+						if(cursorIndex > 0)
+					 		cursorIndex = strFindBackwards(inputBuffer, ' ', cursorIndex-1);
+					}
+				} else {
+					bool isSelected = cursorIndex != markerIndex;
+					if(isSelected && !shift) {
+						if(cursorIndex < markerIndex) {
+							markerIndex = cursorIndex;
+						} else {
+							cursorIndex = markerIndex;
+						}
+					} else {
+						if(cursorIndex > 0) cursorIndex--;
+					}
+				}
+			}
+
+			if(right) {
+				if(ctrl) {
+					while(inputBuffer[cursorIndex] == ' ') cursorIndex++;
 					if(cursorIndex <= strLen(inputBuffer)) {
 						cursorIndex = strFindOrEnd(inputBuffer, ' ', cursorIndex+1);
 						if(cursorIndex != strLen(inputBuffer)) cursorIndex--;
-					} else cursorIndex++;
-				} else cursorIndex++;
+					}
+				} else {
+					// if(cursorIndex < strLen(inputBuffer)) cursorIndex++;
+					bool isSelected = cursorIndex != markerIndex;
+					if(isSelected && !shift) {
+						if(cursorIndex > markerIndex) {
+							markerIndex = cursorIndex;
+						} else {
+							cursorIndex = markerIndex;
+						}
+					} else {
+						if(cursorIndex < strLen(inputBuffer)) cursorIndex++;
+					}
+				}
 			}
 
-			if(input->keysPressed[KEYCODE_HOME]) {
+			if(home) {
 				cursorIndex = 0;
 			}
 
-			if(input->keysPressed[KEYCODE_END]) {
+			if(end) {
 				cursorIndex = strLen(inputBuffer);
 			}
 
-			cursorIndex = clamp(cursorIndex, 0, strLen(inputBuffer));
-
-			if((startCursorIndex != cursorIndex) && !input->keysDown[KEYCODE_SHIFT]) {
+			if((startCursorIndex != cursorIndex) && !shift) {
 				markerIndex = cursorIndex;
 			}
 
 			bool isSelected = cursorIndex != markerIndex;
 
-			if(input->keysPressed[KEYCODE_BACKSPACE] || input->keysPressed[KEYCODE_DEL] || 
-			   (input->inputCharacterCount > 0)) {
+			if(backspace || del || (input->inputCharacterCount > 0)) {
 				if(isSelected) {
 					int delIndex = min(cursorIndex, markerIndex);
 					int delAmount = abs(cursorIndex - markerIndex);
@@ -240,7 +297,7 @@ struct Console {
 				}
 			}
 
-			if(input->keysPressed[KEYCODE_BACKSPACE] && !isSelected) {
+			if(backspace && !isSelected) {
 				if(cursorIndex > 0) {
 					strRemove(inputBuffer, cursorIndex);
 					cursorIndex--;
@@ -248,14 +305,14 @@ struct Console {
 				markerIndex = cursorIndex;
 			}
 
-			if(input->keysPressed[KEYCODE_DEL] && !isSelected) {
+			if(del && !isSelected) {
 				if(cursorIndex+1 <= strLen(inputBuffer)) {
 					strRemove(inputBuffer, cursorIndex+1);
 				}
 				markerIndex = cursorIndex;
 			}
 
-			if(input->keysPressed[KEYCODE_RETURN]) {
+			if(enter) {
 				if(strLen(inputBuffer) > 0) {
 					// Copy over input buffer to console buffer.
 					pushToMainBuffer(inputBuffer);
@@ -303,6 +360,21 @@ struct Console {
 		return str + index;
 	}
 
+	char* eatSign(char* str) {
+		char c = str[0];
+		if(c == '-' || c == '+') return str + 1;
+		else return str;
+	}
+
+	bool charIsDigit(char c) {
+		return (c >= (int)'0') && (c <= (int)'9');
+	}
+
+	char* eatDigits(char* str) {
+		while(charIsDigit(str[0])) str++;
+		return str;
+	}
+
 	char* getNextArgument(char** s) {
 		*s = eatWhiteSpace(*s);
 		char* str = *s;
@@ -328,16 +400,39 @@ struct Console {
 		mainBufferSize++;
 	}
 
+	bool strIsInteger(char* str) {
+		char* s = str;
+		s = eatSign(s);
+		if(!charIsDigit(s[0])) return false;
+		s = eatDigits(s);
+
+		if(s[0] != '\0') return false;
+
+		return true;
+	}
+
 	void evaluateInput() {
 		char* com = inputBuffer;
 
 		char* argument = getNextArgument(&com);
-		printf("Argument: %s.", argument);
 		if(argument == 0) return;
 
 		if(strCompare(argument, "add")) {
-			int a = strToInt(getNextArgument(&com));
-			int b = strToInt(getNextArgument(&com));
+			char* arguments[2];
+			arguments[0] = getNextArgument(&com);
+			arguments[1] = getNextArgument(&com);
+			if(!(arguments + 0) || !(arguments + 1)) {
+				pushToMainBuffer(fillString("Function is missing arguments."));
+				return;
+			}
+
+			if(!strIsInteger(arguments[0]) || !strIsInteger(arguments[1])) {
+				pushToMainBuffer(fillString("Arguments are not integers."));
+				return;
+			}
+
+			int a = strToInt(arguments[0]);
+			int b = strToInt(arguments[1]);
 
 			pushToMainBuffer(fillString("%i + %i = %i", a, b, a+b));
 		} else if(strCompare(argument, "donothing")) {
