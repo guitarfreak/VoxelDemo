@@ -22,11 +22,12 @@ struct Console {
 		TODO's:
 		* Ctrl backspace, Ctrl Delete.
 		* Ctrl Left/Right not jumping multiple spaces.
+		* Selection Left/Right not working propberly.
+		* Ctrl + a.
+		* Clipboard.
 		- Command history.
 		- Scrollbar.
 		- Mouse selection.
-		- Clipboard.
-		- Selection Left/Right not working propberly.
 	*/
 
 	void init(float windowHeight) {
@@ -139,18 +140,21 @@ struct Console {
 		Rect consoleBody = rectMinDim(vec2(0, pos + inputHeight), vec2(res.w, consoleBodyHeight));
 		Rect consoleInput = rectMinDim(vec2(0, pos), vec2(res.w, inputHeight));
 
-		if(pointInRect(input->mousePosNegative, consoleInput)) {
+		if(!isActive && pointInRect(input->mousePosNegative, consoleInput)) {
 			float t = 0.1f;
 			inputColor += vec4(t,t,t,0);
 
 			if(input->mouseButtonPressed[0]) {
 				isActive = true;
 				strClear(inputBuffer);
+				cursorIndex = 0;
+				markerIndex = 0;
 			}
 		}
 
 		if(input->keysPressed[KEYCODE_ESCAPE]) {
 			isActive = false;
+			strClear(inputBuffer);
 		}
 
 		bool visible = true;
@@ -197,6 +201,11 @@ struct Console {
 			bool right = input->keysPressed[KEYCODE_RIGHT];
 			bool up = input->keysPressed[KEYCODE_UP];
 			bool down = input->keysPressed[KEYCODE_DOWN];
+
+			bool a = input->keysPressed[KEYCODE_A];
+			bool x = input->keysPressed[KEYCODE_X];
+			bool c = input->keysPressed[KEYCODE_C];
+			bool v = input->keysPressed[KEYCODE_V];
 			
 			bool home = input->keysPressed[KEYCODE_HOME];
 			bool end = input->keysPressed[KEYCODE_END];
@@ -249,7 +258,6 @@ struct Console {
 						if(cursorIndex != strLen(inputBuffer)) cursorIndex--;
 					}
 				} else {
-					// if(cursorIndex < strLen(inputBuffer)) cursorIndex++;
 					bool isSelected = cursorIndex != markerIndex;
 					if(isSelected && !shift) {
 						if(cursorIndex > markerIndex) {
@@ -275,9 +283,27 @@ struct Console {
 				markerIndex = cursorIndex;
 			}
 
+			if(ctrl && a) {
+				cursorIndex = 0;
+				markerIndex = strLen(inputBuffer);
+			}
+
 			bool isSelected = cursorIndex != markerIndex;
 
-			if(backspace || del || (input->inputCharacterCount > 0)) {
+			if(ctrl && x) {
+				c = true;
+				del = true;
+			}
+
+			if(ctrl && c) {
+				float selectionWidth = abs(cursorIndex - markerIndex);
+				char* selection = getTStringDebug(selectionWidth);
+				strCpy(selection, inputBuffer + (int)min(cursorIndex, markerIndex), selectionWidth);
+
+				setClipboard(selection);
+			}
+
+			if(backspace || del || (input->inputCharacterCount > 0) || (ctrl && v)) {
 				if(isSelected) {
 					int delIndex = min(cursorIndex, markerIndex);
 					int delAmount = abs(cursorIndex - markerIndex);
@@ -286,6 +312,16 @@ struct Console {
 				}
 
 				markerIndex = cursorIndex;
+			}
+
+			if(ctrl && v) {
+				char* clipboard = (char*)getClipboard();
+				int clipboardSize = strLen(clipboard);
+				if(clipboardSize + strLen(inputBuffer) < arrayCount(inputBuffer)) {
+					strInsert(inputBuffer, cursorIndex, clipboard);
+					cursorIndex += clipboardSize;
+					markerIndex = cursorIndex;
+				}
 			}
 
 			// Add input characters to input buffer.
@@ -318,6 +354,8 @@ struct Console {
 					pushToMainBuffer(inputBuffer);
 					evaluateInput();
 					strClear(inputBuffer);
+					cursorIndex = 0;
+					markerIndex = 0;
 				}
 			}
 

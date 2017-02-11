@@ -462,6 +462,13 @@ void updateInput(Input* input, bool* isRunning, HWND windowHandle) {
 //     return (char*)clipBoardData;
 // }
 
+const char* getClipboard() {
+    BOOL result = OpenClipboard(0);
+    HANDLE clipBoardData = GetClipboardData(CF_TEXT);
+
+    return (char*)clipBoardData;
+}
+
 // MetaPlatformFunction();
 void setClipboard(char* text) {
     int textSize = strLen(text) + 1;
