@@ -51,6 +51,14 @@ char* fillString(char* text, ...) {
 			ti += 2;
 			bi += sLen;
 			getTString(sLen);
+		} if(text[ti] == '%' && text[ti+1] == 's') {
+			char* str = va_arg(vl, char*);
+			int sLen = strLen(str);
+			memCpy(buffer + bi, str, sLen);
+
+			ti += 2;
+			bi += sLen;
+			getTString(sLen);
 		} if(text[ti] == '%' && text[ti+1] == '%') {
 			buffer[bi++] = '%';
 			ti += 2;

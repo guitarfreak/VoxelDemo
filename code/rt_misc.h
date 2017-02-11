@@ -236,6 +236,12 @@ int strFind(const char* str, char chr, int startIndex = 0) {
 	return pos+1;
 }
 
+int strFindX(const char* str, char chr, int startIndex = 0) {
+	int pos = strFind(str, chr, startIndex);
+	if(pos == 0) return -1;
+	else return pos;
+}
+
 int strFindOrEnd(const char* str, char chr, int startIndex = 0) {
 	int pos = strFind(str, chr, startIndex);
 	if(pos == 0) return strLen((char*)str);

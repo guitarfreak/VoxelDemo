@@ -16,6 +16,7 @@ struct Console {
 
 	int cursorIndex;
 	int markerIndex;
+	float cursorTime;
 
 	void init(float windowHeight) {
 		float smallPos = -windowHeight * CONSOLE_SMALL_PERCENT;
@@ -24,47 +25,31 @@ struct Console {
 		cursorIndex = 0;
 		markerIndex = 0;
 
-		const char* text = "This is a test String!1";
+		const char* text = "This is a test String!";
 		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)text) + 1);
 		strCpy(mainBuffer[mainBufferSize++], (char*)text);
+
+		const char* result = "123.4543";
+		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)result) + 1);
+		strCpy(mainBuffer[mainBufferSize++], (char*)result);
+
+
+		const char* text2 = "This doesn't produce a result.";
+		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)text2) + 1);
+		strCpy(mainBuffer[mainBufferSize++], (char*)text2);
+
+		mainBuffer[mainBufferSize] = getPArrayDebug(char, 1);
+		strClear(mainBuffer[mainBufferSize++]);
+
+
+
 		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)text) + 1);
 		strCpy(mainBuffer[mainBufferSize++], (char*)text);
-		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)text) + 1);
-		strCpy(mainBuffer[mainBufferSize++], (char*)text);
-		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)text) + 1);
-		strCpy(mainBuffer[mainBufferSize++], (char*)text);
-		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)text) + 1);
-		strCpy(mainBuffer[mainBufferSize++], (char*)text);
-		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)text) + 1);
-		strCpy(mainBuffer[mainBufferSize++], (char*)text);
-		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)text) + 1);
-		strCpy(mainBuffer[mainBufferSize++], (char*)text);
-		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)text) + 1);
-		strCpy(mainBuffer[mainBufferSize++], (char*)text);
-		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)text) + 1);
-		strCpy(mainBuffer[mainBufferSize++], (char*)text);
-		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)text) + 1);
-		strCpy(mainBuffer[mainBufferSize++], (char*)text);
-		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)text) + 1);
-		strCpy(mainBuffer[mainBufferSize++], (char*)text);
-		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)text) + 1);
-		strCpy(mainBuffer[mainBufferSize++], (char*)text);
-		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)text) + 1);
-		strCpy(mainBuffer[mainBufferSize++], (char*)text);
-		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)text) + 1);
-		strCpy(mainBuffer[mainBufferSize++], (char*)text);
-		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)text) + 1);
-		strCpy(mainBuffer[mainBufferSize++], (char*)text);
-		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)text) + 1);
-		strCpy(mainBuffer[mainBufferSize++], (char*)text);
-		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)text) + 1);
-		strCpy(mainBuffer[mainBufferSize++], (char*)text);
-		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)text) + 1);
-		strCpy(mainBuffer[mainBufferSize++], (char*)text);
-		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)text) + 1);
-		strCpy(mainBuffer[mainBufferSize++], (char*)text);
-		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)text) + 1);
-		strCpy(mainBuffer[mainBufferSize++], (char*)text);
+
+		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)result) + 1);
+		strCpy(mainBuffer[mainBufferSize++], (char*)result);
+
+
 	}
 
 	void update(Input* input, Vec2 currentRes, float dt) {
@@ -123,14 +108,16 @@ struct Console {
 		float fontDrawHeightOffset = 0.2f;
 		float consolePadding = 10;
 		float cursorWidth = 2;
+		float cursorSpeed = 3;
+		float cursorColorMod = 0.2f;
 
 
 		Vec4 bodyColor 		= vec4(0.3f,0,0.6f,1.0f);
-		Vec4 inputColor 	= vec4(0.4f,0,0.6f,1.0f);
+		Vec4 inputColor 	= vec4(0.37f,0,0.6f,1.0f);
 		Vec4 bodyFontColor 	= vec4(1,1,1,1);
 		Vec4 inputFontColor = vec4(1,1,1,1);
-		Vec4 cursorColor 	= vec4(0.2f,0.7f,0.1f,0.9f);
-		Vec4 selectionColor = vec4(0.3f,0.3f,0.3f,0.9f);
+		Vec4 cursorColor 	= vec4(0.2f,0.8f,0.1f,0.9f);
+		Vec4 selectionColor = vec4(0.1f,0.4f,0.4f,0.9f);
 
 
 
@@ -154,21 +141,43 @@ struct Console {
 			isActive = false;
 		}
 
-		dcRect(consoleBody, bodyColor);
-		dcRect(consoleInput, inputColor);
+		bool visible = true;
+		if(pos == closedPos) {
+			isActive = false;
+			visible = false;
+		}
 
-		if(mainBufferSize > 0) {
-			dcEnable(STATE_SCISSOR);
-			dcScissor(scissorRectScreenSpace(consoleBody, res.h));
+		if(visible) {
+			dcRect(consoleBody, bodyColor);
+			dcRect(consoleInput, inputColor);
 
-			float textPos = pos + consoleTotalHeight -bodyTextHeight/2;
+			if(mainBufferSize > 0) {
+				dcEnable(STATE_SCISSOR);
+				dcScissor(scissorRectScreenSpace(consoleBody, res.h));
 
-			for(int i = 0; i < mainBufferSize; i++) {
-				dcText(mainBuffer[i], bodyFont, vec2(consolePadding,textPos), bodyFontColor, 0, 1);
-				textPos -= bodyTextHeight;
+				float textPos = pos + consoleTotalHeight -bodyTextHeight/2;
+
+				for(int i = 0; i < mainBufferSize; i++) {
+					if(i%2 == 0) {
+						char* pre = "> ";
+						dcText(pre, bodyFont, vec2(consolePadding,textPos), bodyFontColor, 0, 1);
+
+						dcText(mainBuffer[i], bodyFont, vec2(consolePadding + getTextDim(pre, bodyFont).w,textPos), bodyFontColor, 0, 1);
+						textPos -= bodyTextHeight;
+					} else {
+						if(strLen(mainBuffer[i]) > 0) {
+							char* pre = "    ";
+							dcText(pre, bodyFont, vec2(consolePadding,textPos), bodyFontColor, 0, 1);
+
+							dcText(mainBuffer[i], bodyFont, vec2(consolePadding + getTextDim(pre, bodyFont).w,textPos), vec4(1,0,0,1), 0, 1);
+
+							textPos -= bodyTextHeight;
+						}
+					}
+				}
+
+				dcDisable(STATE_SCISSOR);
 			}
-
-			dcDisable(STATE_SCISSOR);
 		}
 
 		// bool isActive = pos != closedPos;
@@ -247,15 +256,16 @@ struct Console {
 			}
 
 			if(input->keysPressed[KEYCODE_RETURN]) {
+				if(strLen(inputBuffer) > 0) {
+					// Copy over input buffer to console buffer.
+					pushToMainBuffer(inputBuffer);
+					evaluateInput();
+					strClear(inputBuffer);
+				}
+			}
 
-				// Copy over input buffer to console buffer.
-				char* newString = getPArrayDebug(char, strLen(inputBuffer) + 1);
-				strCpy(newString, inputBuffer);
-
-				mainBuffer[mainBufferSize] = newString;
-				mainBufferSize++;
-
-				strClear(inputBuffer);
+			if(startCursorIndex != cursorIndex) {
+				cursorTime = 0;
 			}
 
 			// Drawing.
@@ -264,6 +274,10 @@ struct Console {
 
 			float cursorX = getTextPos(inputBuffer, cursorIndex, inputFont) + consolePadding;
 			Rect cursorRect = rectCenDim(cursorX, inputMid, cursorWidth, inputFontSize);
+			if(cursorIndex == strLen(inputBuffer)) {
+				float width = getTextDim("M", inputFont).w;
+				cursorRect = rectCenDim(cursorX + width/2, inputMid, width, inputFontSize);
+			}
 
 			float markerX = getTextPos(inputBuffer, markerIndex, inputFont) + consolePadding;
 
@@ -277,10 +291,63 @@ struct Console {
 
 			dcText(inputBuffer, inputFont, vec2(consolePadding, consoleInput.min.y + inputHeight/2 + inputFontSize * fontDrawHeightOffset), inputFontColor, 0, 1);
 
-			dcRect(cursorRect, cursorColor);
+			cursorTime += dt*cursorSpeed;
+			Vec4 cmod = vec4(0,cos(cursorTime)*cursorColorMod - cursorColorMod,0,0);
+			dcRect(cursorRect, cursorColor + cmod);
+		}
+	}
+
+	char* eatWhiteSpace(char* str) {
+		int index = 0;
+		while(str[index] == ' ') index++;
+		return str + index;
+	}
+
+	char* getNextArgument(char** s) {
+		*s = eatWhiteSpace(*s);
+		char* str = *s;
+
+		if(str[0] == '\0') return 0;
+		int wpos = strFindX(str, ' ');
+		if(wpos == -1) wpos = strLen(str) + 1;
+		wpos--;
+
+		char* argument = getTStringDebug(wpos + 1);
+		strCpy(argument, str, wpos);
+
+		*s += wpos;
+
+		return argument;
+	}
+
+	void pushToMainBuffer(char* str) {
+		char* newString = getPArrayDebug(char, strLen(str) + 1);
+		strCpy(newString, str);
+
+		mainBuffer[mainBufferSize] = newString;
+		mainBufferSize++;
+	}
+
+	void evaluateInput() {
+		char* com = inputBuffer;
+
+		char* argument = getNextArgument(&com);
+		printf("Argument: %s.", argument);
+		if(argument == 0) return;
+
+		if(strCompare(argument, "add")) {
+			int a = strToInt(getNextArgument(&com));
+			int b = strToInt(getNextArgument(&com));
+
+			pushToMainBuffer(fillString("%i + %i = %i", a, b, a+b));
+		} else if(strCompare(argument, "donothing")) {
+			pushToMainBuffer("");
+		} else {
+			pushToMainBuffer(fillString("Unknown command \"%s\"", argument));
 		}
 	}
 };
+
 
 
 
