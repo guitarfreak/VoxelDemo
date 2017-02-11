@@ -135,8 +135,8 @@ inline void strInsert(char* string, int index, char ch) {
 	string[index] = ch;
 }
 
-void strInsert(char* destination, int index, char* str) {
-	int size = strLen(str);
+void strInsert(char* destination, int index, char* str, int size = -1) {
+	if(size == -1) size = strLen(str);
 	int sizeDest = strLen(destination);
 
 	strCpyBackwards(destination + size + index, destination + index, sizeDest - index + 1);
@@ -234,6 +234,12 @@ int strFind(const char* str, char chr, int startIndex = 0) {
 	}
 
 	return pos+1;
+}
+
+int strFindOrEnd(const char* str, char chr, int startIndex = 0) {
+	int pos = strFind(str, chr, startIndex);
+	if(pos == 0) return strLen((char*)str);
+	else return pos;
 }
 
 int strFindBackwards(char* str, char chr, int startIndex = -1) {
@@ -339,6 +345,12 @@ void strRemove(char* str, int index, int size = 0) {
 	int length = size == 0 ? strLen(str) : size;
 
 	memCpy(str + index - 1, str + (index), length-index+1);
+}
+
+void strRemoveX(char* str, int index, int amount, int size = 0) {
+	int length = size == 0 ? strLen(str) : size;
+
+	memCpy(str + index, str + index+amount, length-index+amount);
 }
 
 void strRemoveWhitespace(char* str, int size = 0) {

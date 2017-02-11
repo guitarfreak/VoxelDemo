@@ -390,8 +390,6 @@ void updateInput(Input* input, bool* isRunning, HWND windowHandle) {
 
                 if(keyDown) {
                     TranslateMessage(&message); 
-
-                    if(vk == VK_ESCAPE) *isRunning = false;
                 }
             } break;
 

@@ -1078,7 +1078,7 @@ struct GraphicsState {
 	Texture textures3d[2];
 	GLuint samplers[SAMPLER_SIZE];
 
-	Font fonts[FONT_SIZE];
+	Font fonts[FONT_SIZE][20];
 
 	Mesh meshs[MESH_SIZE];
 
@@ -1106,15 +1106,24 @@ Texture* getCubemap(int textureId) {
 	return t;
 }
 
-Font* getFont(int fontId) {
-	Font* f = globalGraphicsState->fonts + fontId;
-	return f;
-}
-
 Font* getFont(int fontId, int height) {
-	Font* f = globalGraphicsState->fonts + fontId;
 
-	if(f->height != height) {
+	// Search if Font in this size exists, if not create it.
+
+	int fontSlots = arrayCount(globalGraphicsState->fonts[0]);
+	Font* fontArray = globalGraphicsState->fonts[fontId];
+	Font* fontSlot = 0;
+	for(int i = 0; i < fontSlots; i++) {
+		int fontHeight = fontArray[i].height;
+		if(fontHeight == height || fontHeight == 0) {
+			fontSlot = fontArray + i;
+			break;
+		}
+	}
+
+	// We are going to assume for now that a font size of 0 means it is uninitialized.
+
+	if(fontSlot->height == 0) {
 		Font font;
 		char* path = fontPaths[fontId];
 
@@ -1142,9 +1151,10 @@ Font* getFont(int fontId, int height) {
 		loadTexture(&tex, fontBitmap, size.w, size.h, 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
 		font.tex = tex;
 
-		globalGraphicsState->fonts[fontId] = font;
+		*fontSlot = font;
 	}
-	return f;
+
+	return fontSlot;
 }
 
 void bindShader(int shaderId) {

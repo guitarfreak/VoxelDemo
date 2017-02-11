@@ -64,6 +64,9 @@ Changing course for now:
  - 3d animation system. (Search Opengl vertex skinning)
  - Sound perturbation (Whatever that is). 
 
+ - Clean up the gui to make it more usable.
+ - Make entities watchable and changeable in Gui.
+
 
 //-------------------------------------
 //               BUGS
@@ -741,7 +744,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// TIMER_BLOCK_NAMED("Input");
 		updateInput(ds->input, isRunning, windowHandle);
 		ad->input = *ds->input;
-		if(ds->consoleActive) {
+		if(ds->console.isActive) {
 			memSet(ad->input.keysPressed, 0, sizeof(ad->input.keysPressed));
 			memSet(ad->input.keysDown, 0, sizeof(ad->input.keysDown));
 		}
@@ -762,6 +765,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 			if(ds->playbackIndex == 0) ds->playbackSwapMemory = true;
 		}
 	} 
+
+    if(input->keysPressed[KEYCODE_ESCAPE]) {
+    	*isRunning = false;
+    }
 
 	if(input->keysPressed[KEYCODE_F1]) {
 		int mode;
@@ -2868,129 +2875,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 		//
 
 		{
-
-			float closedPos = 0;
-			float smallPos = -wSettings->currentRes.y * CONSOLE_SMALL_PERCENT;
-			float bigPos = -wSettings->currentRes.y * CONSOLE_BIG_PERCENT;
+			Console* con = &ds->console;
 
 			if(second) {
-				ds->consolePos = 0;
-				ds->targetPos = smallPos;
+				con->init(wSettings->currentRes.y);
 			}
 
-			if(input->keysPressed[KEYCODE_F6]) {
-				if(input->keysDown[KEYCODE_CTRL]) {
-					if(ds->targetPos == closedPos) {
-						ds->targetPos = bigPos;
-					} else if(ds->targetPos == smallPos) {
-						ds->targetPos = bigPos;
-					} else ds->targetPos = closedPos;
-				} else {
-					if(ds->targetPos == closedPos) {
-						ds->targetPos = smallPos;
-					} else if(ds->targetPos == bigPos) {
-						ds->targetPos = smallPos;
-					} else ds->targetPos = closedPos;
-				}
-			}
-
-			// Calculate smoothstep.
-
-			float consoleSpeed = 10;
-			float consoleMovement = consoleSpeed * ad->dt;
-
-			float distance = ds->consolePos - ds->targetPos;
-			if(abs(distance) > 0) {
-				ds->consolePos = lerp(consoleMovement, ds->consolePos, ds->targetPos);
-
-				// Clamp if we overstepped the target position.
-				float newDistance = ds->consolePos - ds->targetPos;
-				if(abs(newDistance) <= 1.0f) ds->consolePos = ds->targetPos;
-
-				// if(newDistance != 0 && (!sameSign(distance, newDistance))) {
-					// ds->consolePos = ds->targetPos;
-				// }
-			}
-
-			Vec2 res = vec2(wSettings->currentRes);
-			float consoleTotalHeight = CONSOLE_SMALL_PERCENT*res.h;
-			float consolePadding = 10;
-			float inputFontSize = 18;
-			float bodyFontSize = 23;
-			Font* inputFont = getFont(FONT_CONSOLAS, inputFontSize);
-			Font* bodyFont = getFont(FONT_ARIAL, bodyFontSize);
-			Vec4 inputFontColor = vec4(1,1,1,1);
-			Vec4 bodyFontColor = vec4(1,1,0,1);
-			Vec4 bodyColor = vec4(0.4f,0,0.6f,0.9f);
-			Vec4 inputColor = vec4(0.2f,0,0.6f,0.9f);
-			Vec4 cursorColor = vec4(0.2f,0,7.1f,0.9f);
-			float inputHeightPadding = 1.8;
-			float bodyFontHeightPadding = 1.0;
-
-			float inputHeight = inputFontSize * inputHeightPadding;
-			float bodyTextHeight = bodyFontSize * bodyFontHeightPadding;
-			float consoleBodyHeight = consoleTotalHeight - inputHeight;
-			Rect consoleBody = rectMinDim(vec2(0, ds->consolePos + inputHeight), vec2(res.w, consoleBodyHeight));
-			Rect consoleInput = rectMinDim(vec2(0, ds->consolePos), vec2(res.w, inputHeight));
-	
-			if(pointInRect(input->mousePosNegative, consoleInput)) {
-				inputColor.g += 0.2;
-
-				if(input->mouseButtonPressed[0]) {
-					ds->consoleActive = true;
-				}
-			} else {
-				if(input->mouseButtonPressed[0]) {
-					ds->consoleActive = false;
-					strClear(ds->inputBuffer);
-				}
-			}
-
-			// bool consoleActive = ds->consolePos != closedPos;
-			if(ds->consoleActive) {
-				inputColor.g += 0.2;
-
-				// Add input characters to input buffer.
-
-				if(input->inputCharacterCount + strLen(ds->inputBuffer) < arrayCount(ds->inputBuffer)) {
-					strAppend(ds->inputBuffer, input->inputCharacters, input->inputCharacterCount);
-				}
-
-				if(input->keysPressed[KEYCODE_BACKSPACE]) {
-					strRemove(ds->inputBuffer, strLen(ds->inputBuffer));
-				}
-
-				if(input->keysPressed[KEYCODE_RETURN]) {
-					// Copy over input buffer to console buffer.
-
-					char* newString = getPArrayDebug(char, strLen(ds->inputBuffer) + 1);
-					strCpy(newString, ds->inputBuffer);
-
-					ds->consoleBuffer[ds->consoleBufferSize] = newString;
-					ds->consoleBufferSize++;
-
-					strClear(ds->inputBuffer);
-				}
-
-			}
-
-			// cursorPos = 1;
-
-			dcRect(consoleBody, bodyColor);
-			dcRect(consoleInput, inputColor);
-
-			if(ds->consoleBufferSize > 0) {
-				float textPos = -bodyTextHeight/2;
-
-				for(int i = 0; i < ds->consoleBufferSize; i++) {
-					dcText(ds->consoleBuffer[i], bodyFont, vec2(consolePadding,textPos), bodyFontColor, 0, 1);
-					textPos -= bodyTextHeight;
-				}
-			}
-			dcText(ds->inputBuffer, inputFont, vec2(consolePadding, consoleInput.min.y + inputHeight/2), inputFontColor, 0, 1);
-			Rect cursorRect = rect(0,0,0,0);
-			// dcRect(cursorRect, );
-
+			con->update(ds->input, vec2(wSettings->currentRes), ad->dt);
 		}
 
 		//

@@ -26,6 +26,11 @@ float getTextPos(char* text, int index, Font* font) {
 	return result;
 }
 
+Rect scissorRectScreenSpace(Rect r, float screenHeight) {
+	Rect scissorRect = {r.min.x, r.min.y+screenHeight, r.max.x, r.max.y+screenHeight};
+	return scissorRect;
+}
+
 
 struct GuiInput {
 	Vec2 mousePos;
