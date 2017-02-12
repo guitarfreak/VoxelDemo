@@ -781,6 +781,20 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 	if(input->keysPressed[KEYCODE_F2]) {
+		static bool switchMonitor = false;
+
+		setWindowMode(windowHandle, wSettings, WINDOW_MODE_WINDOWED);
+
+		if(!switchMonitor) setWindowProperties(windowHandle, 1, 1, 1920, 0);
+		else setWindowProperties(windowHandle, 1920, 1080, -1920, 0);
+		switchMonitor = !switchMonitor;
+
+		setWindowMode(windowHandle, wSettings, WINDOW_MODE_FULLBORDERLESS);
+
+		ad->updateFrameBuffers = true;
+	}
+
+	if(input->keysPressed[KEYCODE_F3]) {
 		ad->captureMouse = !ad->captureMouse;
 	}
 
@@ -796,20 +810,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		while(ShowCursor(false) >= 0);
 	} else {
 		while(ShowCursor(true) < 0);
-	}
-
-	if(input->keysPressed[KEYCODE_F3]) {
-		static bool switchMonitor = false;
-
-		setWindowMode(windowHandle, wSettings, WINDOW_MODE_WINDOWED);
-
-		if(!switchMonitor) setWindowProperties(windowHandle, 1, 1, 1920, 0);
-		else setWindowProperties(windowHandle, 1920, 1080, -1920, 0);
-		switchMonitor = !switchMonitor;
-
-		setWindowMode(windowHandle, wSettings, WINDOW_MODE_FULLBORDERLESS);
-
-		ad->updateFrameBuffers = true;
 	}
 
 	if(ad->updateFrameBuffers) {

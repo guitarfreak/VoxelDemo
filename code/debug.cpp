@@ -9,6 +9,10 @@ struct Console {
 	int mode;
 	bool isActive;
 
+	float scrollMode;
+	float scrollPercent;
+	float lastDiff;
+
 	char* mainBuffer[256];
 	int mainBufferSize;
 
@@ -17,9 +21,8 @@ struct Console {
 
 	int cursorIndex;
 	int markerIndex;
-	float cursorTime;
-
 	bool mouseSelectMode;
+	float cursorTime;
 
 	/*
 		TODO's:
@@ -44,6 +47,7 @@ struct Console {
 		targetPos = smallPos;
 		cursorIndex = 0;
 		markerIndex = 0;
+		scrollPercent = 1;
 
 		const char* text = "This is a test String!";
 		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)text) + 1);
@@ -68,8 +72,6 @@ struct Console {
 
 		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)result) + 1);
 		strCpy(mainBuffer[mainBufferSize++], (char*)result);
-
-
 	}
 
 	void update(Input* input, Vec2 currentRes, float dt) {
@@ -98,6 +100,9 @@ struct Console {
 		Vec4 inputFontColor = vec4(1,1,1,1);
 		Vec4 cursorColor 	= vec4(0.2f,0.8f,0.1f,0.9f);
 		Vec4 selectionColor = vec4(0.1f,0.4f,0.4f,0.9f);
+
+		float scrollBarWidth = 20;
+		float scrollCursorMinHeight = 20;
 
 		// Logic.
 
@@ -144,6 +149,8 @@ struct Console {
 		float consoleBodyHeight = consoleTotalHeight - inputHeight;
 		Rect consoleBody = rectMinDim(vec2(0, pos + inputHeight), vec2(res.w, consoleBodyHeight));
 		Rect consoleInput = rectMinDim(vec2(0, pos), vec2(res.w, inputHeight));
+		Rect scrollRect = consoleBody;
+		scrollRect.min.x = scrollRect.max.x - scrollBarWidth;
 
 		if(!isActive && pointInRect(input->mousePosNegative, consoleInput)) {
 			float t = 0.1f;
@@ -171,11 +178,30 @@ struct Console {
 			dcRect(consoleBody, bodyColor);
 			dcRect(consoleInput, inputColor);
 
+
+			if(input->mouseButtonPressed[0] && pointInRect(input->mousePosNegative, scrollRect)) {
+				scrollMode = true;
+			}
+
+			if(input->mouseButtonReleased[0]) {
+				scrollMode = false;
+			}
+
+			if(scrollMode) {
+				scrollPercent = mapRangeClamp(input->mousePosNegative.y, scrollRect.min.y, scrollRect.max.y, 0, 1);
+				scrollPercent = 1-scrollPercent;
+			}
+
+
 			if(mainBufferSize > 0) {
 				dcEnable(STATE_SCISSOR);
 				dcScissor(scissorRectScreenSpace(consoleBody, res.h));
 
-				float textPos = pos + consoleTotalHeight -bodyTextHeight/2;
+				float scrollOffset = 0;
+				if(lastDiff > 0) scrollOffset = scrollPercent*lastDiff; 
+
+				float textPos = pos + consoleTotalHeight -bodyTextHeight/2 + scrollOffset;
+				float textStart = textPos;
 
 				for(int i = 0; i < mainBufferSize; i++) {
 					if(i%2 == 0) {
@@ -195,6 +221,24 @@ struct Console {
 						}
 					}
 				}
+
+
+
+				if(scrollOffset != 0) {
+					dcRect(scrollRect, vec4(1,1,1,1));
+
+					float consoleHeight = rectGetDim(consoleBody).h;
+					float scrollCursorHeight = consoleHeight / lastDiff * consoleHeight;
+					clampMin(&scrollCursorHeight, scrollCursorMinHeight);
+
+					float scrollCursorPos = lerp(scrollPercent, scrollRect.max.y, scrollRect.min.y);
+					Rect scrollCursorRect = rectCenDim(vec2(scrollRect.max.x - scrollBarWidth/2, scrollCursorPos), vec2(scrollBarWidth,scrollCursorHeight));
+					dcRect(scrollCursorRect, vec4(0,1,1,1));
+				}
+
+
+				lastDiff = textStart - textPos - rectGetDim(consoleBody).h;
+
 
 				dcDisable(STATE_SCISSOR);
 			}
@@ -407,7 +451,7 @@ struct Console {
 						// Copy over input buffer to console buffer.
 						pushToMainBuffer(inputBuffer);
 						evaluateInput();
-						
+
 						strClear(inputBuffer);
 						cursorIndex = 0;
 						markerIndex = 0;
