@@ -37,6 +37,7 @@ struct Console {
 		* Cleanup.
 		* Scrollbar.
 
+		- Line wrap.
 		- Select inside console output.
 		- Command history.
 		- Command hint on tab.
