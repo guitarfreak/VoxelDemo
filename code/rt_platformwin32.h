@@ -82,6 +82,7 @@ struct Input {
 	int mouseWheel;
 	bool mouseButtonPressed[8];
 	bool mouseButtonDown[8];
+	bool mouseButtonReleased[8];
 
 	bool keysDown[KEYCODE_COUNT];
 	bool keysPressed[KEYCODE_COUNT];
@@ -329,6 +330,7 @@ void makeWindowVisible(SystemData* systemData) {
 void updateInput(Input* input, bool* isRunning, HWND windowHandle) {
     input->mouseWheel = 0;
     for(int i = 0; i < arrayCount(input->mouseButtonPressed); i++) input->mouseButtonPressed[i] = 0;
+    for(int i = 0; i < arrayCount(input->mouseButtonReleased); i++) input->mouseButtonReleased[i] = 0;
     for(int i = 0; i < arrayCount(input->keysPressed); i++) input->keysPressed[i] = 0;
     input->mShift = 0;
     input->mCtrl = 0;
@@ -366,14 +368,17 @@ void updateInput(Input* input, bool* isRunning, HWND windowHandle) {
 	        case WM_LBUTTONUP: { 
             	ReleaseCapture();
 				input->mouseButtonDown[0] = false; 
+				input->mouseButtonReleased[0] = true;
 			} break;
 	        case WM_RBUTTONUP: { 
             	ReleaseCapture();
 				input->mouseButtonDown[1] = false; 
+				input->mouseButtonReleased[1] = true;
 			} break;
 	        case WM_MBUTTONUP: { 
             	ReleaseCapture();
 				input->mouseButtonDown[2] = false; 
+				input->mouseButtonReleased[2] = true;
 			} break;
 
             case WM_KEYDOWN:

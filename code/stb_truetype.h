@@ -2592,6 +2592,13 @@ STBTT_DEF Vec2 stbtt_GetTextDim(stbtt_bakedchar* cData, int fontHeight, int glyp
 	return dim;
 }
 
+STBTT_DEF float stbtt_GetCharDim(stbtt_bakedchar* cData, int fontHeight, int glyphStart, char c) {
+	stbtt_bakedchar *b = cData + (int)c - glyphStart;
+	float width = b->xadvance;
+
+	return width;
+}
+
 STBTT_DEF void stbtt_GetBakedQuad(stbtt_bakedchar *chardata, int pw, int ph, int char_index, float *xpos, float *ypos, stbtt_aligned_quad *q, int opengl_fillrule)
 {
 	float d3d_bias = opengl_fillrule ? 0 : -0.5f;

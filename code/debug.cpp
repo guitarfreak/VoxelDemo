@@ -6,6 +6,7 @@
 struct Console {
 	float pos;
 	float targetPos;
+	int mode;
 	bool isActive;
 
 	char* mainBuffer[256];
@@ -18,6 +19,8 @@ struct Console {
 	int markerIndex;
 	float cursorTime;
 
+	bool mouseSelectMode;
+
 	/*
 		TODO's:
 		* Ctrl backspace, Ctrl Delete.
@@ -25,14 +28,19 @@ struct Console {
 		* Selection Left/Right not working propberly.
 		* Ctrl + a.
 		* Clipboard.
-		- Command history.
+		* Mouse selection.
+		* Mouse release.
+		* Cleanup.
 		- Scrollbar.
-		- Mouse selection.
+
+		- Command history.
+		- Command hint on tab.
 	*/
 
 	void init(float windowHeight) {
 		float smallPos = -windowHeight * CONSOLE_SMALL_PERCENT;
-		pos = smallPos;
+		pos = 0;
+		mode = 1;
 		targetPos = smallPos;
 		cursorIndex = 0;
 		markerIndex = 0;
@@ -65,51 +73,11 @@ struct Console {
 	}
 
 	void update(Input* input, Vec2 currentRes, float dt) {
-		float closedPos = 0;
-		float smallPos = -currentRes.y * CONSOLE_SMALL_PERCENT;
-		float bigPos = -currentRes.y * CONSOLE_BIG_PERCENT;
 
-		if(input->keysPressed[KEYCODE_F6]) {
-			if(input->keysDown[KEYCODE_CTRL]) {
-				if(targetPos == closedPos) {
-					targetPos = bigPos;
-				} else if(targetPos == smallPos) {
-					targetPos = bigPos;
-				} else targetPos = closedPos;
-			} else {
-				if(targetPos == closedPos) {
-					targetPos = smallPos;
-				} else if(targetPos == bigPos) {
-					targetPos = smallPos;
-				} else targetPos = closedPos;
-			}
-		}
-
-		// Calculate smoothstep.
+		// Console variables.
 
 		float consoleSpeed = 10;
-		float consoleMovement = consoleSpeed * dt;
 
-		float distance = pos - targetPos;
-		if(abs(distance) > 0) {
-			pos = lerp(consoleMovement, pos, targetPos);
-
-			// Clamp if we overstepped the target position.
-			float newDistance = pos - targetPos;
-			if(abs(newDistance) <= 1.0f) pos = targetPos;
-
-			// if(newDistance != 0 && (!sameSign(distance, newDistance))) {
-				// pos = targetPos;
-			// }
-		}
-
-		Vec2 res = currentRes;
-		// float consoleTotalHeight = abs(smallPos);
-		float consoleTotalHeight = abs(pos);
-		clampMin(&consoleTotalHeight, abs(smallPos));
-
-		// Font* bodyFont = getFont(FONT_SOURCESANS_PRO, bodyFontSize);
-		// Font* bodyFont = getFont(FONT_CALIBRI, bodyFontSize);
 		float bodyFontHeightPadding = 1.0f;
 		float bodyFontHeightResultPadding = 1.2f;
 		float bodyFontSize = 22;
@@ -124,7 +92,6 @@ struct Console {
 		float cursorSpeed = 3;
 		float cursorColorMod = 0.2f;
 
-
 		Vec4 bodyColor 		= vec4(0.3f,0,0.6f,1.0f);
 		Vec4 inputColor 	= vec4(0.37f,0,0.6f,1.0f);
 		Vec4 bodyFontColor 	= vec4(1,1,1,1);
@@ -132,7 +99,45 @@ struct Console {
 		Vec4 cursorColor 	= vec4(0.2f,0.8f,0.1f,0.9f);
 		Vec4 selectionColor = vec4(0.1f,0.4f,0.4f,0.9f);
 
+		// Logic.
 
+		float closedPos = 0;
+		float smallPos = -currentRes.y * CONSOLE_SMALL_PERCENT;
+		float bigPos = -currentRes.y * CONSOLE_BIG_PERCENT;
+
+		if(input->keysPressed[KEYCODE_F6]) {
+			if(input->keysDown[KEYCODE_CTRL]) {
+				if(mode == 0) mode = 2;
+				else if(mode == 1) mode = 2;
+				else mode = 0;
+			} else {
+				if(mode == 0) mode = 1;
+				else if(mode == 2) mode = 1;
+				else mode = 0;
+			}
+		}
+
+		if(mode == 0) targetPos = 0;
+		else if(mode == 1) targetPos = smallPos;
+		else if(mode == 2) targetPos = bigPos;
+
+		// Calculate smoothstep.
+
+		float distance = pos - targetPos;
+		if(abs(distance) > 0) {
+			float consoleMovement = consoleSpeed * dt;
+			pos = lerp(consoleMovement, pos, targetPos);
+
+			// Clamp if we overstepped the target position.
+			float newDistance = pos - targetPos;
+			if(abs(newDistance) <= 1.0f) pos = targetPos;
+		}
+
+
+
+		Vec2 res = currentRes;
+		float consoleTotalHeight = abs(pos);
+		clampMin(&consoleTotalHeight, abs(smallPos));
 
 		float inputHeight = inputFontSize * inputHeightPadding;
 		float bodyTextHeight = bodyFontSize * bodyFontHeightPadding;
@@ -154,7 +159,6 @@ struct Console {
 
 		if(input->keysPressed[KEYCODE_ESCAPE]) {
 			isActive = false;
-			strClear(inputBuffer);
 		}
 
 		bool visible = true;
@@ -197,170 +201,222 @@ struct Console {
 		}
 
 		if(isActive) {
-			bool left = input->keysPressed[KEYCODE_LEFT];
-			bool right = input->keysPressed[KEYCODE_RIGHT];
-			bool up = input->keysPressed[KEYCODE_UP];
-			bool down = input->keysPressed[KEYCODE_DOWN];
-
-			bool a = input->keysPressed[KEYCODE_A];
-			bool x = input->keysPressed[KEYCODE_X];
-			bool c = input->keysPressed[KEYCODE_C];
-			bool v = input->keysPressed[KEYCODE_V];
-			
-			bool home = input->keysPressed[KEYCODE_HOME];
-			bool end = input->keysPressed[KEYCODE_END];
-			bool backspace = input->keysPressed[KEYCODE_BACKSPACE];
-			bool del = input->keysPressed[KEYCODE_DEL];
-			bool enter = input->keysPressed[KEYCODE_RETURN];
-
-			bool ctrl = input->keysDown[KEYCODE_CTRL];
-			bool shift = input->keysDown[KEYCODE_SHIFT];
-
-			int startCursorIndex = cursorIndex;
-
-			if(ctrl && backspace) {
-				shift = true;
-				left = true;
-			}
-
-			if(ctrl && del) {
-				shift = true;
-				right = true;
-			}
-
-			if(left) {
-				if(ctrl) {
-					if(cursorIndex > 0) {
-						while(inputBuffer[cursorIndex-1] == ' ') cursorIndex--;
-
-						if(cursorIndex > 0)
-					 		cursorIndex = strFindBackwards(inputBuffer, ' ', cursorIndex-1);
-					}
+			if(input->mouseButtonPressed[0]) {
+				if(pointInRect(input->mousePosNegative, consoleInput)) {
+					mouseSelectMode = true;
 				} else {
-					bool isSelected = cursorIndex != markerIndex;
-					if(isSelected && !shift) {
-						if(cursorIndex < markerIndex) {
-							markerIndex = cursorIndex;
-						} else {
-							cursorIndex = markerIndex;
-						}
-					} else {
-						if(cursorIndex > 0) cursorIndex--;
-					}
-				}
-			}
-
-			if(right) {
-				if(ctrl) {
-					while(inputBuffer[cursorIndex] == ' ') cursorIndex++;
-					if(cursorIndex <= strLen(inputBuffer)) {
-						cursorIndex = strFindOrEnd(inputBuffer, ' ', cursorIndex+1);
-						if(cursorIndex != strLen(inputBuffer)) cursorIndex--;
-					}
-				} else {
-					bool isSelected = cursorIndex != markerIndex;
-					if(isSelected && !shift) {
-						if(cursorIndex > markerIndex) {
-							markerIndex = cursorIndex;
-						} else {
-							cursorIndex = markerIndex;
-						}
-					} else {
-						if(cursorIndex < strLen(inputBuffer)) cursorIndex++;
-					}
-				}
-			}
-
-			if(home) {
-				cursorIndex = 0;
-			}
-
-			if(end) {
-				cursorIndex = strLen(inputBuffer);
-			}
-
-			if((startCursorIndex != cursorIndex) && !shift) {
-				markerIndex = cursorIndex;
-			}
-
-			if(ctrl && a) {
-				cursorIndex = 0;
-				markerIndex = strLen(inputBuffer);
-			}
-
-			bool isSelected = cursorIndex != markerIndex;
-
-			if(ctrl && x) {
-				c = true;
-				del = true;
-			}
-
-			if(ctrl && c) {
-				float selectionWidth = abs(cursorIndex - markerIndex);
-				char* selection = getTStringDebug(selectionWidth);
-				strCpy(selection, inputBuffer + (int)min(cursorIndex, markerIndex), selectionWidth);
-
-				setClipboard(selection);
-			}
-
-			if(backspace || del || (input->inputCharacterCount > 0) || (ctrl && v)) {
-				if(isSelected) {
-					int delIndex = min(cursorIndex, markerIndex);
-					int delAmount = abs(cursorIndex - markerIndex);
-					strRemoveX(inputBuffer, delIndex, delAmount);
-					cursorIndex = delIndex;
-				}
-
-				markerIndex = cursorIndex;
-			}
-
-			if(ctrl && v) {
-				char* clipboard = (char*)getClipboard();
-				int clipboardSize = strLen(clipboard);
-				if(clipboardSize + strLen(inputBuffer) < arrayCount(inputBuffer)) {
-					strInsert(inputBuffer, cursorIndex, clipboard);
-					cursorIndex += clipboardSize;
 					markerIndex = cursorIndex;
 				}
 			}
 
-			// Add input characters to input buffer.
-			if(input->inputCharacterCount > 0) {
-				if(input->inputCharacterCount + strLen(inputBuffer) < arrayCount(inputBuffer)) {
-					strInsert(inputBuffer, cursorIndex, input->inputCharacters, input->inputCharacterCount);
-					cursorIndex += input->inputCharacterCount;
-					markerIndex = cursorIndex;
-				}
+			if(input->mouseButtonReleased[0]) {
+				mouseSelectMode = false;
 			}
 
-			if(backspace && !isSelected) {
-				if(cursorIndex > 0) {
-					strRemove(inputBuffer, cursorIndex);
-					cursorIndex--;
+			if(mouseSelectMode && (strLen(inputBuffer) >= 1)) {
+				int inputSize = strLen(inputBuffer);
+				int mouseIndex;
+
+				float left = consolePadding + getCharWidth(inputBuffer[0], inputFont) * 0.5;
+				if(input->mousePos.x < left) {
+					mouseIndex = 0;
+				} else {
+					float p = consolePadding;
+					bool found = false;
+					for(int i = 0; i < inputSize - 1; i++) {
+						float p1 = p;
+						float p2 = p1 + getCharWidth(inputBuffer[i], inputFont);
+						float p3 = p2 + getCharWidth(inputBuffer[i+1], inputFont);
+						p = p2;
+
+						float x1 = p1 + (p2-p1) * 0.5f;
+						float x2 = p2 + (p3-p2) * 0.5f;
+
+						if(valueBetween(input->mousePos.x, x1, x2)) {
+							mouseIndex = i+1;
+							found = true;
+							break;
+						}
+					}
+
+					if(!found) mouseIndex = inputSize;
 				}
-				markerIndex = cursorIndex;
+
+				if(input->mouseButtonPressed[0]) {
+					markerIndex = mouseIndex;
+				}
+
+				cursorIndex = mouseIndex;
 			}
 
-			if(del && !isSelected) {
-				if(cursorIndex+1 <= strLen(inputBuffer)) {
-					strRemove(inputBuffer, cursorIndex+1);
-				}
-				markerIndex = cursorIndex;
-			}
+			if(!mouseSelectMode) {
+				bool left = input->keysPressed[KEYCODE_LEFT];
+				bool right = input->keysPressed[KEYCODE_RIGHT];
+				bool up = input->keysPressed[KEYCODE_UP];
+				bool down = input->keysPressed[KEYCODE_DOWN];
 
-			if(enter) {
-				if(strLen(inputBuffer) > 0) {
-					// Copy over input buffer to console buffer.
-					pushToMainBuffer(inputBuffer);
-					evaluateInput();
-					strClear(inputBuffer);
+				bool a = input->keysPressed[KEYCODE_A];
+				bool x = input->keysPressed[KEYCODE_X];
+				bool c = input->keysPressed[KEYCODE_C];
+				bool v = input->keysPressed[KEYCODE_V];
+				
+				bool home = input->keysPressed[KEYCODE_HOME];
+				bool end = input->keysPressed[KEYCODE_END];
+				bool backspace = input->keysPressed[KEYCODE_BACKSPACE];
+				bool del = input->keysPressed[KEYCODE_DEL];
+				bool enter = input->keysPressed[KEYCODE_RETURN];
+
+				bool ctrl = input->keysDown[KEYCODE_CTRL];
+				bool shift = input->keysDown[KEYCODE_SHIFT];
+
+
+				int startCursorIndex = cursorIndex;
+
+				if(ctrl && backspace) {
+					shift = true;
+					left = true;
+				}
+
+				if(ctrl && del) {
+					shift = true;
+					right = true;
+				}
+
+				if(left) {
+					if(ctrl) {
+						if(cursorIndex > 0) {
+							while(inputBuffer[cursorIndex-1] == ' ') cursorIndex--;
+
+							if(cursorIndex > 0)
+						 		cursorIndex = strFindBackwards(inputBuffer, ' ', cursorIndex-1);
+						}
+					} else {
+						bool isSelected = cursorIndex != markerIndex;
+						if(isSelected && !shift) {
+							if(cursorIndex < markerIndex) {
+								markerIndex = cursorIndex;
+							} else {
+								cursorIndex = markerIndex;
+							}
+						} else {
+							if(cursorIndex > 0) cursorIndex--;
+						}
+					}
+				}
+
+				if(right) {
+					if(ctrl) {
+						while(inputBuffer[cursorIndex] == ' ') cursorIndex++;
+						if(cursorIndex <= strLen(inputBuffer)) {
+							cursorIndex = strFindOrEnd(inputBuffer, ' ', cursorIndex+1);
+							if(cursorIndex != strLen(inputBuffer)) cursorIndex--;
+						}
+					} else {
+						bool isSelected = cursorIndex != markerIndex;
+						if(isSelected && !shift) {
+							if(cursorIndex > markerIndex) {
+								markerIndex = cursorIndex;
+							} else {
+								cursorIndex = markerIndex;
+							}
+						} else {
+							if(cursorIndex < strLen(inputBuffer)) cursorIndex++;
+						}
+					}
+				}
+
+				if(home) {
 					cursorIndex = 0;
-					markerIndex = 0;
 				}
-			}
 
-			if(startCursorIndex != cursorIndex) {
-				cursorTime = 0;
+				if(end) {
+					cursorIndex = strLen(inputBuffer);
+				}
+
+				if((startCursorIndex != cursorIndex) && !shift) {
+					markerIndex = cursorIndex;
+				}
+
+				if(ctrl && a) {
+					cursorIndex = 0;
+					markerIndex = strLen(inputBuffer);
+				}
+
+				bool isSelected = cursorIndex != markerIndex;
+
+				if(ctrl && x) {
+					c = true;
+					del = true;
+				}
+
+				if(ctrl && c) {
+					float selectionWidth = abs(cursorIndex - markerIndex);
+					char* selection = getTStringDebug(selectionWidth);
+					strCpy(selection, inputBuffer + (int)min(cursorIndex, markerIndex), selectionWidth);
+
+					setClipboard(selection);
+				}
+
+				if(backspace || del || (input->inputCharacterCount > 0) || (ctrl && v)) {
+					if(isSelected) {
+						int delIndex = min(cursorIndex, markerIndex);
+						int delAmount = abs(cursorIndex - markerIndex);
+						strRemoveX(inputBuffer, delIndex, delAmount);
+						cursorIndex = delIndex;
+					}
+
+					markerIndex = cursorIndex;
+				}
+
+				if(ctrl && v) {
+					char* clipboard = (char*)getClipboard();
+					int clipboardSize = strLen(clipboard);
+					if(clipboardSize + strLen(inputBuffer) < arrayCount(inputBuffer)) {
+						strInsert(inputBuffer, cursorIndex, clipboard);
+						cursorIndex += clipboardSize;
+						markerIndex = cursorIndex;
+					}
+				}
+
+				// Add input characters to input buffer.
+				if(input->inputCharacterCount > 0) {
+					if(input->inputCharacterCount + strLen(inputBuffer) < arrayCount(inputBuffer)) {
+						strInsert(inputBuffer, cursorIndex, input->inputCharacters, input->inputCharacterCount);
+						cursorIndex += input->inputCharacterCount;
+						markerIndex = cursorIndex;
+					}
+				}
+
+				if(backspace && !isSelected) {
+					if(cursorIndex > 0) {
+						strRemove(inputBuffer, cursorIndex);
+						cursorIndex--;
+					}
+					markerIndex = cursorIndex;
+				}
+
+				if(del && !isSelected) {
+					if(cursorIndex+1 <= strLen(inputBuffer)) {
+						strRemove(inputBuffer, cursorIndex+1);
+					}
+					markerIndex = cursorIndex;
+				}
+
+				if(enter) {
+					if(strLen(inputBuffer) > 0) {
+						// Copy over input buffer to console buffer.
+						pushToMainBuffer(inputBuffer);
+						evaluateInput();
+						
+						strClear(inputBuffer);
+						cursorIndex = 0;
+						markerIndex = 0;
+					}
+				}
+
+				if(startCursorIndex != cursorIndex) {
+					cursorTime = 0;
+				}
 			}
 
 			// Drawing.

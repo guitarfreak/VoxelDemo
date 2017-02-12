@@ -4,6 +4,11 @@ Vec2 getTextDim(char* text, Font* font) {
 	return textDim;
 }
 
+float getCharWidth(char c, Font* font) {
+	float width = stbtt_GetCharDim(font->cData, font->height, font->glyphStart, c);
+	return width;
+}
+
 float getTextPos(char* text, int index, Font* font) {
 	float result = 0;
 	Vec2 pos = vec2(0,0);
@@ -20,7 +25,6 @@ float getTextPos(char* text, int index, Font* font) {
 
 		stbtt_aligned_quad q;
 		stbtt_GetBakedQuad(font->cData, font->tex.dim.w, font->tex.dim.h, t-font->glyphStart, &pos.x, &pos.y, &q, 1);
-		Rect r = rect(q.x0, q.y0, q.x1, q.y1);
 	}
 
 	return result;
