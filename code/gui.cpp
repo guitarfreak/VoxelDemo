@@ -4,6 +4,11 @@ Vec2 getTextDim(char* text, Font* font) {
 	return textDim;
 }
 
+float getTextHeight(char* text, Font* font) {
+	float height = stbtt_GetTextHeight(font->cData, font->height, font->glyphStart, text);
+	return height;
+}
+
 float getCharWidth(char c, Font* font) {
 	float width = stbtt_GetCharDim(font->cData, font->height, font->glyphStart, c);
 	return width;

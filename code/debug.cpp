@@ -52,29 +52,21 @@ struct Console {
 		markerIndex = 0;
 		scrollPercent = 1;
 
-		const char* text = "This is a test String!";
-		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)text) + 1);
-		strCpy(mainBuffer[mainBufferSize++], (char*)text);
 
-		const char* result = "123.4543";
-		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)result) + 1);
-		strCpy(mainBuffer[mainBufferSize++], (char*)result);
+		pushToMainBuffer("This is a test String!");
+		pushToMainBuffer("123.456");
 
+		pushToMainBuffer("Nothing!");
+		pushToMainBuffer("");
 
-		const char* text2 = "This doesn't produce a result.";
-		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)text2) + 1);
-		strCpy(mainBuffer[mainBufferSize++], (char*)text2);
+		pushToMainBuffer("This is a test String This is a test StringThis is a test StringThis is a test StringThis is a test StringThis is a test StringThis is a test StringThis is a test StringThis is a test StringThis is a test StringThis is a test StringThis is a test StringThis is a test StringThis is a test StringThis is a test StringThis is a test StringThis is a test StringThis is a test StringThis is a test StringThis is a test StringThis is a test String");
 
-		mainBuffer[mainBufferSize] = getPArrayDebug(char, 1);
-		strClear(mainBuffer[mainBufferSize++]);
+		pushToMainBuffer("Lets get ready to rumbleee Lets get ready to rumbleeeLets get ready to rumbleeeLets get ready to rumbleee Lets get ready to rumbleeeLets get ready to rumbleeeLets get ready to rumbleee    Lets get ready to rumbleee Lets get ready to rumbleeeLets get ready to rumbleeeLets get ready to rumbleeeLets get ready to rumbleeeLets get ready to rumbleeeLets get ready to rumbleeeLets get ready to rumbleeeLets get ready to rumbleee");
 
 
+		pushToMainBuffer("ergoishergoshe rgghsehrg hrhrehrg \nhrigergoo4iheorg    \nwefjo");
+		pushToMainBuffer("WEFaerj a eorgis hrgs\nerg e\ne rgesrg serg\n sergserg");
 
-		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)text) + 1);
-		strCpy(mainBuffer[mainBufferSize++], (char*)text);
-
-		mainBuffer[mainBufferSize] = getPArrayDebug(char, strLen((char*)result) + 1);
-		strCpy(mainBuffer[mainBufferSize++], (char*)result);
 	}
 
 	void update(Input* input, Vec2 currentRes, float dt) {
@@ -92,7 +84,7 @@ struct Console {
 
 		float inputHeightPadding = 1.5;
 		float fontDrawHeightOffset = 0.2f;
-		float consolePadding = 10;
+		Vec2 consolePadding = vec2(10,10);
 		float cursorWidth = 2;
 		float cursorSpeed = 3;
 		float cursorColorMod = 0.2f;
@@ -267,31 +259,37 @@ struct Console {
 
 			if(mainBufferSize > 0) {
 				dcEnable(STATE_SCISSOR);
-				dcScissor(scissorRectScreenSpace(consoleBody, res.h));
 
-				float textPos = pos + consoleTotalHeight -bodyTextHeight/2 + scrollOffset;
-				float textStart = textPos;
+				Rect consoleTextRect = consoleBody;
+				consoleTextRect.max.x -= consolePadding.x;
+				if(lastDiff >= 0) consoleTextRect.max.x -= scrollBarWidth;
+
+				dcScissor(scissorRectScreenSpace(consoleTextRect, res.h));
+
+				char* pre = "> ";
+				float preSize = getTextDim(pre, bodyFont).w;
+
+				Vec2 textPos = vec2(consolePadding.x + preSize, pos + consoleTotalHeight + scrollOffset - consolePadding.y);
+				float textStart = textPos.y;
+
 
 				for(int i = 0; i < mainBufferSize; i++) {
 					if(i%2 == 0) {
-						char* pre = "> ";
-						dcText(pre, bodyFont, vec2(consolePadding,textPos), bodyFontColor, 0, 1);
+						dcText(pre, bodyFont, textPos - vec2(preSize,0), bodyFontColor, 0, 2);
 
-						dcText(mainBuffer[i], bodyFont, vec2(consolePadding + getTextDim(pre, bodyFont).w,textPos), bodyFontColor, 0, 1);
-						textPos -= bodyTextHeight;
+						dcText(mainBuffer[i], bodyFont, textPos, bodyFontColor, 0, 2);
+						// textPos.y -= bodyTextHeight;
+						textPos.y -= getTextHeight(mainBuffer[i], bodyFont);
 					} else {
 						if(strLen(mainBuffer[i]) > 0) {
-							char* pre = "    ";
-							dcText(pre, bodyFont, vec2(consolePadding,textPos), bodyFontColor, 0, 1);
-
-							dcText(mainBuffer[i], bodyFont, vec2(consolePadding + getTextDim(pre, bodyFont).w,textPos), vec4(1,0,0,1), 0, 1);
-
-							textPos -= bodyTextHeight * bodyFontHeightResultPadding;
+							dcText(mainBuffer[i], bodyFont, textPos, vec4(1,0,0,1), 0, 2);
+							// textPos.y -= bodyTextHeight;
+							textPos.y -= getTextHeight(mainBuffer[i], bodyFont);
 						}
 					}
 				}
 
-				lastDiff = textStart - textPos - rectGetDim(consoleBody).h;
+				lastDiff = textStart - textPos.y - rectGetDim(consoleTextRect).h + consolePadding.y*2;
 
 				dcDisable(STATE_SCISSOR);
 			}
@@ -314,11 +312,11 @@ struct Console {
 				int inputSize = strLen(inputBuffer);
 				int mouseIndex;
 
-				float left = consolePadding + getCharWidth(inputBuffer[0], inputFont) * 0.5;
+				float left = consolePadding.x + getCharWidth(inputBuffer[0], inputFont) * 0.5;
 				if(input->mousePos.x < left) {
 					mouseIndex = 0;
 				} else {
-					float p = consolePadding;
+					float p = consolePadding.x;
 					bool found = false;
 					for(int i = 0; i < inputSize - 1; i++) {
 						float p1 = p;
@@ -522,14 +520,14 @@ struct Console {
 
 			float inputMid = pos + inputHeight/2;
 
-			float cursorX = getTextPos(inputBuffer, cursorIndex, inputFont) + consolePadding;
+			float cursorX = getTextPos(inputBuffer, cursorIndex, inputFont) + consolePadding.x;
 			Rect cursorRect = rectCenDim(cursorX, inputMid, cursorWidth, inputFontSize);
 			if(cursorIndex == strLen(inputBuffer)) {
 				float width = getTextDim("M", inputFont).w;
 				cursorRect = rectCenDim(cursorX + width/2, inputMid, width, inputFontSize);
 			}
 
-			float markerX = getTextPos(inputBuffer, markerIndex, inputFont) + consolePadding;
+			float markerX = getTextPos(inputBuffer, markerIndex, inputFont) + consolePadding.x;
 
 			if(cursorIndex != markerIndex) {
 				float selectionWidth = abs(cursorX - markerX);
@@ -539,7 +537,7 @@ struct Console {
 				dcRect(selectionRect, selectionColor);
 			}
 
-			dcText(inputBuffer, inputFont, vec2(consolePadding, consoleInput.min.y + inputHeight/2 + inputFontSize * fontDrawHeightOffset), inputFontColor, 0, 1);
+			dcText(inputBuffer, inputFont, vec2(consolePadding.x, consoleInput.min.y + inputHeight/2 + inputFontSize * fontDrawHeightOffset), inputFontColor, 0, 1);
 
 			cursorTime += dt*cursorSpeed;
 			Vec4 cmod = vec4(0,cos(cursorTime)*cursorColorMod - cursorColorMod,0,0);

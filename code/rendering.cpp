@@ -1285,7 +1285,14 @@ void drawText(char* text, Font* font, Vec2 pos, Vec4 color, int vAlign = 0, int 
 	int length = strLen(text);
 	Vec2 textDim = getTextDim(text, font);
 	pos.x -= vAlign*0.5f*textDim.w;
-	pos.y -= hAlign*0.5f*textDim.h;
+
+	// Total hack for now. We have to find a way to not be dependend on the base line of the font. 
+	if(hAlign == 2) {
+		float baseLineOffset = 0.8f;
+		pos.y -= hAlign*0.5f*font->height*baseLineOffset;
+	} else {
+		pos.y -= hAlign*0.5f*textDim.h;
+	}
 
 	Vec2 shadowOffset = vec2(shadow, -shadow);
 

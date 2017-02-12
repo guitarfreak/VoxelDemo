@@ -2592,6 +2592,17 @@ STBTT_DEF Vec2 stbtt_GetTextDim(stbtt_bakedchar* cData, int fontHeight, int glyp
 	return dim;
 }
 
+STBTT_DEF float stbtt_GetTextHeight(stbtt_bakedchar* cData, int fontHeight, int glyphStart, char* text) {
+	float height = fontHeight;
+
+	int length = strLen(text);
+	for(int i = 0; i < length; i++) {
+		if(text[i] == (int)'\n') height += fontHeight;
+	}
+
+	return height;
+}
+
 STBTT_DEF float stbtt_GetCharDim(stbtt_bakedchar* cData, int fontHeight, int glyphStart, char c) {
 	stbtt_bakedchar *b = cData + (int)c - glyphStart;
 	float width = b->xadvance;
