@@ -90,13 +90,14 @@ struct Console {
 		float cursorColorMod = 0.2f;
 
 		float g = 0.1f;
-		Vec4 mouseHoverColorMod = vec4(g,g,g,0);
-		Vec4 bodyColor 		= vec4(0.3f,0,0.6f,1.0f);
-		Vec4 inputColor 	= vec4(0.37f,0,0.6f,1.0f);
-		Vec4 bodyFontColor 	= vec4(1,1,1,1);
-		Vec4 inputFontColor = vec4(1,1,1,1);
-		Vec4 cursorColor 	= vec4(0.2f,0.8f,0.1f,0.9f);
-		Vec4 selectionColor = vec4(0.1f,0.4f,0.4f,0.9f);
+		Vec4 mouseHoverColorMod 	= vec4(g,g,g,0);
+		Vec4 bodyColor 				= vec4(0.3f,0,0.6f,1.0f);
+		Vec4 inputColor 			= vec4(0.37f,0,0.6f,1.0f);
+		Vec4 bodyFontColor 			= vec4(1,1,1,1);
+		Vec4 bodyFontResultColor 	= vec4(0.9f,0,0.1f,1);
+		Vec4 inputFontColor 		= vec4(1,1,1,1);
+		Vec4 cursorColor 			= vec4(0.2f,0.8f,0.1f,0.9f);
+		Vec4 selectionColor 		= vec4(0.1f,0.4f,0.4f,0.9f);
 		Vec4 scrollBarBackgroundColor = bodyColor + vec4(0.2,0,0,0);
 		Vec4 scrollBarColor = vec4(0,0.5f,0.7f,1);
 
@@ -276,17 +277,11 @@ struct Console {
 				for(int i = 0; i < mainBufferSize; i++) {
 					if(i%2 == 0) {
 						dcText(pre, bodyFont, textPos - vec2(preSize,0), bodyFontColor, 0, 2);
-
-						dcText(mainBuffer[i], bodyFont, textPos, bodyFontColor, 0, 2);
-						// textPos.y -= bodyTextHeight;
-						textPos.y -= getTextHeight(mainBuffer[i], bodyFont);
-					} else {
-						if(strLen(mainBuffer[i]) > 0) {
-							dcText(mainBuffer[i], bodyFont, textPos, vec4(1,0,0,1), 0, 2);
-							// textPos.y -= bodyTextHeight;
-							textPos.y -= getTextHeight(mainBuffer[i], bodyFont);
-						}
 					}
+
+					Vec4 color = i%2 == 0 ? bodyFontColor : bodyFontResultColor;
+					dcText(mainBuffer[i], bodyFont, textPos, color, 0, 2);
+					textPos.y -= getTextHeight(mainBuffer[i], bodyFont);
 				}
 
 				lastDiff = textStart - textPos.y - rectGetDim(consoleTextRect).h + consolePadding.y*2;
