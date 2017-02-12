@@ -12,6 +12,7 @@ struct Console {
 	float scrollMode;
 	float scrollPercent;
 	float lastDiff;
+	float mouseAnchor;
 
 	char* mainBuffer[256];
 	int mainBufferSize;
@@ -34,8 +35,9 @@ struct Console {
 		* Mouse selection.
 		* Mouse release.
 		* Cleanup.
-		- Scrollbar.
+		* Scrollbar.
 
+		- Select inside console output.
 		- Command history.
 		- Command hint on tab.
 	*/
@@ -94,15 +96,22 @@ struct Console {
 		float cursorSpeed = 3;
 		float cursorColorMod = 0.2f;
 
+		float g = 0.1f;
+		Vec4 mouseHoverColorMod = vec4(g,g,g,0);
 		Vec4 bodyColor 		= vec4(0.3f,0,0.6f,1.0f);
 		Vec4 inputColor 	= vec4(0.37f,0,0.6f,1.0f);
 		Vec4 bodyFontColor 	= vec4(1,1,1,1);
 		Vec4 inputFontColor = vec4(1,1,1,1);
 		Vec4 cursorColor 	= vec4(0.2f,0.8f,0.1f,0.9f);
 		Vec4 selectionColor = vec4(0.1f,0.4f,0.4f,0.9f);
+		Vec4 scrollBarBackgroundColor = bodyColor + vec4(0.2,0,0,0);
+		Vec4 scrollBarColor = vec4(0,0.5f,0.7f,1);
 
 		float scrollBarWidth = 20;
-		float scrollCursorMinHeight = 20;
+		float scrollCursorMinHeight = 60;
+		float scrollCursorMod = 0.3f;
+		float scrollWheelAmount = bodyFontSize;
+		float scrollWheelAmountMod = 4;
 
 		// Logic.
 
@@ -149,12 +158,10 @@ struct Console {
 		float consoleBodyHeight = consoleTotalHeight - inputHeight;
 		Rect consoleBody = rectMinDim(vec2(0, pos + inputHeight), vec2(res.w, consoleBodyHeight));
 		Rect consoleInput = rectMinDim(vec2(0, pos), vec2(res.w, inputHeight));
-		Rect scrollRect = consoleBody;
-		scrollRect.min.x = scrollRect.max.x - scrollBarWidth;
+
 
 		if(!isActive && pointInRect(input->mousePosNegative, consoleInput)) {
-			float t = 0.1f;
-			inputColor += vec4(t,t,t,0);
+			inputColor += mouseHoverColorMod;
 
 			if(input->mouseButtonPressed[0]) {
 				isActive = true;
@@ -179,26 +186,87 @@ struct Console {
 			dcRect(consoleInput, inputColor);
 
 
-			if(input->mouseButtonPressed[0] && pointInRect(input->mousePosNegative, scrollRect)) {
-				scrollMode = true;
-			}
+			float scrollOffset = 0;
+			if(lastDiff >= 0) {
+				scrollOffset = scrollPercent*lastDiff; 
+				
+				// Scrollbar background.
 
-			if(input->mouseButtonReleased[0]) {
-				scrollMode = false;
-			}
+				Rect scrollRect = consoleBody;
+				scrollRect.min.x = scrollRect.max.x - scrollBarWidth;
 
-			if(scrollMode) {
-				scrollPercent = mapRangeClamp(input->mousePosNegative.y, scrollRect.min.y, scrollRect.max.y, 0, 1);
-				scrollPercent = 1-scrollPercent;
-			}
+				// Scrollbar cursor.
 
+				float consoleHeight = rectGetDim(consoleBody).h;
+				float scrollCursorHeight = (consoleHeight / (consoleHeight + lastDiff)) * consoleHeight;
+				clampMin(&scrollCursorHeight, scrollCursorMinHeight);
+
+
+				if(input->mouseWheel && pointInRect(input->mousePosNegative, consoleBody)) {
+					if(input->keysDown[KEYCODE_CTRL]) scrollWheelAmount *= scrollWheelAmountMod;
+
+					scrollPercent += -input->mouseWheel * (scrollWheelAmount / lastDiff);
+					clamp(&scrollPercent, 0, 1);
+				}
+
+				// Enable scrollbar keyboard navigation if we're not typing anything into the input console.
+				if(strLen(inputBuffer) == 0) {
+					if(input->keysPressed[KEYCODE_HOME]) scrollPercent = 0;
+					if(input->keysPressed[KEYCODE_END]) scrollPercent = 1;
+					if(input->keysPressed[KEYCODE_PAGEUP] || input->keysPressed[KEYCODE_PAGEDOWN]) {
+						float dir;
+						if(input->keysPressed[KEYCODE_PAGEUP]) dir = -1;
+						else dir = 1;
+
+						scrollPercent += dir * (consoleHeight*0.8f / lastDiff);
+					}
+
+					clamp(&scrollPercent, 0, 1);
+				}
+
+				// @CodeDuplication.
+
+				float scrollCursorPos = lerp(scrollPercent, scrollRect.max.y - scrollCursorHeight/2, scrollRect.min.y + scrollCursorHeight/2);
+				Rect scrollCursorRect = rectCenDim(vec2(scrollRect.max.x - scrollBarWidth/2, scrollCursorPos), vec2(scrollBarWidth,scrollCursorHeight));
+
+
+				if(input->mouseButtonReleased[0]) {
+					scrollMode = false;
+				}
+
+				if(pointInRect(input->mousePosNegative, scrollCursorRect)) {
+					if(input->mouseButtonPressed[0]) {
+						scrollMode = true;
+						mouseAnchor = scrollCursorPos - input->mousePosNegative.y;
+					}
+
+					if(!scrollMode) {
+						scrollBarColor += mouseHoverColorMod;
+					}
+				}
+
+				if(scrollMode) {
+					scrollBarColor += mouseHoverColorMod;
+
+					scrollPercent = mapRangeClamp(input->mousePosNegative.y + mouseAnchor, scrollRect.min.y + scrollCursorHeight/2, scrollRect.max.y - scrollCursorHeight/2, 0, 1);
+					scrollPercent = 1-scrollPercent;
+				}
+
+				// @CodeDuplication.
+				// Recalculate scroll rect to reduce lag.
+
+				scrollCursorPos = lerp(scrollPercent, scrollRect.max.y - scrollCursorHeight/2, scrollRect.min.y + scrollCursorHeight/2);
+				scrollCursorRect = rectCenDim(vec2(scrollRect.max.x - scrollBarWidth/2, scrollCursorPos), vec2(scrollBarWidth,scrollCursorHeight));
+
+				// Draw scrollbar.
+
+				dcRect(scrollRect, scrollBarBackgroundColor);
+				dcRect(scrollCursorRect, scrollBarColor);
+			}
 
 			if(mainBufferSize > 0) {
 				dcEnable(STATE_SCISSOR);
 				dcScissor(scissorRectScreenSpace(consoleBody, res.h));
-
-				float scrollOffset = 0;
-				if(lastDiff > 0) scrollOffset = scrollPercent*lastDiff; 
 
 				float textPos = pos + consoleTotalHeight -bodyTextHeight/2 + scrollOffset;
 				float textStart = textPos;
@@ -222,23 +290,7 @@ struct Console {
 					}
 				}
 
-
-
-				if(scrollOffset != 0) {
-					dcRect(scrollRect, vec4(1,1,1,1));
-
-					float consoleHeight = rectGetDim(consoleBody).h;
-					float scrollCursorHeight = consoleHeight / lastDiff * consoleHeight;
-					clampMin(&scrollCursorHeight, scrollCursorMinHeight);
-
-					float scrollCursorPos = lerp(scrollPercent, scrollRect.max.y, scrollRect.min.y);
-					Rect scrollCursorRect = rectCenDim(vec2(scrollRect.max.x - scrollBarWidth/2, scrollCursorPos), vec2(scrollBarWidth,scrollCursorHeight));
-					dcRect(scrollCursorRect, vec4(0,1,1,1));
-				}
-
-
 				lastDiff = textStart - textPos - rectGetDim(consoleBody).h;
-
 
 				dcDisable(STATE_SCISSOR);
 			}
@@ -455,6 +507,8 @@ struct Console {
 						strClear(inputBuffer);
 						cursorIndex = 0;
 						markerIndex = 0;
+
+						scrollPercent = 1;
 					}
 				}
 

@@ -15,6 +15,8 @@ enum Keycode {
 	KEYCODE_DEL,
 	KEYCODE_HOME,
 	KEYCODE_END,
+	KEYCODE_PAGEUP,
+	KEYCODE_PAGEDOWN,
 	KEYCODE_UP,
 	KEYCODE_DOWN,
 	KEYCODE_LEFT,
@@ -118,6 +120,8 @@ int vkToKeycode(int vk) {
 		case VK_DELETE: return KEYCODE_DEL;
 		case VK_HOME: return KEYCODE_HOME;
 		case VK_END: return KEYCODE_END;
+		case VK_PRIOR: return KEYCODE_PAGEUP;
+		case VK_NEXT: return KEYCODE_PAGEDOWN;
 		case VK_UP: return KEYCODE_UP;
 		case VK_DOWN: return KEYCODE_DOWN;
 		case VK_LEFT: return KEYCODE_LEFT;
