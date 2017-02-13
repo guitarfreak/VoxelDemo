@@ -152,6 +152,8 @@ struct Draw_Command_Text {
 	int hAlign;
 	int shadow;
 	Vec4 shadowColor;
+
+	int wrapWidth;
 };
 
 struct Draw_Command_Scissor {
@@ -227,7 +229,8 @@ void dcRect(Rect r, Vec4 color, DrawCommandList* drawList = 0) {
 	command->texZ = -1;
 }
 
-void dcText(char* text, Font* font, Vec2 pos, Vec4 color, int vAlign = 0, int hAlign = 0, int shadow = 0, Vec4 shadowColor = vec4(0,0,0,1), DrawCommandList* drawList = 0) {
+// void dcText(char* text, Font* font, Vec2 pos, Vec4 color, int vAlign = 0, int hAlign = 0, int shadow = 0, Vec4 shadowColor = vec4(0,0,0,1), DrawCommandList* drawList = 0) {
+void dcText(char* text, Font* font, Vec2 pos, Vec4 color, int vAlign = 0, int hAlign = 0, int shadow = 0, Vec4 shadowColor = vec4(0,0,0,1), int wrapWidth = -1, DrawCommandList* drawList = 0) {
 	PUSH_DRAW_COMMAND(Text, Text);
 
 	command->text = text;
@@ -238,6 +241,7 @@ void dcText(char* text, Font* font, Vec2 pos, Vec4 color, int vAlign = 0, int hA
 	command->hAlign = hAlign;
 	command->shadow = shadow;
 	command->shadowColor = shadowColor;
+	command->wrapWidth = wrapWidth;
 }
 
 void dcScissor(Rect rect, DrawCommandList* drawList = 0) {
@@ -1281,7 +1285,7 @@ void perspective(float fov, float aspect, float n, float f) {
 
 
 Vec2 getTextDim(char* text, Font* font);
-void drawText(char* text, Font* font, Vec2 pos, Vec4 color, int vAlign = 0, int hAlign = 0, int shadow = 0, Vec4 shadowColor = vec4(0,0,0,1)) {
+void drawText(char* text, Font* font, Vec2 pos, Vec4 color, int vAlign = 0, int hAlign = 0, int shadow = 0, Vec4 shadowColor = vec4(0,0,0,1), int wrapWidth = -1) {
 	int length = strLen(text);
 	Vec2 textDim = getTextDim(text, font);
 	pos.x -= vAlign*0.5f*textDim.w;
@@ -1298,10 +1302,31 @@ void drawText(char* text, Font* font, Vec2 pos, Vec4 color, int vAlign = 0, int 
 
 	if(shadow != 0 && shadowColor == vec4(0,0,0,0)) shadowColor = vec4(0,0,0,1);
 
+	int checkIndex = 0;
+
 	pos = vec2((int)pos.x, roundInt((int)pos.y));
 	Vec2 startPos = pos;
 	for(int i = 0; i < length; i++) {
 		char t = text[i];
+
+		if(wrapWidth != -1 && i == checkIndex) {
+			char c = t;
+			float wordWidth = 0;
+			int it = i;
+			while(c != '\n' && c != '\0' && c != ' ') {
+				wordWidth += stbtt_GetCharDim(font->cData, font->height, font->glyphStart, c);
+				it++;
+				c = text[it];
+			}
+
+			if(pos.x + wordWidth > startPos.x + wrapWidth) {
+				t = '\n';
+				i--;
+			}
+
+			checkIndex = it;
+			if(checkIndex == it) checkIndex++;
+		}
 
 		if(t == '\n') {
 			pos.y -= font->height;
@@ -1515,7 +1540,7 @@ void executeCommandList(DrawCommandList* list, bool print = false) {
 
 			case Draw_Command_Text_Type: {
 				dcGetStructAndIncrement(Text);
-				drawText(dc.text, dc.font, dc.pos, dc.color, dc.vAlign, dc.hAlign, dc.shadow, dc.shadowColor);
+				drawText(dc.text, dc.font, dc.pos, dc.color, dc.vAlign, dc.hAlign, dc.shadow, dc.shadowColor, dc.wrapWidth);
 			} break;
 
 			case Draw_Command_Scissor_Type: {

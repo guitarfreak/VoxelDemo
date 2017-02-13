@@ -1,17 +1,68 @@
 
+float getCharWidth(char c, Font* font) {
+	float width = stbtt_GetCharDim(font->cData, font->height, font->glyphStart, c);
+	return width;
+}
+
 Vec2 getTextDim(char* text, Font* font) {
 	Vec2 textDim = stbtt_GetTextDim(font->cData, font->height, font->glyphStart, text);
 	return textDim;
 }
 
 float getTextHeight(char* text, Font* font) {
-	float height = stbtt_GetTextHeight(font->cData, font->height, font->glyphStart, text);
+	float height = font->height;
+
+	int length = strLen(text);
+	for(int i = 0; i < length; i++) {
+		if(text[i] == (int)'\n') height += font->height;
+	}
+
 	return height;
 }
 
-float getCharWidth(char c, Font* font) {
-	float width = stbtt_GetCharDim(font->cData, font->height, font->glyphStart, c);
-	return width;
+float getTextHeightWidthWrapping(char* text, Font* font, float pos, int wrapWidth, bool wordWrapping = false) {
+	float height = font->height;
+
+	float startX = pos;
+
+	int checkIndex = 0;
+
+	int length = strLen(text);
+	for(int i = 0; i < length; i++) {
+		char t = text[i];
+
+		if(wrapWidth != -1 && i == checkIndex) {
+			char c = t;
+			float wordWidth = 0;
+			int it = i;
+			while(c != '\n' && c != '\0' && c != ' ') {
+				wordWidth += stbtt_GetCharDim(font->cData, font->height, font->glyphStart, c);
+				it++;
+				c = text[it];
+			}
+
+			if(pos + wordWidth > startX + wrapWidth) {
+				t = '\n';
+				i--;
+			}
+
+			checkIndex = it;
+			if(checkIndex == it) checkIndex++;
+		}
+
+		if(t == '\n') {
+			height += font->height;
+
+			pos = startX;
+			continue;
+		}
+
+		float cw = stbtt_GetCharDim(font->cData, font->height, font->glyphStart, t);
+
+		pos += cw;
+	}
+
+	return height;
 }
 
 float getTextPos(char* text, int index, Font* font) {

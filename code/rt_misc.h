@@ -178,6 +178,11 @@ inline void strErase(char* string, int index, int size) {
 	memCpy(string+index, string+index+size, amount+1);
 }
 
+inline bool strIsEmpty(char* string) {
+	bool result = string[0] == '\0';
+	return result;
+}
+
 void copySubstring(char * destination, char * source, int start, int end) {
 	int size = end - start;
 	memCpy(destination, source + start, size + 1);

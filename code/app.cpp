@@ -2445,6 +2445,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 						input->keysPressed[KEYCODE_LEFT], input->keysPressed[KEYCODE_RIGHT], input->keysPressed[KEYCODE_UP], input->keysPressed[KEYCODE_DOWN], 
 						input->keysDown[KEYCODE_SHIFT], input->keysDown[KEYCODE_CTRL], input->inputCharacters, input->inputCharacterCount};
 
+		if(false)
 		{
 			int fontSize = 18;
 			int pi = 0;
@@ -2883,6 +2884,17 @@ extern "C" APPMAINFUNCTION(appMain) {
 			}
 
 			con->update(ds->input, vec2(wSettings->currentRes), ad->dt);
+
+			// Rect r = rectULDim(vec2(100,-400), vec2(150,200));
+			// dcRect(r, vec4(0,0,0,1));
+
+			// char* te = "AA AAA A AAAAAA A AA AA AA  AA   AA \nAA AA AAA\n   AA";
+			// dcText(te, getFont(FONT_ARIAL, 24), rectGetUL(r), vec4(1,1,0,1), 0, 2, 0, vec4(0,0,0,0), rectGetDim(r).w);
+
+			// int textHeight = getTextHeightWidthWrapping(te, getFont(FONT_ARIAL, 24), rectGetUL(r).x, rectGetDim(r).w);
+
+			// dcText();
+			// dcText(fillString("Text Height: %i", textHeight), getFont(FONT_ARIAL, 24), vec2(300,-300), vec4(0,0,0,1), 0, 2);
 		}
 
 		//

@@ -36,8 +36,8 @@ struct Console {
 		* Mouse release.
 		* Cleanup.
 		* Scrollbar.
+		* Line wrap.
 
-		- Line wrap.
 		- Select inside console output.
 		- Command history.
 		- Command hint on tab.
@@ -47,6 +47,7 @@ struct Console {
 		float smallPos = -windowHeight * CONSOLE_SMALL_PERCENT;
 		pos = 0;
 		mode = 1;
+		// mode = 0;
 		targetPos = smallPos;
 		cursorIndex = 0;
 		markerIndex = 0;
@@ -63,6 +64,10 @@ struct Console {
 
 		pushToMainBuffer("Lets get ready to rumbleee Lets get ready to rumbleeeLets get ready to rumbleeeLets get ready to rumbleee Lets get ready to rumbleeeLets get ready to rumbleeeLets get ready to rumbleee    Lets get ready to rumbleee Lets get ready to rumbleeeLets get ready to rumbleeeLets get ready to rumbleeeLets get ready to rumbleeeLets get ready to rumbleeeLets get ready to rumbleeeLets get ready to rumbleeeLets get ready to rumbleee");
 
+
+		pushToMainBuffer("We were somewhere around Barstow on the edge of the desert when the drugs began to take hold. I remember saying something like “I feel a bit lightheaded; maybe you should drive…” And suddenly there was a terrible roar all around us and the sky was full of what looked like huge bats, all swooping and screeching and diving around the car, which was going about a hundred miles an hour with the top down to Las Vegas. And a voice was screaming: “Holy Jesus! What are these goddamn animals?” Then it was quiet again. My attorney had taken his shirt off and was pouring beer on his chest, to facilitate the tanning process. “What the hell are you yelling about?” he muttered, staring up at the sun with his eyes closed and covered with wraparound Spanish sunglasses. “Never mind,” I said. “It’s your turn to drive.” I hit the brakes and aimed the Great Red Shark toward the shoulder of the highway. No point mentioning those bats, I thought. The poor bastard will see them soon enough.  It was almost noon, and we still had more than a hundred miles to go. They would be tough miles. Very soon, I knew, we would both be completely twisted. But there was no going back, and no time to rest. We would have to ride it out. Press-registration for the fabulous Mint 400 was already underway, and we had to get there by four to claim our sound-proof suite. A fashionable sporting-magazine in New York had taken care of the reservations, along with this huge red Chevy convertible we’d just rented off a lot on the Sunset Strip… and I was, after all, a professional journalist; so I had an obligation to cover the story, for good or ill.  The sporting editors had also given me $300 in cash, most of which was already spent on extremely dangerous drugs. The trunk of the car looked like a mobile police narcotics lab. We had two bags of grass, seventy-five pellets of mescaline, five sheets of high-powered blotter acid, a salt shaker half full of cocaine, and a whole galaxy of multi-colored uppers, downers, screamers, laughers and also a quart of tequila, a quart of rum, a case of Budweiser, a pint of raw ether and two dozen amyls. All this had been rounded up the night before, in a frenzy of highspeed driving all over Los Angeles County – from Topanga to Watts, we picked up everything we could get our hands on. Not that we needed all that for the trip, but once you get locked into a serious drug-collection, the tendency is to push it as far as you can.  The only thing that really worried me was the ether. There is nothing in the world more helpless and irresponsible and depraved than a man in the depths of an ether binge. And I knew we’d get into that rotten stuff pretty soon. Probably at the next gas station. We had sampled almost everything else, and now – yes, it was time for a long snort of ether. And then do the next hundred miles in a horrible, slobbering sort of spastic stupor. The only way to keep alert on ether is to do up a lot of amyls – not all at once, but steadily, just enough to maintain the focus at ninety miles an hour through Barstow.  “Man, this is the way to travel,” said my attorney. He leaned over to turn the volume up on the radio, humming along withthe rhythm section and kind of moaning the words: “One toke over the line, Sweet Jesus… One toke over the line...” One toke? You poor fool! Wait till you see those goddamn bats. I could barely hear the radio… slumped over on the far side of the seat, grappling with a tape recorder turned all the way up on “Sympathy for the Devil.” That was the only tape we had, so we played it constantly, over and over, as a kind of demented counterpoint.");
+
+		pushToMainBuffer("");
 
 		pushToMainBuffer("ergoishergoshe rgghsehrg hrhrehrg \nhrigergoo4iheorg    \nwefjo");
 		pushToMainBuffer("WEFaerj a eorgis hrgs\nerg e\ne rgesrg serg\n sergserg");
@@ -272,16 +277,22 @@ struct Console {
 
 				Vec2 textPos = vec2(consolePadding.x + preSize, pos + consoleTotalHeight + scrollOffset - consolePadding.y);
 				float textStart = textPos.y;
+				float textStartX = textPos.x;
 
+				Vec2 mp = input->mousePosNegative;
 
 				for(int i = 0; i < mainBufferSize; i++) {
 					if(i%2 == 0) {
 						dcText(pre, bodyFont, textPos - vec2(preSize,0), bodyFontColor, 0, 2);
+					} else {
+						if(strIsEmpty(mainBuffer[i])) continue;
 					}
 
 					Vec4 color = i%2 == 0 ? bodyFontColor : bodyFontResultColor;
-					dcText(mainBuffer[i], bodyFont, textPos, color, 0, 2);
-					textPos.y -= getTextHeight(mainBuffer[i], bodyFont);
+					float wrappingWidth = rectGetDim(consoleTextRect).w - textStartX;
+					dcText(mainBuffer[i], bodyFont, textPos, color, 0, 2, 0, vec4(0,0,0,0), wrappingWidth);
+
+					textPos.y -= getTextHeightWidthWrapping(mainBuffer[i], bodyFont, textPos.x, wrappingWidth);
 				}
 
 				lastDiff = textStart - textPos.y - rectGetDim(consoleTextRect).h + consolePadding.y*2;
