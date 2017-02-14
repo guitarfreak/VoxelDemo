@@ -1284,7 +1284,238 @@ void perspective(float fov, float aspect, float n, float f) {
 }
 
 
-Vec2 getTextDim(char* text, Font* font);
+
+float getCharWidth(char c, Font* font) {
+	float width = stbtt_GetCharDim(font->cData, font->height, font->glyphStart, c);
+	return width;
+}
+
+Vec2 getTextDim(char* text, Font* font) {
+	Vec2 textDim = stbtt_GetTextDim(font->cData, font->height, font->glyphStart, text);
+	return textDim;
+}
+
+float getTextHeight(char* text, Font* font) {
+	float height = font->height;
+
+	int length = strLen(text);
+	for(int i = 0; i < length; i++) {
+		if(text[i] == (int)'\n') height += font->height;
+	}
+
+	return height;
+}
+
+enum TextStatus {
+	TEXTSTATUS_END = 0, 
+	TEXTSTATUS_NEWLINE, 
+	TEXTSTATUS_WRAPPED, 
+	TEXTSTATUS_DEFAULT, 
+	TEXTSTATUS_SIZE, 
+};
+
+// Returns 1 on new line and 0 on end of text.
+int textSim(char* text, int length, Font* font, Vec2* pos, int* index, int* wrapIndex, Rect* charRect, Rect* uvRect, Vec2 startPos = vec2(0,0), int wrapWidth = -1) {
+
+	int i = *index;
+	char t = text[i];
+
+	if(t == '\0') return TEXTSTATUS_END;
+
+	bool wrapped = false;
+
+	if(wrapWidth != -1 && i == (*wrapIndex)) {
+		char c = text[i];
+		float wordWidth = 0;
+		if(c == '\n') wordWidth = getCharWidth(c, font);
+
+		int it = i;
+		while(c != '\n' && c != '\0' && c != ' ') {
+			wordWidth += getCharWidth(c, font);
+			it++;
+			c = text[it];
+		}
+
+		if(pos->x + wordWidth > startPos.x + wrapWidth) {
+			wrapped = true;
+			i--;
+		}
+
+		// (*wrapIndex) = it;
+		// if((*wrapIndex) == it) (*wrapIndex) = (*wrapIndex) + 1;
+		if(it != i) (*wrapIndex) = it;
+		else (*wrapIndex) = (*wrapIndex) + 1;
+	}
+
+	bool newLine = false;
+	if(t == '\n') newLine = true;
+
+	if(newLine || wrapped) {
+		pos->x = startPos.x;
+		pos->y -= font->height;
+	} else {
+		stbtt_aligned_quad q;
+		stbtt_GetBakedQuad(font->cData, font->tex.dim.w, font->tex.dim.h, t-font->glyphStart, &pos->x, &pos->y, &q, 1);
+
+		*charRect = rect(q.x0, q.y0, q.x1, q.y1);
+		*uvRect = rect(q.s0,q.t0,q.s1,q.t1);
+	}
+
+	*index = i+1;
+
+	if(newLine) return TEXTSTATUS_NEWLINE;
+	else if(wrapped) return TEXTSTATUS_WRAPPED;
+	else return TEXTSTATUS_DEFAULT;
+}
+
+float getTextHeightWidthWrapping(char* text, Font* font, Vec2 pos, int wrapWidth) {
+	Vec2 startPos = pos;
+
+	int length = strLen(text);
+	int wrapIndex = 0;
+	int i = 0;
+	while(true) {
+		Rect tr = rect(0,0,0,0);
+		Rect uv = rect(0,0,0,0);
+		int status = textSim(text, length, font, &pos, &i, &wrapIndex, &tr, &uv, startPos, wrapWidth);
+		if(status == TEXTSTATUS_END) break;
+	}
+
+	return startPos.y - (pos.y - font->height);
+}
+
+Vec2 getTextMouseCursor(char* text, Font* font, Vec2 pos, int wrapWidth, Vec2 mousePos) {
+	Vec2 startPos = pos;
+
+	if(mousePos.y > pos.y) return startPos;
+
+	int length = strLen(text);
+	int wrapIndex = 0;
+	int i = 0;
+	Vec2 lastPos = startPos;
+	bool foundLine = false;
+	while(true) {
+		Rect tr = rect(0,0,0,0);
+		Rect uv = rect(0,0,0,0);
+		lastPos = pos;
+		int status = textSim(text, length, font, &pos, &i, &wrapIndex, &tr, &uv, startPos, wrapWidth);
+		
+		if(status == TEXTSTATUS_END) break;
+
+		if(status == TEXTSTATUS_NEWLINE) {
+			if(foundLine) return lastPos;
+			continue;
+		}
+
+	    foundLine = valueBetween(mousePos.y, pos.y - font->height, pos.y);
+	    if(foundLine) {
+	    	float charWidth = getCharWidth(text[i-1], font);
+	    	float charMid = pos.x - charWidth*0.5f;
+			if(mousePos.x < charMid) return vec2(pos.x - charWidth, pos.y);
+		}
+	}
+
+	return pos;
+}
+
+float getTextPos(char* text, int index, Font* font) {
+	float result = 0;
+	Vec2 pos = vec2(0,0);
+
+	// no support for new line
+	int length = strLen(text);
+	for(int i = 0; i < length+1; i++) {
+		char t = text[i];
+
+		if(i == index) {
+			result = pos.x;
+			break;
+		}
+
+		stbtt_aligned_quad q;
+		stbtt_GetBakedQuad(font->cData, font->tex.dim.w, font->tex.dim.h, t-font->glyphStart, &pos.x, &pos.y, &q, 1);
+	}
+
+	return result;
+}
+
+float getTextPosWrapping(char* text, Font* font, Vec2 pos, int wrapWidth, Vec2 mousePos) {
+	Vec2 startPos = pos;
+
+	if(mousePos.y > pos.y) return 0;
+
+	int length = strLen(text);
+	int wrapIndex = 0;
+	int i = 0;
+	bool foundLine = false;
+	while(true) {
+		Rect tr = rect(0,0,0,0);
+		Rect uv = rect(0,0,0,0);
+		int status = textSim(text, length, font, &pos, &i, &wrapIndex, &tr, &uv, startPos, wrapWidth);
+		
+		if(status == TEXTSTATUS_END) break;
+
+		if(status == TEXTSTATUS_NEWLINE) {
+			if(foundLine) return i-1;
+			continue;
+		}
+
+		if(status == TEXTSTATUS_WRAPPED) {
+			if(foundLine) return i;
+			continue;
+		}
+
+	    foundLine = valueBetween(mousePos.y, pos.y - font->height, pos.y);
+	    if(foundLine) {
+	    	float charWidth = getCharWidth(text[i-1], font);
+	    	float charMid = pos.x - charWidth*0.5f;
+			if(mousePos.x < charMid) return i-1;
+		}
+	}
+
+	return i;
+}
+
+Vec2 getTextMousePos(char* text, Font* font, Vec2 pos, int index, int wrapWidth) {
+	Vec2 startPos = pos;
+
+	if(index == 0) return startPos;
+
+	int length = strLen(text);
+	int wrapIndex = 0;
+	int i = 0;
+	Vec2 lastPos = startPos;
+	bool foundLine = false;
+	while(true) {
+		Rect tr = rect(0,0,0,0);
+		Rect uv = rect(0,0,0,0);
+		lastPos = pos;
+		int status = textSim(text, length, font, &pos, &i, &wrapIndex, &tr, &uv, startPos, wrapWidth);
+		
+		if(status == TEXTSTATUS_END) break;
+
+		if(i == index) {
+			return pos;
+		}
+
+		// if(status == 1) {
+		// 	// if(foundLine) return lastPos;
+		// 	if(foundLine) return lastPos;
+		// 	continue;
+		// }
+
+	 //    foundLine = valueBetween(mousePos.y, pos.y - font->height, pos.y);
+	 //    if(foundLine) {
+	 //    	float charWidth = getCharWidth(text[i-1], font);
+	 //    	float charMid = pos.x - charWidth*0.5f;
+		// 	// if(mousePos.x < charMid) return vec2(pos.x - charWidth, pos.y);
+		// 	if(mousePos.x < charMid) return i-1;
+		// }
+	}
+
+	return pos;
+}
+
 void drawText(char* text, Font* font, Vec2 pos, Vec4 color, int vAlign = 0, int hAlign = 0, int shadow = 0, Vec4 shadowColor = vec4(0,0,0,1), int wrapWidth = -1) {
 	int length = strLen(text);
 	Vec2 textDim = getTextDim(text, font);
@@ -1302,48 +1533,24 @@ void drawText(char* text, Font* font, Vec2 pos, Vec4 color, int vAlign = 0, int 
 
 	if(shadow != 0 && shadowColor == vec4(0,0,0,0)) shadowColor = vec4(0,0,0,1);
 
-	int checkIndex = 0;
+	int wrapIndex = 0;
 
-	pos = vec2((int)pos.x, roundInt((int)pos.y));
+	pos = vec2(roundInt((int)pos.x), roundInt((int)pos.y));
 	Vec2 startPos = pos;
-	for(int i = 0; i < length; i++) {
-		char t = text[i];
+	int i = 0;
+	while(true) {
+		Rect tr = rect(0,0,0,0);
+		Rect uv = rect(0,0,0,0);
+		int status = textSim(text, length, font, &pos, &i, &wrapIndex, &tr, &uv, startPos, wrapWidth);
+		if(status == TEXTSTATUS_END) break;
+		if(status == TEXTSTATUS_NEWLINE || status == TEXTSTATUS_WRAPPED) continue;
 
-		if(wrapWidth != -1 && i == checkIndex) {
-			char c = t;
-			float wordWidth = 0;
-			int it = i;
-			while(c != '\n' && c != '\0' && c != ' ') {
-				wordWidth += stbtt_GetCharDim(font->cData, font->height, font->glyphStart, c);
-				it++;
-				c = text[it];
-			}
-
-			if(pos.x + wordWidth > startPos.x + wrapWidth) {
-				t = '\n';
-				i--;
-			}
-
-			checkIndex = it;
-			if(checkIndex == it) checkIndex++;
-		}
-
-		if(t == '\n') {
-			pos.y -= font->height;
-			pos.x = startPos.x;
-			continue;
-		}
-
-		stbtt_aligned_quad q;
-		stbtt_GetBakedQuad(font->cData, font->tex.dim.w, font->tex.dim.h, t-font->glyphStart, &pos.x, &pos.y, &q, 1);
-
-		Rect r = rect(q.x0, q.y0, q.x1, q.y1);
-		if(shadow > 0) {
-			drawRect(rectAddOffset(r, shadowOffset), rect(q.s0,q.t0,q.s1,q.t1), shadowColor, font->tex.id);
-		}
-		drawRect(r, rect(q.s0,q.t0,q.s1,q.t1), color, font->tex.id);
+		if(shadow > 0) drawRect(rectAddOffset(tr, shadowOffset), uv, shadowColor, font->tex.id);
+		drawRect(tr, uv, color, font->tex.id);
 	}
 }
+
+
 
 void drawCube(Vec3 trans, Vec3 scale, Vec4 color, float degrees, Vec3 rot) {
 	glBindTextures(0,1,&getTexture(TEXTURE_WHITE)->id);

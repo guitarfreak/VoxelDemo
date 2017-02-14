@@ -2885,16 +2885,34 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			con->update(ds->input, vec2(wSettings->currentRes), ad->dt);
 
-			// Rect r = rectULDim(vec2(100,-400), vec2(150,200));
-			// dcRect(r, vec4(0,0,0,1));
+			Rect r = rectULDim(vec2(100,-100), vec2(70,200));
+			// Rect r = rectULDim(vec2(100,-100), vec2(400,200));
+			dcRect(r, vec4(0,0,0,1));
 
-			// char* te = "AA AAA A AAAAAA A AA AA AA  AA   AA \nAA AA AAA\n   AA";
-			// dcText(te, getFont(FONT_ARIAL, 24), rectGetUL(r), vec4(1,1,0,1), 0, 2, 0, vec4(0,0,0,0), rectGetDim(r).w);
+			// char* te = "ABCD \nE f ghiAAA A\n AA AA AA\n  AA   AA \nAA AA AAA\n   AA";
+			char* te = "ABCD EFG AA        AAA";
+			// char* te = "abAAA safwa";
+			Font* tf = getFont(FONT_ARIAL, 24);
+			dcText(te, tf, rectGetUL(r), vec4(1,1,0,1), 0, 2, 0, vec4(0,0,0,0), rectGetDim(r).w);
 
-			// int textHeight = getTextHeightWidthWrapping(te, getFont(FONT_ARIAL, 24), rectGetUL(r).x, rectGetDim(r).w);
+			// int textHeight = getTextHeightWidthWrapping(te, getFont(FONT_ARIAL, 24), rectGetUL(r), rectGetDim(r).w);
 
-			// dcText();
 			// dcText(fillString("Text Height: %i", textHeight), getFont(FONT_ARIAL, 24), vec2(300,-300), vec4(0,0,0,1), 0, 2);
+
+			Vec2 point = vec2(100,-100);
+
+			// if(input->mouseButtonPressed[1]) {
+				// point = getTextMouseCursor(te, tf, rectGetUL(r), rectGetDim(r).w, input->mousePosNegative);
+				// point = getTextMouseCursor(te, tf, rectGetUL(r), rectGetDim(r).w, input->mousePosNegative);
+			// }
+
+			int textIndex = getTextPosWrapping(te, tf, rectGetUL(r), rectGetDim(r).w, input->mousePosNegative);
+			dcText(fillString("Text Index: %i", textIndex), getFont(FONT_ARIAL, 24), vec2(300,-300), vec4(0,0,0,1), 0, 2);
+
+
+			point = getTextMousePos(te, tf, rectGetUL(r), textIndex, rectGetDim(r).w);
+			dcRect(rectCenDim(point - vec2(0, tf->height/2), vec2(4,24)), vec4(1,0,0,1));
+
 		}
 
 		//
