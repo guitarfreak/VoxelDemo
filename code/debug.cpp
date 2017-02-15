@@ -25,6 +25,12 @@ struct Console {
 	bool mouseSelectMode;
 	float cursorTime;
 
+	// char* bodySelectedText;
+	int bodySelectionIndex;
+	int bodySelectionMarker1, bodySelectionMarker2;
+	bool bodySelectionMode;
+	bool mousePressedInside;
+
 	/*
 		TODO's:
 		* Ctrl backspace, Ctrl Delete.
@@ -38,7 +44,7 @@ struct Console {
 		* Scrollbar.
 		* Line wrap.
 
-		- Select inside console output.
+		* Select inside console output.
 		  - Clean this up once it's solid.
 		- Command history.
 		- Command hint on tab.
@@ -47,12 +53,13 @@ struct Console {
 	void init(float windowHeight) {
 		float smallPos = -windowHeight * CONSOLE_SMALL_PERCENT;
 		pos = 0;
-		// mode = 1;
-		mode = 0;
+		mode = 1;
+		// mode = 0;
 		targetPos = smallPos;
 		cursorIndex = 0;
 		markerIndex = 0;
 		scrollPercent = 1;
+		bodySelectionIndex = -1;
 
 
 		pushToMainBuffer("This is a test String!");
@@ -268,6 +275,9 @@ struct Console {
 			if(mainBufferSize > 0) {
 				dcEnable(STATE_SCISSOR);
 
+				Rect scrollRect = consoleBody;
+				scrollRect.min.x = scrollRect.max.x - scrollBarWidth;
+
 				Rect consoleTextRect = consoleBody;
 				consoleTextRect.max.x -= consolePadding.x;
 				if(lastDiff >= 0) consoleTextRect.max.x -= scrollBarWidth;
@@ -279,9 +289,29 @@ struct Console {
 
 				Vec2 textPos = vec2(consolePadding.x + preSize, pos + consoleTotalHeight + scrollOffset - consolePadding.y);
 				float textStart = textPos.y;
+				// bool mousePressed = pointInRect(input->mousePosNegative, consoleTextRect) ? true : false;
 				float textStartX = textPos.x;
+				float wrappingWidth = rectGetDim(consoleTextRect).w - textStartX;
 
-				Vec2 mp = input->mousePosNegative;
+				bool mousePressed = input->mouseButtonPressed[0];
+				bool mouseInsideConsole = pointInRect(input->mousePosNegative, consoleTextRect);
+				bool mouseInsideScrollbar = pointInRect(input->mousePosNegative, scrollRect);
+				if(mousePressed) {
+					if(mouseInsideConsole) bodySelectionMode = true;
+					else if(mouseInsideScrollbar) bodySelectionMode = false;
+					else {
+						bodySelectionMode = false;
+						bodySelectionIndex = -1;
+					}
+				}
+
+				if(input->mouseButtonReleased[0]) {
+					bodySelectionMode = false;
+
+					if(bodySelectionMarker1 == bodySelectionMarker2) {
+						bodySelectionIndex = -1;
+					}
+				}
 
 				for(int i = 0; i < mainBufferSize; i++) {
 					if(i%2 == 0) {
@@ -290,14 +320,48 @@ struct Console {
 						if(strIsEmpty(mainBuffer[i])) continue;
 					}
 
-					Vec4 color = i%2 == 0 ? bodyFontColor : bodyFontResultColor;
-					float wrappingWidth = rectGetDim(consoleTextRect).w - textStartX;
-					dcText(mainBuffer[i], bodyFont, textPos, color, 0, 2, 0, vec4(0,0,0,0), wrappingWidth);
+					// Cull texts that are above or below the console body.
+					int textHeight = getTextHeightWithWrapping(mainBuffer[i], bodyFont, textPos, wrappingWidth);
+					bool textOutside = textPos.y - textHeight > consoleTextRect.max.y || textPos.y < consoleTextRect.min.y;
 
-					textPos.y -= getTextHeightWidthWrapping(mainBuffer[i], bodyFont, textPos, wrappingWidth);
+					if(!textOutside) {
+						if(mousePressed && mouseInsideConsole) {
+							if(valueBetween(input->mousePosNegative.y, textPos.y - textHeight, textPos.y) && 
+							   (input->mousePosNegative.x < consoleTextRect.max.x)) {
+								bodySelectionIndex = i;
+								bodySelectionMarker1 = getTextPosWrapping(mainBuffer[bodySelectionIndex], bodyFont, textPos, input->mousePosNegative, wrappingWidth);
+								bodySelectionMarker2 = bodySelectionMarker1;
+								mousePressed = false;
+							} 
+						}
+
+						if(i == bodySelectionIndex) {
+							if(bodySelectionMode) {
+								bodySelectionMarker2 = getTextPosWrapping(mainBuffer[bodySelectionIndex], bodyFont, textPos, input->mousePosNegative, wrappingWidth);
+							}
+
+							drawTextSelection(mainBuffer[i], bodyFont, textPos, bodySelectionMarker1, bodySelectionMarker2, selectionColor, wrappingWidth);
+						}
+
+						Vec4 color = i%2 == 0 ? bodyFontColor : bodyFontResultColor;
+						dcText(mainBuffer[i], bodyFont, textPos, color, 0, 2, 0, vec4(0,0,0,0), wrappingWidth);
+					}
+
+					textPos.y -= textHeight;
 				}
 
 				lastDiff = textStart - textPos.y - rectGetDim(consoleTextRect).h + consolePadding.y*2;
+
+				if(cursorIndex != markerIndex) {
+					bodySelectionIndex = -1;
+				}
+
+				if(bodySelectionIndex != 0) {
+					if(input->keysDown[KEYCODE_CTRL] && input->keysPressed[KEYCODE_C]) {
+						char* selection = textSelectionToString(mainBuffer[bodySelectionIndex], bodySelectionMarker1, bodySelectionMarker2);
+						setClipboard(selection);
+					}
+				}
 
 				dcDisable(STATE_SCISSOR);
 			}
@@ -317,33 +381,8 @@ struct Console {
 			}
 
 			if(mouseSelectMode && (strLen(inputBuffer) >= 1)) {
-				int inputSize = strLen(inputBuffer);
-				int mouseIndex;
-
-				float left = consolePadding.x + getCharWidth(inputBuffer[0], inputFont) * 0.5;
-				if(input->mousePos.x < left) {
-					mouseIndex = 0;
-				} else {
-					float p = consolePadding.x;
-					bool found = false;
-					for(int i = 0; i < inputSize - 1; i++) {
-						float p1 = p;
-						float p2 = p1 + getCharWidth(inputBuffer[i], inputFont);
-						float p3 = p2 + getCharWidth(inputBuffer[i+1], inputFont);
-						p = p2;
-
-						float x1 = p1 + (p2-p1) * 0.5f;
-						float x2 = p2 + (p3-p2) * 0.5f;
-
-						if(valueBetween(input->mousePos.x, x1, x2)) {
-							mouseIndex = i+1;
-							found = true;
-							break;
-						}
-					}
-
-					if(!found) mouseIndex = inputSize;
-				}
+				float inputMid = pos + inputHeight/2;
+				int mouseIndex = getTextPosWrapping(inputBuffer, inputFont, vec2(consolePadding.x, inputMid + inputFont->height/2), input->mousePosNegative);
 
 				if(input->mouseButtonPressed[0]) {
 					markerIndex = mouseIndex;
@@ -453,11 +492,10 @@ struct Console {
 				}
 
 				if(ctrl && c) {
-					float selectionWidth = abs(cursorIndex - markerIndex);
-					char* selection = getTStringDebug(selectionWidth);
-					strCpy(selection, inputBuffer + (int)min(cursorIndex, markerIndex), selectionWidth);
-
-					setClipboard(selection);
+					if(cursorIndex != markerIndex) {
+						char* selection = textSelectionToString(inputBuffer, cursorIndex, markerIndex);
+						setClipboard(selection);
+					}
 				}
 
 				if(backspace || del || (input->inputCharacterCount > 0) || (ctrl && v)) {
@@ -524,31 +562,29 @@ struct Console {
 				}
 			}
 
+			// 
 			// Drawing.
-
+			//
+			
 			float inputMid = pos + inputHeight/2;
 
-			float cursorX = getTextPos(inputBuffer, cursorIndex, inputFont) + consolePadding.x;
-			Rect cursorRect = rectCenDim(cursorX, inputMid, cursorWidth, inputFontSize);
-			if(cursorIndex == strLen(inputBuffer)) {
-				float width = getTextDim("M", inputFont).w;
-				cursorRect = rectCenDim(cursorX + width/2, inputMid, width, inputFontSize);
-			}
+			// Selection.
 
-			float markerX = getTextPos(inputBuffer, markerIndex, inputFont) + consolePadding.x;
+			drawTextSelection(inputBuffer, inputFont, vec2(consolePadding.x, inputMid + inputFontSize/2), cursorIndex, markerIndex, selectionColor);
 
-			if(cursorIndex != markerIndex) {
-				float selectionWidth = abs(cursorX - markerX);
-				Vec2 selectionMid = vec2(min(cursorX, markerX) + selectionWidth/2, inputMid);
-				Rect selectionRect = rectCenDim(selectionMid, vec2(selectionWidth, inputFontSize));
-
-				dcRect(selectionRect, selectionColor);
-			}
+			// Text.
 
 			dcText(inputBuffer, inputFont, vec2(consolePadding.x, consoleInput.min.y + inputHeight/2 + inputFontSize * fontDrawHeightOffset), inputFontColor, 0, 1);
 
+			// Cursor.
+
 			cursorTime += dt*cursorSpeed;
 			Vec4 cmod = vec4(0,cos(cursorTime)*cursorColorMod - cursorColorMod,0,0);
+
+			Vec2 cursorPos = getTextMousePos(inputBuffer, inputFont, vec2(consolePadding.x, inputMid + inputFontSize/2), cursorIndex);
+			float cWidth = cursorIndex == strLen(inputBuffer) ? getTextDim("M", inputFont).w : cursorWidth;
+			Rect cursorRect = rectULDim(cursorPos, vec2(cWidth, inputFontSize));
+
 			dcRect(cursorRect, cursorColor + cmod);
 		}
 	}

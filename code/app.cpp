@@ -2885,33 +2885,54 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			con->update(ds->input, vec2(wSettings->currentRes), ad->dt);
 
+
+			#if 0
+
 			Rect r = rectULDim(vec2(100,-100), vec2(70,200));
 			// Rect r = rectULDim(vec2(100,-100), vec2(400,200));
 			dcRect(r, vec4(0,0,0,1));
-
-			// char* te = "ABCD \nE f ghiAAA A\n AA AA AA\n  AA   AA \nAA AA AAA\n   AA";
+ 
 			char* te = "ABCD EFG AA        AAA";
-			// char* te = "abAAA safwa";
+			// char* te = "ABCD \nE f ghiAAA A\n AA AA AA\n  AA   AA \nAA AA AAA\n   AA";
 			Font* tf = getFont(FONT_ARIAL, 24);
-			dcText(te, tf, rectGetUL(r), vec4(1,1,0,1), 0, 2, 0, vec4(0,0,0,0), rectGetDim(r).w);
 
-			// int textHeight = getTextHeightWidthWrapping(te, getFont(FONT_ARIAL, 24), rectGetUL(r), rectGetDim(r).w);
 
-			// dcText(fillString("Text Height: %i", textHeight), getFont(FONT_ARIAL, 24), vec2(300,-300), vec4(0,0,0,1), 0, 2);
+
+
+
+			static int textIndex1 = 0;
+			if(input->mouseButtonPressed[0]) {
+				textIndex1 = getTextPosWrapping(te, tf, rectGetUL(r), rectGetDim(r).w, input->mousePosNegative);
+			}
+
+			static int textIndex2 = 0;
+			if(input->mouseButtonReleased[0]) {
+				textIndex2 = getTextPosWrapping(te, tf, rectGetUL(r), rectGetDim(r).w, input->mousePosNegative);
+			}
+
+			// drawTextSelection(char* text, Font* font, Vec2 startPos, int index1, int index2, int wrapWidth) {
+
+			drawTextSelection(te, tf, rectGetUL(r), textIndex1, textIndex2, vec4(0.5f,0.5f,0.5f,1), rectGetDim(r).w);
+
 
 			Vec2 point = vec2(100,-100);
-
-			// if(input->mouseButtonPressed[1]) {
-				// point = getTextMouseCursor(te, tf, rectGetUL(r), rectGetDim(r).w, input->mousePosNegative);
-				// point = getTextMouseCursor(te, tf, rectGetUL(r), rectGetDim(r).w, input->mousePosNegative);
-			// }
-
-			int textIndex = getTextPosWrapping(te, tf, rectGetUL(r), rectGetDim(r).w, input->mousePosNegative);
-			dcText(fillString("Text Index: %i", textIndex), getFont(FONT_ARIAL, 24), vec2(300,-300), vec4(0,0,0,1), 0, 2);
-
-
-			point = getTextMousePos(te, tf, rectGetUL(r), textIndex, rectGetDim(r).w);
+			point = getTextMousePos(te, tf, rectGetUL(r), textIndex1, rectGetDim(r).w);
 			dcRect(rectCenDim(point - vec2(0, tf->height/2), vec2(4,24)), vec4(1,0,0,1));
+
+			point = getTextMousePos(te, tf, rectGetUL(r), textIndex2, rectGetDim(r).w);
+			dcRect(rectCenDim(point - vec2(0, tf->height/2), vec2(4,24)), vec4(0,1,0,1));
+
+			if(input->keysPressed[KEYCODE_C]) {
+// void textSelectionToString(char* text, Font* font, int index1, int index2) {
+				char* str = textSelectionToString(te, tf, textIndex1, textIndex2);
+
+				setClipboard(str);
+			}
+
+
+			dcText(te, tf, rectGetUL(r), vec4(1,1,0,1), 0, 2, 0, vec4(0,0,0,0), rectGetDim(r).w);
+
+			#endif
 
 		}
 

@@ -21,7 +21,7 @@
 //#define M_BOLTZ		1.3806503e-23						///< boltzmann constant
 #define M_BOLTZ		1.44269504							///< boltzmann constant
 
-#define swap(type, a, b) 	\
+#define swapGeneric(type, a, b) 	\
 		type swap##type = a;		\
 		a = b;							\
 		b = swap##type;
@@ -45,6 +45,18 @@ float modFloat(float val, float d) {
 	return result;
 }
 
+inline void swap(int* a, int* b) {
+	int temp = *a;
+	*a = *b;
+	*b = temp;
+}
+
+inline void swap(float* a, float* b) {
+	float temp = *a;
+	*a = *b;
+	*b = temp;
+}
+
 inline float min(float a, float b) {
 	return a <= b ? a : b;
 }
@@ -59,6 +71,14 @@ inline float max(float a, float b) {
 
 inline float max(float a, float b, float c) {
 	return max(max(a, b), max(b, c));
+}
+
+inline int minInt(int a, int b) {
+	return a <= b ? a : b;
+}
+
+inline int maxInt(int a, int b) {
+	return a >= b ? a : b;
 }
 
 inline int maxReturnIndex(float a, float b, float c) {
@@ -2693,16 +2713,17 @@ Vec4 colorSRGB(Vec4 color) {
 void bubbleSort(int* list, int size) {
 
 	for(int off = 0; off < size-2; off++) {
-		bool swap = false;
+		bool sw = false;
 
 		for(int i = 0; i < size-1 - off; i++) {
 			if(list[i+1] < list[i]) {
-				swap(int, list[i], list[i+1]);
-				swap = true;
+				// swap(list + i, list + (i+1) );
+				swap(&off, &size);
+				sw = true;
 			}
 		}
 
-		if(!swap) break;
+		if(!sw) break;
 	}
 }
 

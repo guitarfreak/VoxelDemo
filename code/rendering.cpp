@@ -230,7 +230,7 @@ void dcRect(Rect r, Vec4 color, DrawCommandList* drawList = 0) {
 }
 
 // void dcText(char* text, Font* font, Vec2 pos, Vec4 color, int vAlign = 0, int hAlign = 0, int shadow = 0, Vec4 shadowColor = vec4(0,0,0,1), DrawCommandList* drawList = 0) {
-void dcText(char* text, Font* font, Vec2 pos, Vec4 color, int vAlign = 0, int hAlign = 0, int shadow = 0, Vec4 shadowColor = vec4(0,0,0,1), int wrapWidth = -1, DrawCommandList* drawList = 0) {
+void dcText(char* text, Font* font, Vec2 pos, Vec4 color, int vAlign = 0, int hAlign = 0, int shadow = 0, Vec4 shadowColor = vec4(0,0,0,1), int wrapWidth = 0, DrawCommandList* drawList = 0) {
 	PUSH_DRAW_COMMAND(Text, Text);
 
 	command->text = text;
@@ -1315,7 +1315,7 @@ enum TextStatus {
 };
 
 // Returns 1 on new line and 0 on end of text.
-int textSim(char* text, int length, Font* font, Vec2* pos, int* index, int* wrapIndex, Rect* charRect, Rect* uvRect, Vec2 startPos = vec2(0,0), int wrapWidth = -1) {
+int textSim(char* text, Font* font, Vec2* pos, int* index, int* wrapIndex, Rect* charRect, Rect* uvRect, Vec2 startPos = vec2(0,0), int wrapWidth = 0) {
 
 	int i = *index;
 	char t = text[i];
@@ -1324,7 +1324,7 @@ int textSim(char* text, int length, Font* font, Vec2* pos, int* index, int* wrap
 
 	bool wrapped = false;
 
-	if(wrapWidth != -1 && i == (*wrapIndex)) {
+	if(wrapWidth != 0 && i == (*wrapIndex)) {
 		char c = text[i];
 		float wordWidth = 0;
 		if(c == '\n') wordWidth = getCharWidth(c, font);
@@ -1368,7 +1368,7 @@ int textSim(char* text, int length, Font* font, Vec2* pos, int* index, int* wrap
 	else return TEXTSTATUS_DEFAULT;
 }
 
-float getTextHeightWidthWrapping(char* text, Font* font, Vec2 pos, int wrapWidth) {
+float getTextHeightWithWrapping(char* text, Font* font, Vec2 pos, int wrapWidth) {
 	Vec2 startPos = pos;
 
 	int length = strLen(text);
@@ -1377,45 +1377,11 @@ float getTextHeightWidthWrapping(char* text, Font* font, Vec2 pos, int wrapWidth
 	while(true) {
 		Rect tr = rect(0,0,0,0);
 		Rect uv = rect(0,0,0,0);
-		int status = textSim(text, length, font, &pos, &i, &wrapIndex, &tr, &uv, startPos, wrapWidth);
+		int status = textSim(text, font, &pos, &i, &wrapIndex, &tr, &uv, startPos, wrapWidth);
 		if(status == TEXTSTATUS_END) break;
 	}
 
 	return startPos.y - (pos.y - font->height);
-}
-
-Vec2 getTextMouseCursor(char* text, Font* font, Vec2 pos, int wrapWidth, Vec2 mousePos) {
-	Vec2 startPos = pos;
-
-	if(mousePos.y > pos.y) return startPos;
-
-	int length = strLen(text);
-	int wrapIndex = 0;
-	int i = 0;
-	Vec2 lastPos = startPos;
-	bool foundLine = false;
-	while(true) {
-		Rect tr = rect(0,0,0,0);
-		Rect uv = rect(0,0,0,0);
-		lastPos = pos;
-		int status = textSim(text, length, font, &pos, &i, &wrapIndex, &tr, &uv, startPos, wrapWidth);
-		
-		if(status == TEXTSTATUS_END) break;
-
-		if(status == TEXTSTATUS_NEWLINE) {
-			if(foundLine) return lastPos;
-			continue;
-		}
-
-	    foundLine = valueBetween(mousePos.y, pos.y - font->height, pos.y);
-	    if(foundLine) {
-	    	float charWidth = getCharWidth(text[i-1], font);
-	    	float charMid = pos.x - charWidth*0.5f;
-			if(mousePos.x < charMid) return vec2(pos.x - charWidth, pos.y);
-		}
-	}
-
-	return pos;
 }
 
 float getTextPos(char* text, int index, Font* font) {
@@ -1439,7 +1405,7 @@ float getTextPos(char* text, int index, Font* font) {
 	return result;
 }
 
-float getTextPosWrapping(char* text, Font* font, Vec2 pos, int wrapWidth, Vec2 mousePos) {
+int getTextPosWrapping(char* text, Font* font, Vec2 pos, Vec2 mousePos, int wrapWidth = 0) {
 	Vec2 startPos = pos;
 
 	if(mousePos.y > pos.y) return 0;
@@ -1451,7 +1417,7 @@ float getTextPosWrapping(char* text, Font* font, Vec2 pos, int wrapWidth, Vec2 m
 	while(true) {
 		Rect tr = rect(0,0,0,0);
 		Rect uv = rect(0,0,0,0);
-		int status = textSim(text, length, font, &pos, &i, &wrapIndex, &tr, &uv, startPos, wrapWidth);
+		int status = textSim(text, font, &pos, &i, &wrapIndex, &tr, &uv, startPos, wrapWidth);
 		
 		if(status == TEXTSTATUS_END) break;
 
@@ -1476,7 +1442,7 @@ float getTextPosWrapping(char* text, Font* font, Vec2 pos, int wrapWidth, Vec2 m
 	return i;
 }
 
-Vec2 getTextMousePos(char* text, Font* font, Vec2 pos, int index, int wrapWidth) {
+Vec2 getTextMousePos(char* text, Font* font, Vec2 pos, int index, int wrapWidth = 0) {
 	Vec2 startPos = pos;
 
 	if(index == 0) return startPos;
@@ -1490,30 +1456,57 @@ Vec2 getTextMousePos(char* text, Font* font, Vec2 pos, int index, int wrapWidth)
 		Rect tr = rect(0,0,0,0);
 		Rect uv = rect(0,0,0,0);
 		lastPos = pos;
-		int status = textSim(text, length, font, &pos, &i, &wrapIndex, &tr, &uv, startPos, wrapWidth);
+		int status = textSim(text, font, &pos, &i, &wrapIndex, &tr, &uv, startPos, wrapWidth);
 		
 		if(status == TEXTSTATUS_END) break;
 
-		if(i == index) {
-			return pos;
-		}
-
-		// if(status == 1) {
-		// 	// if(foundLine) return lastPos;
-		// 	if(foundLine) return lastPos;
-		// 	continue;
-		// }
-
-	 //    foundLine = valueBetween(mousePos.y, pos.y - font->height, pos.y);
-	 //    if(foundLine) {
-	 //    	float charWidth = getCharWidth(text[i-1], font);
-	 //    	float charMid = pos.x - charWidth*0.5f;
-		// 	// if(mousePos.x < charMid) return vec2(pos.x - charWidth, pos.y);
-		// 	if(mousePos.x < charMid) return i-1;
-		// }
+		if(i == index) return pos;
 	}
 
 	return pos;
+}
+
+char* textSelectionToString(char* text, int index1, int index2) {
+	assert(index1 >= 0 && index2 >= 0);
+
+	int range = abs(index1 - index2);
+	char* str = getTStringDebug(range + 1); // We assume text selection will only be used for debug things.
+	strCpy(str, text + minInt(index1, index2), range);
+	return str;
+}
+
+void drawTextSelection(char* text, Font* font, Vec2 startPos, int index1, int index2, Vec4 color, int wrapWidth = 0) {
+	if(index1 == index2) return;
+
+	if(index1 > index2) {
+		swap(&index1, &index2);
+	}
+
+	Vec2 pos = startPos;
+	int i = 0;
+	int wrapIndex = 0;
+
+	int diff = abs(index1 - index2);
+	if(index1 == 0 && diff > 0) {
+		Rect r = rectULDim(pos, vec2(getCharWidth(text[i], font) - 1, font->height));
+		dcRect(r, rect(0,0,1,1), color);
+	}
+
+	while(true) {
+
+		Rect tr, uv;
+		int status = textSim(text, font, &pos, &i, &wrapIndex, &tr, &uv, startPos, wrapWidth);
+		if(status == TEXTSTATUS_END) break;
+
+		// if(status == TEXTSTATUS_WRAPPED) {
+		// 	continue;
+		// }
+
+		if(i >= index1 && i < index2) {
+			Rect r = rectULDim(pos, vec2(getCharWidth(text[i], font), font->height));
+			dcRect(r, rect(0,0,1,1), color);
+		}
+	}
 }
 
 void drawText(char* text, Font* font, Vec2 pos, Vec4 color, int vAlign = 0, int hAlign = 0, int shadow = 0, Vec4 shadowColor = vec4(0,0,0,1), int wrapWidth = -1) {
@@ -1541,7 +1534,7 @@ void drawText(char* text, Font* font, Vec2 pos, Vec4 color, int vAlign = 0, int 
 	while(true) {
 		Rect tr = rect(0,0,0,0);
 		Rect uv = rect(0,0,0,0);
-		int status = textSim(text, length, font, &pos, &i, &wrapIndex, &tr, &uv, startPos, wrapWidth);
+		int status = textSim(text, font, &pos, &i, &wrapIndex, &tr, &uv, startPos, wrapWidth);
 		if(status == TEXTSTATUS_END) break;
 		if(status == TEXTSTATUS_NEWLINE || status == TEXTSTATUS_WRAPPED) continue;
 
