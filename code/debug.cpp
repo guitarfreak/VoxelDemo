@@ -17,7 +17,7 @@ struct Console {
 	char* mainBuffer[256];
 	int mainBufferSize;
 
-	char inputBuffer[256];
+	char inputBuffer[1024];
 	// int inputBufferSize;
 
 	int cursorIndex;

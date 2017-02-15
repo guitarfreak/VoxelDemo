@@ -1498,10 +1498,6 @@ void drawTextSelection(char* text, Font* font, Vec2 startPos, int index1, int in
 		int status = textSim(text, font, &pos, &i, &wrapIndex, &tr, &uv, startPos, wrapWidth);
 		if(status == TEXTSTATUS_END) break;
 
-		// if(status == TEXTSTATUS_WRAPPED) {
-		// 	continue;
-		// }
-
 		if(i >= index1 && i < index2) {
 			Rect r = rectULDim(pos, vec2(getCharWidth(text[i], font), font->height));
 			dcRect(r, rect(0,0,1,1), color);
