@@ -2934,6 +2934,44 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			#endif
 
+
+
+
+			#if 1
+
+			Rect r = rectULDim(vec2(100,-100), vec2(70,200));
+			// Rect r = rectULDim(vec2(100,-100), vec2(400,200));
+			dcRect(r, vec4(0,0,0,1));
+ 
+			char* te = "Abc \nDeF Ztihog";
+			// char* te = "ABCD \nE f ghiAAA A\n AA AA AA\n  AA   AA \nAA AA AAA\n   AA";
+			Font* tf = getFont(FONT_ARIAL, 24);
+
+			Vec2i align = vec2i(-1,-1);
+
+			static int textIndex1 = 0;
+			if(input->mouseButtonPressed[0]) {
+				textIndex1 = testgetTextPosWrapping(te, tf, rectGetUL(r), input->mousePosNegative, align, rectGetDim(r).w);
+			}
+
+			static int textIndex2 = 0;
+			if(input->mouseButtonDown[0]) {
+				textIndex2 = testgetTextPosWrapping(te, tf, rectGetUL(r), input->mousePosNegative, align, rectGetDim(r).w);
+			}
+
+			testdrawTextSelection(te, tf, rectGetUL(r), textIndex1, textIndex2, vec4(0.5f,0.5f,0.5f,1), align, rectGetDim(r).w);
+
+			Vec2 point = vec2(100,-100);
+			point = testgetTextMousePos(te, tf, rectGetUL(r), textIndex1, align, rectGetDim(r).w);
+			dcRect(rectCenDim(point - vec2(0, tf->height/2), vec2(4,24)), vec4(1,0,0,1));
+
+			point = testgetTextMousePos(te, tf, rectGetUL(r), textIndex2, align, rectGetDim(r).w);
+			dcRect(rectCenDim(point - vec2(0, tf->height/2), vec2(4,24)), vec4(0,1,0,1));
+
+			dcText(te, tf, rectGetUL(r), vec4(1,1,0,1), align.x, align.y, 0, vec4(0,0,0,0), rectGetDim(r).w);
+
+			#endif
+
 		}
 
 		//

@@ -53,8 +53,8 @@ struct Console {
 	void init(float windowHeight) {
 		float smallPos = -windowHeight * CONSOLE_SMALL_PERCENT;
 		pos = 0;
-		mode = 1;
-		// mode = 0;
+		// mode = 1;
+		mode = 0;
 		targetPos = smallPos;
 		cursorIndex = 0;
 		markerIndex = 0;
