@@ -1310,10 +1310,6 @@ float getTextHeight(char* text, Font* font) {
 
 
 
-float testgetCharWidth(char c, Font* font) {
-	float width = stbtt_GetCharDim(font->cData, font->height, font->glyphStart, c);
-	return width;
-}
 
 enum TextStatus {
 	TEXTSTATUS_END = 0, 
@@ -1347,12 +1343,18 @@ struct TextInfo {
 	Vec2 posAdvance;
 	Rect r;
 	Rect uv;
+
+	bool lineBreak;
+	Vec2 breakPos;
 };
 
 struct TextSimInfo {
 	Vec2 pos;
 	int index;
 	int wrapIndex;
+
+	bool lineBreak;
+	Vec2 breakPos;
 };
 
 TextSimInfo initTextSimInfo(Vec2 startPos) {
@@ -1360,11 +1362,24 @@ TextSimInfo initTextSimInfo(Vec2 startPos) {
 	tsi.pos = startPos;
 	tsi.index = 0;
 	tsi.wrapIndex = 0;
+	tsi.lineBreak = false;
+	tsi.breakPos = vec2(0,0);
 	return tsi;
 }
 
 int testtextSim(char* text, Font* font, TextSimInfo* tsi, TextInfo* ti, Vec2 startPos = vec2(0,0), int wrapWidth = 0) {
-	if(text[tsi->index] == '\0') return 0;
+	if(text[tsi->index] == '\0') {
+		ti->index = tsi->index;
+		return 0;
+	}
+
+	ti->lineBreak = false;
+
+	if(tsi->lineBreak) {
+		ti->lineBreak = true;
+		ti->breakPos = tsi->breakPos;
+		tsi->lineBreak = false;
+	}
 
 	Vec2 oldPos = tsi->pos;
 
@@ -1376,11 +1391,11 @@ int testtextSim(char* text, Font* font, TextSimInfo* tsi, TextInfo* ti, Vec2 sta
 	if(wrapWidth != 0 && i == tsi->wrapIndex) {
 		char c = text[i];
 		float wordWidth = 0;
-		if(c == '\n') wordWidth = testgetCharWidth(c, font);
+		if(c == '\n') wordWidth = getCharAdvance(c, font);
 
 		int it = i;
 		while(c != '\n' && c != '\0' && c != ' ') {
-			wordWidth += testgetCharWidth(c, font);
+			wordWidth += getCharAdvance(c, font);
 			it++;
 			c = text[it];
 		}
@@ -1391,17 +1406,19 @@ int testtextSim(char* text, Font* font, TextSimInfo* tsi, TextInfo* ti, Vec2 sta
 
 		if(it != i) tsi->wrapIndex = it;
 		else tsi->wrapIndex++;
-
-		if(wrapped) {
-			tsi->pos.x = startPos.x;
-			tsi->pos.y -= font->height;
-			return testtextSim(text, font, tsi, ti, startPos, wrapWidth);
-		}
 	}
 
-	if(t == '\n') {
+	if(t == '\n' || wrapped) {
+		tsi->lineBreak = true;
+		if(t == '\n') tsi->breakPos = tsi->pos + vec2(getCharAdvance(t, font),0);
+		if(wrapped) tsi->breakPos = tsi->pos;
+
 		tsi->pos.x = startPos.x;
 		tsi->pos.y -= font->height;
+
+		if(wrapped) {
+			return testtextSim(text, font, tsi, ti, startPos, wrapWidth);
+		}
 	} else {
 		getTextQuad(t, font, tsi->pos, &ti->r, &ti->uv);
 		tsi->pos.x += getCharAdvance(t, font);
@@ -1498,21 +1515,64 @@ char* testtextSelectionToString(char* text, int index1, int index2) {
 	return str;
 }
 
+// void testdrawTextSelection(char* text, Font* font, Vec2 startPos, int index1, int index2, Vec4 color, Vec2i align = vec2i(-1,1), int wrapWidth = 0) {
+// 	if(index1 == index2) return;
+// 	if(index1 > index2) swap(&index1, &index2);
+
+// 	startPos = testgetTextStartPos(text, font, startPos, align, wrapWidth);
+
+// 	TextSimInfo tsi = initTextSimInfo(startPos);
+// 	while(true) {
+// 		TextInfo ti;
+// 		if(!testtextSim(text, font, &tsi, &ti, startPos, wrapWidth)) break;
+
+// 		if(ti.index >= index1 && ti.index < index2) {
+// 			Rect r = rectULDim(ti.pos, vec2(getCharAdvance(text[ti.index], font), font->height));
+// 			r = rectExpand(r, vec2(-1,-1));
+// 			dcRect(r, rect(0,0,1,1), color);
+// 		}
+// 	}
+// }
+
 void testdrawTextSelection(char* text, Font* font, Vec2 startPos, int index1, int index2, Vec4 color, Vec2i align = vec2i(-1,1), int wrapWidth = 0) {
 	if(index1 == index2) return;
 	if(index1 > index2) swap(&index1, &index2);
 
 	startPos = testgetTextStartPos(text, font, startPos, align, wrapWidth);
 
+	Vec2 lineStart;
+	bool drawSelection = false;
+
 	TextSimInfo tsi = initTextSimInfo(startPos);
 	while(true) {
 		TextInfo ti;
-		if(!testtextSim(text, font, &tsi, &ti, startPos, wrapWidth)) break;
+		int result = testtextSim(text, font, &tsi, &ti, startPos, wrapWidth);
 
-		if(ti.index >= index1 && ti.index < index2) {
-			Rect r = rectULDim(ti.pos, vec2(testgetCharWidth(text[ti.index], font), font->height));
-			dcRect(r, rect(0,0,1,1), color);
+		bool endReached = ti.index == index2;
+
+		if(drawSelection) {
+			// Check for line break.
+			if(ti.lineBreak || endReached) {
+
+				Vec2 lineEnd = ti.lineBreak ? ti.breakPos : ti.pos;
+				if(!result) lineEnd = tsi.pos;
+
+				Rect r = rect(lineStart - vec2(0,font->height), lineEnd);
+				r = rectExpand(r, vec2(-2,-2));
+				dcRect(r, rect(0,0,1,1), color);
+
+				lineStart = ti.pos;
+
+				if(endReached) break;
+			}
 		}
+
+		if(!drawSelection && (ti.index >= index1)) {
+			drawSelection = true;
+			lineStart = ti.pos;
+		}
+
+		if(!result) break;
 	}
 }
 

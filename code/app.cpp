@@ -2145,7 +2145,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	emitter.pos = ep + vec3(sin(dt),0,0);
 	// drawCube(emitter.pos, vec3(0.5f), vec4(0,0,0,0.2f), 0, vec3(0,0,0));
 
-	// if(0)
+	if(0)
 	{
 		ParticleEmitter* e = &emitter;
 		float dt = ad->dt;
@@ -2187,7 +2187,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 	}
 
-	particleEmitterUpdate(&emitter, ad->dt);
+		// particleEmitterUpdate(&emitter, ad->dt);
 
 	// glDisable(GL_CULL_FACE);
 
