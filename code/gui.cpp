@@ -269,7 +269,7 @@ struct Gui {
 		if(align == 0) textPos.x -= rectGetDim(region).w*0.5f;
 		else if(align == 2) textPos.x += rectGetDim(region).w*0.5f;
 
-		dcText(text, font, textPos, colors.textColor, align, 1, settings.textShadow, colors.shadowColor);		
+		dcText(text, font, textPos, colors.textColor, vec2i(align-1, 0), 0, settings.textShadow, colors.shadowColor);		
 
 		scissorPop();
 	}
@@ -281,7 +281,7 @@ struct Gui {
 		if(align == 0) textPos.x -= rectGetDim(region).w*0.5f;
 		else if(align == 2) textPos.x += rectGetDim(region).w*0.5f;
 
-		dcText(text, font, textPos, colors.textColor, align, 1, settings.textShadow, colors.shadowColor);		
+		dcText(text, font, textPos, colors.textColor, vec2i(align-1, 0), 0, settings.textShadow, colors.shadowColor);		
 
 		scissorPop();
 	}
@@ -554,7 +554,9 @@ struct Gui {
 	bool beginSection(char* text, bool* b) {
 		heightPush(settings.sectionOffset);
 		defaultWidth();
+		settings.textShadow = 2;
 		div(vec2(getDefaultHeight(), 0)); switcher("", b); label(text, 1, colors.sectionColor);
+		settings.textShadow = 0;
 		heightPop();
 
 		float indent = panelWidth*settings.sectionIndent;
@@ -932,22 +934,15 @@ struct Gui {
 
 			Rect regCen = rectGetCenDim(region);
 			Vec2 textStart = regCen.cen - vec2(regCen.dim.w*0.5f,0);
-			Vec2 cursorPos = textStart + vec2(getTextPos(textBoxText, textBoxIndex, font), 0);
-			if(textBoxIndex == 0) cursorPos += vec2(1,0); // avoid scissoring cursor on far left
 
-			Rect cursorRect = rectCenDim(cursorPos, vec2(settings.cursorWidth,font->height));
+			Rect cursorRect = getTextCursor(textBoxText, font, textStart, textBoxIndex, settings.cursorWidth, vec2i(-1,0));
+			if(textBoxIndex == 0) cursorRect = rectAddOffset(cursorRect, vec2(1,0));
 
 			if(selectionAnchor != -1) {
 				int start = min(textBoxIndex, selectionAnchor);
 				int end = max(textBoxIndex, selectionAnchor);
 
-				Vec2 selectionStartPos = textStart + vec2(getTextPos(textBoxText, start, font), 0);
-				Vec2 selectionEndPos = textStart + vec2(getTextPos(textBoxText, end, font), 0);
-				float selectionWidth = selectionEndPos.x - selectionStartPos.x;
-
-				Vec2 center = selectionStartPos+selectionWidth*0.5;
-				Rect selectionRect = rectCenDim(selectionStartPos + vec2(selectionWidth*0.5f,0), vec2(selectionWidth,font->height));
-				drawRect(selectionRect, colors.selectionColor, true);
+				drawTextSelection(textBoxText, font, textStart, start, end, colors.selectionColor, vec2i(-1,0));
 			} 
 
 			drawText(textBoxText, 0);

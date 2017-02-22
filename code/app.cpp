@@ -2445,7 +2445,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 						input->keysPressed[KEYCODE_LEFT], input->keysPressed[KEYCODE_RIGHT], input->keysPressed[KEYCODE_UP], input->keysPressed[KEYCODE_DOWN], 
 						input->keysDown[KEYCODE_SHIFT], input->keysDown[KEYCODE_CTRL], input->inputCharacters, input->inputCharacterCount};
 
-		if(false)
+		// if(false)
 		{
 			int fontSize = 18;
 			int pi = 0;
@@ -2453,30 +2453,27 @@ extern "C" APPMAINFUNCTION(appMain) {
 			Vec4 c = vec4(1.0f,0.4f,0.0f,1);
 			Vec4 c2 = vec4(0,0,0,1);
 			Font* font = getFont(FONT_CONSOLAS, fontSize);
-			// Font* font = getFont(FONT_CALIBR, fontSize);
-			int shadow = 1;
-			// float shadow = 0;
-			float xo = 6;
-			int ali = 2;
+			int sh = 1;
+			Vec2 offset = vec2(6,6);
+			Vec2i ali = vec2i(1,1);
 
-			Vec2i tp = ad->wSettings.currentRes - vec2i(xo, 0);
+			Vec2 tp = vec2(ad->wSettings.currentRes.x, 0) - offset;
+
 			#define PVEC3(v) v.x, v.y, v.z
 			#define PVEC2(v) v.x, v.y
-			dcText(fillString("Pos  : (%f,%f,%f)", PVEC3(ad->activeCam.pos)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow);
-			dcText(fillString("Pos  : (%f,%f,%f)", PVEC3(ad->selectedBlock)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow);
-			dcText(fillString("Look : (%f,%f,%f)", PVEC3(ad->activeCam.look)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow);
-			dcText(fillString("Up   : (%f,%f,%f)", PVEC3(ad->activeCam.up)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow);
-			dcText(fillString("Right: (%f,%f,%f)", PVEC3(ad->activeCam.right)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow);
-			dcText(fillString("Rot  : (%f,%f)", 	PVEC2(player->rot)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow);
-			dcText(fillString("Vec  : (%f,%f,%f)", PVEC3(player->vel)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow);
-			dcText(fillString("Acc  : (%f,%f,%f)", PVEC3(player->acc)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow);
-			dcText(fillString("Draws: (%i)", 		drawCounter), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow);
-			dcText(fillString("Quads: (%i)", 		triangleCount), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow);
-
-			dcText(fillString("Threads: (%i, %i)",	threadQueue->completionCount, threadQueue->completionGoal), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow);
+			dcText(fillString("Pos  : (%f,%f,%f)", PVEC3(ad->activeCam.pos)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
+			dcText(fillString("Pos  : (%f,%f,%f)", PVEC3(ad->selectedBlock)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
+			dcText(fillString("Look : (%f,%f,%f)", PVEC3(ad->activeCam.look)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
+			dcText(fillString("Up   : (%f,%f,%f)", PVEC3(ad->activeCam.up)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
+			dcText(fillString("Right: (%f,%f,%f)", PVEC3(ad->activeCam.right)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
+			dcText(fillString("Rot  : (%f,%f)",    PVEC2(player->rot)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
+			dcText(fillString("Vec  : (%f,%f,%f)", PVEC3(player->vel)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
+			dcText(fillString("Acc  : (%f,%f,%f)", PVEC3(player->acc)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
+			dcText(fillString("Draws: (%i)", 	   drawCounter), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
+			dcText(fillString("Quads: (%i)", 	   triangleCount), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
 		}
 
-		{			
+		{
 			if(input->keysPressed[KEYCODE_F5]) ds->showHud = !ds->showHud;
 
 			if(ds->showHud) {
@@ -2937,7 +2934,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-			#if 1
+			#if 0
 
 			Rect r = rectULDim(vec2(100,-100), vec2(70,200));
 			// Rect r = rectULDim(vec2(100,-100), vec2(400,200));
@@ -2947,26 +2944,23 @@ extern "C" APPMAINFUNCTION(appMain) {
 			// char* te = "ABCD \nE f ghiAAA A\n AA AA AA\n  AA   AA \nAA AA AAA\n   AA";
 			Font* tf = getFont(FONT_ARIAL, 24);
 
-			Vec2i align = vec2i(-1,-1);
+			Vec2i align = vec2i(-1,1);
 
 			static int textIndex1 = 0;
 			if(input->mouseButtonPressed[0]) {
-				textIndex1 = testgetTextPosWrapping(te, tf, rectGetUL(r), input->mousePosNegative, align, rectGetDim(r).w);
+				textIndex1 = textMouseToIndex(te, tf, rectGetUL(r), input->mousePosNegative, align, rectGetDim(r).w);
 			}
 
 			static int textIndex2 = 0;
 			if(input->mouseButtonDown[0]) {
-				textIndex2 = testgetTextPosWrapping(te, tf, rectGetUL(r), input->mousePosNegative, align, rectGetDim(r).w);
+				textIndex2 = textMouseToIndex(te, tf, rectGetUL(r), input->mousePosNegative, align, rectGetDim(r).w);
 			}
 
 			testdrawTextSelection(te, tf, rectGetUL(r), textIndex1, textIndex2, vec4(0.5f,0.5f,0.5f,1), align, rectGetDim(r).w);
 
 			Vec2 point = vec2(100,-100);
-			point = testgetTextMousePos(te, tf, rectGetUL(r), textIndex1, align, rectGetDim(r).w);
-			dcRect(rectCenDim(point - vec2(0, tf->height/2), vec2(4,24)), vec4(1,0,0,1));
-
-			point = testgetTextMousePos(te, tf, rectGetUL(r), textIndex2, align, rectGetDim(r).w);
-			dcRect(rectCenDim(point - vec2(0, tf->height/2), vec2(4,24)), vec4(0,1,0,1));
+			drawTextCursor(te, tf, rectGetUL(r), textIndex1, 4, vec4(1,0,0,1), align, rectGetDim(r).w);
+			drawTextCursor(te, tf, rectGetUL(r), textIndex2, 4, vec4(0,1,0,1), align, rectGetDim(r).w);
 
 			dcText(te, tf, rectGetUL(r), vec4(1,1,0,1), align.x, align.y, 0, vec4(0,0,0,0), rectGetDim(r).w);
 

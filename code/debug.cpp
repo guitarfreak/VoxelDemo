@@ -289,7 +289,6 @@ struct Console {
 
 				Vec2 textPos = vec2(consolePadding.x + preSize, pos + consoleTotalHeight + scrollOffset - consolePadding.y);
 				float textStart = textPos.y;
-				// bool mousePressed = pointInRect(input->mousePosNegative, consoleTextRect) ? true : false;
 				float textStartX = textPos.x;
 				float wrappingWidth = rectGetDim(consoleTextRect).w - textStartX;
 
@@ -315,13 +314,13 @@ struct Console {
 
 				for(int i = 0; i < mainBufferSize; i++) {
 					if(i%2 == 0) {
-						dcText(pre, bodyFont, textPos - vec2(preSize,0), bodyFontColor, 0, 2);
+						dcText(pre, bodyFont, textPos - vec2(preSize,0), bodyFontColor, vec2i(-1,1));
 					} else {
 						if(strIsEmpty(mainBuffer[i])) continue;
 					}
 
 					// Cull texts that are above or below the console body.
-					int textHeight = getTextHeightWithWrapping(mainBuffer[i], bodyFont, textPos, wrappingWidth);
+					int textHeight = getTextDim(mainBuffer[i], bodyFont, textPos, wrappingWidth).h;
 					bool textOutside = textPos.y - textHeight > consoleTextRect.max.y || textPos.y < consoleTextRect.min.y;
 
 					if(!textOutside) {
@@ -329,7 +328,7 @@ struct Console {
 							if(valueBetween(input->mousePosNegative.y, textPos.y - textHeight, textPos.y) && 
 							   (input->mousePosNegative.x < consoleTextRect.max.x)) {
 								bodySelectionIndex = i;
-								bodySelectionMarker1 = getTextPosWrapping(mainBuffer[bodySelectionIndex], bodyFont, textPos, input->mousePosNegative, wrappingWidth);
+								bodySelectionMarker1 = textMouseToIndex(mainBuffer[bodySelectionIndex], bodyFont, textPos, input->mousePosNegative, vec2i(-1,1), wrappingWidth);
 								bodySelectionMarker2 = bodySelectionMarker1;
 								mousePressed = false;
 							} 
@@ -337,14 +336,14 @@ struct Console {
 
 						if(i == bodySelectionIndex) {
 							if(bodySelectionMode) {
-								bodySelectionMarker2 = getTextPosWrapping(mainBuffer[bodySelectionIndex], bodyFont, textPos, input->mousePosNegative, wrappingWidth);
+								bodySelectionMarker2 = textMouseToIndex(mainBuffer[bodySelectionIndex], bodyFont, textPos, input->mousePosNegative, vec2i(-1,1), wrappingWidth);
 							}
 
-							drawTextSelection(mainBuffer[i], bodyFont, textPos, bodySelectionMarker1, bodySelectionMarker2, selectionColor, wrappingWidth);
+							drawTextSelection(mainBuffer[i], bodyFont, textPos, bodySelectionMarker1, bodySelectionMarker2, selectionColor, vec2i(-1,1), wrappingWidth);
 						}
 
 						Vec4 color = i%2 == 0 ? bodyFontColor : bodyFontResultColor;
-						dcText(mainBuffer[i], bodyFont, textPos, color, 0, 2, 0, vec4(0,0,0,0), wrappingWidth);
+						dcText(mainBuffer[i], bodyFont, textPos, color, vec2i(-1,1), wrappingWidth);
 					}
 
 					textPos.y -= textHeight;
@@ -382,7 +381,7 @@ struct Console {
 
 			if(mouseSelectMode && (strLen(inputBuffer) >= 1)) {
 				float inputMid = pos + inputHeight/2;
-				int mouseIndex = getTextPosWrapping(inputBuffer, inputFont, vec2(consolePadding.x, inputMid + inputFont->height/2), input->mousePosNegative);
+				int mouseIndex = textMouseToIndex(inputBuffer, inputFont, vec2(consolePadding.x, inputMid + inputFont->height/2), input->mousePosNegative);
 
 				if(input->mouseButtonPressed[0]) {
 					markerIndex = mouseIndex;
@@ -570,21 +569,21 @@ struct Console {
 
 			// Selection.
 
-			drawTextSelection(inputBuffer, inputFont, vec2(consolePadding.x, inputMid + inputFontSize/2), cursorIndex, markerIndex, selectionColor);
+			drawTextSelection(inputBuffer, inputFont, vec2(consolePadding.x, inputMid), cursorIndex, markerIndex, selectionColor, vec2i(-1,0));
 
 			// Text.
 
-			dcText(inputBuffer, inputFont, vec2(consolePadding.x, consoleInput.min.y + inputHeight/2 + inputFontSize * fontDrawHeightOffset), inputFontColor, 0, 1);
+			dcText(inputBuffer, inputFont, vec2(consolePadding.x, inputMid), inputFontColor, vec2i(-1,0));
 
 			// Cursor.
 
 			cursorTime += dt*cursorSpeed;
 			Vec4 cmod = vec4(0,cos(cursorTime)*cursorColorMod - cursorColorMod,0,0);
 
-			Vec2 cursorPos = getTextMousePos(inputBuffer, inputFont, vec2(consolePadding.x, inputMid + inputFontSize/2), cursorIndex);
-			float cWidth = cursorIndex == strLen(inputBuffer) ? getTextDim("M", inputFont).w : cursorWidth;
-			Rect cursorRect = rectULDim(cursorPos, vec2(cWidth, inputFontSize));
-
+			bool cursorAtEnd = cursorIndex == strLen(inputBuffer);
+			float cWidth = cursorAtEnd ? getTextDim("M", inputFont).w : cursorWidth;
+			Rect cursorRect = getTextCursor(inputBuffer, inputFont, vec2(consolePadding.x, inputMid), cursorIndex, cWidth, vec2i(-1,0));
+			if(cursorAtEnd) cursorRect = rectAddOffset(cursorRect, vec2(rectGetDim(cursorRect).w/2, 0));
 			dcRect(cursorRect, cursorColor + cmod);
 		}
 	}
