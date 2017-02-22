@@ -1515,25 +1515,6 @@ char* testtextSelectionToString(char* text, int index1, int index2) {
 	return str;
 }
 
-// void testdrawTextSelection(char* text, Font* font, Vec2 startPos, int index1, int index2, Vec4 color, Vec2i align = vec2i(-1,1), int wrapWidth = 0) {
-// 	if(index1 == index2) return;
-// 	if(index1 > index2) swap(&index1, &index2);
-
-// 	startPos = testgetTextStartPos(text, font, startPos, align, wrapWidth);
-
-// 	TextSimInfo tsi = initTextSimInfo(startPos);
-// 	while(true) {
-// 		TextInfo ti;
-// 		if(!testtextSim(text, font, &tsi, &ti, startPos, wrapWidth)) break;
-
-// 		if(ti.index >= index1 && ti.index < index2) {
-// 			Rect r = rectULDim(ti.pos, vec2(getCharAdvance(text[ti.index], font), font->height));
-// 			r = rectExpand(r, vec2(-1,-1));
-// 			dcRect(r, rect(0,0,1,1), color);
-// 		}
-// 	}
-// }
-
 void testdrawTextSelection(char* text, Font* font, Vec2 startPos, int index1, int index2, Vec4 color, Vec2i align = vec2i(-1,1), int wrapWidth = 0) {
 	if(index1 == index2) return;
 	if(index1 > index2) swap(&index1, &index2);
@@ -1551,7 +1532,6 @@ void testdrawTextSelection(char* text, Font* font, Vec2 startPos, int index1, in
 		bool endReached = ti.index == index2;
 
 		if(drawSelection) {
-			// Check for line break.
 			if(ti.lineBreak || endReached) {
 
 				Vec2 lineEnd = ti.lineBreak ? ti.breakPos : ti.pos;
