@@ -3,6 +3,8 @@
 #define CONSOLE_SMALL_PERCENT 0.3f
 #define CONSOLE_BIG_PERCENT 0.8f
 
+const char* consoleFunctionNames[] = {"add", "cls", "doNothing"};
+
 struct Console {
 	float pos;
 	float targetPos;
@@ -23,6 +25,7 @@ struct Console {
 	int markerIndex;
 	bool mouseSelectMode;
 	float cursorTime;
+	float inputOffset;
 
 	int bodySelectionIndex;
 	int bodySelectionMarker1, bodySelectionMarker2;
@@ -34,7 +37,10 @@ struct Console {
 	int historyReadIndex;
 	int historyWriteIndex;
 
-	float inputOffset;
+	bool autoCompleteMode;
+	int autoCompleteIndex;
+	int autoCompleteCursor;
+	char autoCompleteWord[64];
 
 	/*
 		TODO's:
@@ -50,11 +56,10 @@ struct Console {
 		* Line wrap.
 		* Command history.
 		* Input cursor vertical scrolling.
+		* Command hint on tab.
 
 		* Select inside console output.
 		  - Clean this up once it's solid.
-
-		- Command hint on tab.
 	*/
 
 	void init(float windowHeight) {
@@ -67,13 +72,15 @@ struct Console {
 		markerIndex = 0;
 		scrollPercent = 1;
 		bodySelectionIndex = -1;
+		inputOffset = 0;
 
 		historyMode = false;
 		historyReadIndex = 0;
 		historyWriteIndex = 1;
 		for(int i = 0; i < arrayCount(historyBuffer); i++) historyBuffer[i][0] = '\0';
 
-		inputOffset = 0;
+		autoCompleteMode = false;
+
 
 
 		pushToMainBuffer("This is a test String!");
@@ -428,9 +435,12 @@ struct Console {
 				bool backspace = input->keysPressed[KEYCODE_BACKSPACE];
 				bool del = input->keysPressed[KEYCODE_DEL];
 				bool enter = input->keysPressed[KEYCODE_RETURN];
+				bool tab = input->keysPressed[KEYCODE_TAB];
 
 				bool ctrl = input->keysDown[KEYCODE_CTRL];
 				bool shift = input->keysDown[KEYCODE_SHIFT];
+
+				// History.
 
 				if(historyMode) {
 					if(up || down) {
@@ -463,6 +473,64 @@ struct Console {
 						markerIndex = cursorIndex;
 					}
 				}
+
+				// Auto complete.
+
+				if(tab && !autoCompleteMode) {
+					// Search backwards for a word.
+
+					autoCompleteIndex = 0;
+					int wordIndex = strFindBackwards(inputBuffer, ' ', cursorIndex);
+					int wordLength = cursorIndex - wordIndex;
+
+					if(wordLength < arrayCount(autoCompleteWord)) {
+						autoCompleteMode = true;
+						
+						strCpy(autoCompleteWord, inputBuffer + wordIndex, wordLength);
+
+						autoCompleteCursor = wordIndex;
+					}
+				}
+				
+				if(autoCompleteMode) {
+					if(tab) {
+						int nameCount = arrayCount(consoleFunctionNames);
+						bool found = false;
+						for(int i = 0; i < nameCount; i++) {
+							int index = mod(autoCompleteIndex+i, nameCount);
+							bool result;
+							if(strLen(autoCompleteWord) == 0) result = true;
+							else result = strStartsWith((char*)consoleFunctionNames[index], autoCompleteWord);
+
+							if(result) {
+								autoCompleteIndex = index;
+								found = true;
+
+								int amount = cursorIndex - autoCompleteCursor;
+								strRemoveX(inputBuffer, autoCompleteCursor, amount);
+
+								char* word = (char*)consoleFunctionNames[autoCompleteIndex];
+								int wordLength = strLen(word);
+
+								strInsert(inputBuffer, autoCompleteCursor, word);
+
+								cursorIndex = autoCompleteCursor + wordLength;
+								markerIndex = cursorIndex;
+
+								break;
+							}
+						}
+
+						if(!found) autoCompleteMode = false;
+
+						autoCompleteIndex = mod(autoCompleteIndex+1, arrayCount(consoleFunctionNames));
+
+					} else if(input->anyKey) {
+						autoCompleteMode = false;
+					}
+				}
+
+				// Main navigation and things.
 
 				int startCursorIndex = cursorIndex;
 
@@ -761,7 +829,7 @@ struct Console {
 			pushToMainBuffer(fillString("%i + %i = %i", a, b, a+b));
 		} else if(strCompare(argument, "cls")) {
 			mainBufferSize = 0;
-		} else if(strCompare(argument, "donothing")) {
+		} else if(strCompare(argument, "doNothing")) {
 			pushToMainBuffer("");
 		} else {
 			pushToMainBuffer(fillString("Unknown command \"%s\"", argument));

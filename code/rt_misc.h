@@ -227,6 +227,22 @@ bool strCompare(char* str, int size1, char* str2, int size2) {
 	return result;
 }
 
+bool strStartsWith(char* str, char* str2, int size = -1) {
+	int length = size == -1 ? strLen(str2) : size;
+
+	if(strLen(str) < length) return false;
+
+	bool result = true;
+	for(int i = 0; i < length; i++) {
+		if(str[i] != str2[i]) {
+			result = false;
+			break;
+		}
+	}
+
+	return result;
+}
+
 int strFind(const char* str, char chr, int startIndex = 0) {
 	int index = startIndex;
 	int pos = -1;

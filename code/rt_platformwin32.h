@@ -92,6 +92,8 @@ struct Input {
 	int inputCharacterCount;
 
 	bool mShift, mCtrl, mAlt;
+
+	bool anyKey;
 };
 
 
@@ -332,6 +334,8 @@ void makeWindowVisible(SystemData* systemData) {
 }
 
 void updateInput(Input* input, bool* isRunning, HWND windowHandle) {
+	input->anyKey = false;
+
     input->mouseWheel = 0;
     for(int i = 0; i < arrayCount(input->mouseButtonPressed); i++) input->mouseButtonPressed[i] = 0;
     for(int i = 0; i < arrayCount(input->mouseButtonReleased); i++) input->mouseButtonReleased[i] = 0;
@@ -398,6 +402,8 @@ void updateInput(Input* input, bool* isRunning, HWND windowHandle) {
                 input->mAlt = ((GetKeyState(VK_MENU) & 0x80) != 0);
 
                 if(keyDown) {
+                	input->anyKey = true;
+
                     TranslateMessage(&message); 
                 }
             } break;
