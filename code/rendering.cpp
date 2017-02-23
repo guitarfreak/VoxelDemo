@@ -1450,7 +1450,7 @@ void drawText(char* text, Font* font, Vec2 startPos, Vec4 color, Vec2i align = v
 	}
 }
 
-Rect getTextCursor(char* text, Font* font, Vec2 startPos, int index, float cursorWidth, Vec2i align = vec2i(-1,1), int wrapWidth = 0) {
+Vec2 textIndexToPos(char* text, Font* font, Vec2 startPos, int index, Vec2i align = vec2i(-1,1), int wrapWidth = 0) {
 	startPos = testgetTextStartPos(text, font, startPos, align, wrapWidth);
 
 	TextSimInfo tsi = initTextSimInfo(startPos);
@@ -1459,14 +1459,14 @@ Rect getTextCursor(char* text, Font* font, Vec2 startPos, int index, float curso
 		int result = textSim(text, font, &tsi, &ti, startPos, wrapWidth);
 
 		if(ti.index == index) {
-			Rect cursorRect = rectCenDim(ti.pos - vec2(0, font->height/2), vec2(cursorWidth,font->height));
-			return cursorRect;
+			Vec2 pos = ti.pos - vec2(0, font->height/2);
+			return pos;
 		}
 
 		if(!result) break;
 	}
 
-	return rect(0,0,0,0);
+	return vec2(0,0);
 }
 
 void drawTextSelection(char* text, Font* font, Vec2 startPos, int index1, int index2, Vec4 color, Vec2i align = vec2i(-1,1), int wrapWidth = 0, DrawCommandList* drawList = 0) {

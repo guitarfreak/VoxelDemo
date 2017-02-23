@@ -935,7 +935,8 @@ struct Gui {
 			Rect regCen = rectGetCenDim(region);
 			Vec2 textStart = regCen.cen - vec2(regCen.dim.w*0.5f,0);
 
-			Rect cursorRect = getTextCursor(textBoxText, font, textStart, textBoxIndex, settings.cursorWidth, vec2i(-1,0));
+			Vec2 cursorPos = textIndexToPos(textBoxText, font, textStart, textBoxIndex, vec2i(-1,0));
+			Rect cursorRect = rectCenDim(cursorPos, vec2(settings.cursorWidth, font->height));
 			if(textBoxIndex == 0) cursorRect = rectAddOffset(cursorRect, vec2(1,0));
 
 			if(selectionAnchor != -1) {

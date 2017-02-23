@@ -29,14 +29,12 @@ struct Console {
 	bool bodySelectionMode;
 	bool mousePressedInside;
 
-	// Command history.
-
 	bool historyMode;
 	char historyBuffer[20][256];
 	int historyReadIndex;
 	int historyWriteIndex;
 
-
+	float inputOffset;
 
 	/*
 		TODO's:
@@ -50,10 +48,12 @@ struct Console {
 		* Cleanup.
 		* Scrollbar.
 		* Line wrap.
+		* Command history.
+		* Input cursor vertical scrolling.
 
 		* Select inside console output.
 		  - Clean this up once it's solid.
-		- Command history.
+
 		- Command hint on tab.
 	*/
 
@@ -73,6 +73,7 @@ struct Console {
 		historyWriteIndex = 1;
 		for(int i = 0; i < arrayCount(historyBuffer); i++) historyBuffer[i][0] = '\0';
 
+		inputOffset = 0;
 
 
 		pushToMainBuffer("This is a test String!");
@@ -134,6 +135,9 @@ struct Console {
 		float scrollWheelAmount = bodyFontSize;
 		float scrollWheelAmountMod = 4;
 
+		float inputScrollMargin = 10;
+
+
 		// Logic.
 
 		float closedPos = 0;
@@ -189,6 +193,9 @@ struct Console {
 				strClear(inputBuffer);
 				cursorIndex = 0;
 				markerIndex = 0;
+				
+				historyMode = false;
+				historyReadIndex = mod(historyWriteIndex-1, arrayCount(historyBuffer));
 			}
 		}
 
@@ -285,7 +292,8 @@ struct Console {
 				dcRect(scrollCursorRect, scrollBarColor);
 			}
 
-			// if(mainBufferSize > 0) {
+			// Main window.
+			{
 				dcEnable(STATE_SCISSOR);
 
 				Rect scrollRect = consoleBody;
@@ -376,7 +384,7 @@ struct Console {
 				}
 
 				dcDisable(STATE_SCISSOR);
-			// }
+			}
 		}
 
 		if(isActive) {
@@ -393,8 +401,9 @@ struct Console {
 			}
 
 			if(mouseSelectMode && (strLen(inputBuffer) >= 1)) {
-				float inputMid = pos + inputHeight/2;
-				int mouseIndex = textMouseToIndex(inputBuffer, inputFont, vec2(consolePadding.x, inputMid + inputFont->height/2), input->mousePosNegative);
+				Vec2 inputStartPos = (consoleInput.min + vec2(consolePadding.x, 0)) + vec2(-inputOffset, inputHeight/2);
+
+				int mouseIndex = textMouseToIndex(inputBuffer, inputFont, inputStartPos, input->mousePosNegative, vec2i(-1,0));
 
 				if(input->mouseButtonPressed[0]) {
 					markerIndex = mouseIndex;
@@ -454,7 +463,6 @@ struct Console {
 						markerIndex = cursorIndex;
 					}
 				}
-
 
 				int startCursorIndex = cursorIndex;
 
@@ -615,28 +623,56 @@ struct Console {
 				}
 			}
 
+			// Scroll input vertically.
+
+			{
+				Rect inputRect = rectExpand(consoleInput, vec2(-consolePadding.x, 0));
+				Vec2 inputStartPos = inputRect.min + vec2(-inputOffset, inputHeight/2);
+
+				Vec2 cursorPos = textIndexToPos(inputBuffer, inputFont, inputStartPos, cursorIndex, vec2i(-1,0));
+
+				float cursorDiffLeft = (inputRect.min.x + inputScrollMargin) - cursorPos.x;
+				if(cursorDiffLeft > 0) {
+					inputOffset = clampMin(inputOffset - cursorDiffLeft, consoleInput.min.x);
+				}
+
+				float cursorDiffRight = cursorPos.x - (inputRect.max.x - inputScrollMargin);
+				if(cursorDiffRight > 0) {
+					inputOffset = inputOffset + cursorDiffRight;
+				}
+			}
+
 			// 
 			// Drawing.
 			//
 			
-			float inputMid = pos + inputHeight/2;
+			Rect inputRect = rectExpand(consoleInput, vec2(-consolePadding.x, 0));
+			Vec2 inputStartPos = inputRect.min + vec2(-inputOffset, inputHeight/2);
 
 			// Selection.
 
-			drawTextSelection(inputBuffer, inputFont, vec2(consolePadding.x, inputMid), cursorIndex, markerIndex, selectionColor, vec2i(-1,0));
+			drawTextSelection(inputBuffer, inputFont, inputStartPos, cursorIndex, markerIndex, selectionColor, vec2i(-1,0));
 
 			// Text.
 
-			dcText(inputBuffer, inputFont, vec2(consolePadding.x, inputMid), inputFontColor, vec2i(-1,0));
+			dcEnable(STATE_SCISSOR);
+			dcScissor(scissorRectScreenSpace(inputRect, res.h));
+
+			dcText(inputBuffer, inputFont, inputStartPos, inputFontColor, vec2i(-1,0));
+
+			dcDisable(STATE_SCISSOR);
 
 			// Cursor.
 
 			cursorTime += dt*cursorSpeed;
 			Vec4 cmod = vec4(0,cos(cursorTime)*cursorColorMod - cursorColorMod,0,0);
 
+			Vec2 cursorPos = textIndexToPos(inputBuffer, inputFont, inputStartPos, cursorIndex, vec2i(-1,0));
+
 			bool cursorAtEnd = cursorIndex == strLen(inputBuffer);
 			float cWidth = cursorAtEnd ? getTextDim("M", inputFont).w : cursorWidth;
-			Rect cursorRect = getTextCursor(inputBuffer, inputFont, vec2(consolePadding.x, inputMid), cursorIndex, cWidth, vec2i(-1,0));
+			Rect cursorRect = rectCenDim(cursorPos, vec2(cWidth, inputFont->height));
+
 			if(cursorAtEnd) cursorRect = rectAddOffset(cursorRect, vec2(rectGetDim(cursorRect).w/2, 0));
 			dcRect(cursorRect, cursorColor + cmod);
 		}
