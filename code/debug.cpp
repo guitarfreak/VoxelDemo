@@ -18,18 +18,25 @@ struct Console {
 	int mainBufferSize;
 
 	char inputBuffer[1024];
-	// int inputBufferSize;
 
 	int cursorIndex;
 	int markerIndex;
 	bool mouseSelectMode;
 	float cursorTime;
 
-	// char* bodySelectedText;
 	int bodySelectionIndex;
 	int bodySelectionMarker1, bodySelectionMarker2;
 	bool bodySelectionMode;
 	bool mousePressedInside;
+
+	// Command history.
+
+	bool historyMode;
+	char historyBuffer[20][256];
+	int historyReadIndex;
+	int historyWriteIndex;
+
+
 
 	/*
 		TODO's:
@@ -53,13 +60,19 @@ struct Console {
 	void init(float windowHeight) {
 		float smallPos = -windowHeight * CONSOLE_SMALL_PERCENT;
 		pos = 0;
-		// mode = 1;
-		mode = 0;
+		mode = 1;
+		// mode = 0;
 		targetPos = smallPos;
 		cursorIndex = 0;
 		markerIndex = 0;
 		scrollPercent = 1;
 		bodySelectionIndex = -1;
+
+		historyMode = false;
+		historyReadIndex = 0;
+		historyWriteIndex = 1;
+		for(int i = 0; i < arrayCount(historyBuffer); i++) historyBuffer[i][0] = '\0';
+
 
 
 		pushToMainBuffer("This is a test String!");
@@ -410,6 +423,38 @@ struct Console {
 				bool ctrl = input->keysDown[KEYCODE_CTRL];
 				bool shift = input->keysDown[KEYCODE_SHIFT];
 
+				if(historyMode) {
+					if(up || down) {
+						int newPos;
+						if(up) newPos = mod(historyReadIndex-1, arrayCount(historyBuffer));
+						else if(down) newPos = mod(historyReadIndex+1, arrayCount(historyBuffer));
+
+						bool skip = false;
+						if(up && (newPos == mod(historyWriteIndex-1, arrayCount(historyBuffer)))) skip = true;
+						else if(down && newPos == historyWriteIndex) skip = true;
+
+						if(!skip && strLen(historyBuffer[newPos]) != 0) {
+							historyReadIndex = newPos;
+							strCpy(inputBuffer, historyBuffer[historyReadIndex]);
+
+							cursorIndex = strLen(inputBuffer);
+							markerIndex = cursorIndex;
+						}
+					}
+				}
+
+				if(up && !historyMode) {
+					historyMode = true;
+					historyReadIndex = mod(historyWriteIndex-1, arrayCount(historyBuffer));
+
+					if(strLen(historyBuffer[historyReadIndex]) != 0) {
+						strCpy(inputBuffer, historyBuffer[historyReadIndex]);
+						
+						cursorIndex = strLen(inputBuffer);
+						markerIndex = cursorIndex;
+					}
+				}
+
 
 				int startCursorIndex = cursorIndex;
 
@@ -544,7 +589,16 @@ struct Console {
 
 				if(enter) {
 					if(strLen(inputBuffer) > 0) {
+						// Push to history buffer.
+
+						int stringLength = max(strLen(inputBuffer), arrayCount(historyBuffer));
+						strCpy(historyBuffer[historyWriteIndex], inputBuffer, stringLength);
+						historyReadIndex = historyWriteIndex;
+						historyWriteIndex = mod(historyWriteIndex+1, arrayCount(historyBuffer));
+						historyMode = false;
+
 						// Copy over input buffer to console buffer.
+
 						pushToMainBuffer(inputBuffer);
 						evaluateInput();
 
