@@ -285,7 +285,7 @@ struct Console {
 				dcRect(scrollCursorRect, scrollBarColor);
 			}
 
-			if(mainBufferSize > 0) {
+			// if(mainBufferSize > 0) {
 				dcEnable(STATE_SCISSOR);
 
 				Rect scrollRect = consoleBody;
@@ -376,7 +376,7 @@ struct Console {
 				}
 
 				dcDisable(STATE_SCISSOR);
-			}
+			// }
 		}
 
 		if(isActive) {
@@ -431,7 +431,7 @@ struct Console {
 
 						bool skip = false;
 						if(up && (newPos == mod(historyWriteIndex-1, arrayCount(historyBuffer)))) skip = true;
-						else if(down && newPos == historyWriteIndex) skip = true;
+						if(down && newPos == historyWriteIndex) skip = true;
 
 						if(!skip && strLen(historyBuffer[newPos]) != 0) {
 							historyReadIndex = newPos;
@@ -723,6 +723,8 @@ struct Console {
 			int b = strToInt(arguments[1]);
 
 			pushToMainBuffer(fillString("%i + %i = %i", a, b, a+b));
+		} else if(strCompare(argument, "cls")) {
+			mainBufferSize = 0;
 		} else if(strCompare(argument, "donothing")) {
 			pushToMainBuffer("");
 		} else {
