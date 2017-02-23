@@ -57,6 +57,11 @@ struct Console {
 		* Command history.
 		* Input cursor vertical scrolling.
 		* Command hint on tab.
+		* Lag when inputting.
+
+		- Add function with string as argument.
+		- Add function with float as argument.
+		- Make adding functions more robust.
 
 		* Select inside console output.
 		  - Clean this up once it's solid.
@@ -119,7 +124,7 @@ struct Console {
 
 		float inputHeightPadding = 1.5;
 		float fontDrawHeightOffset = 0.2f;
-		Vec2 consolePadding = vec2(10,10);
+		Vec2 consolePadding = vec2(10,5);
 		float cursorWidth = 2;
 		float cursorSpeed = 3;
 		float cursorColorMod = 0.2f;
@@ -307,7 +312,7 @@ struct Console {
 				scrollRect.min.x = scrollRect.max.x - scrollBarWidth;
 
 				Rect consoleTextRect = consoleBody;
-				consoleTextRect.max.x -= consolePadding.x;
+				consoleTextRect = rectExpand(consoleTextRect, -consolePadding*2);
 				if(lastDiff >= 0) consoleTextRect.max.x -= scrollBarWidth;
 
 				dcScissor(scissorRectScreenSpace(consoleTextRect, res.h));
@@ -377,7 +382,7 @@ struct Console {
 					textPos.y -= textHeight;
 				}
 
-				lastDiff = textStart - textPos.y - rectGetDim(consoleTextRect).h + consolePadding.y*2;
+				lastDiff = textStart - textPos.y - rectGetDim(consoleTextRect).h;
 
 				if(cursorIndex != markerIndex) {
 					bodySelectionIndex = -1;
@@ -813,8 +818,14 @@ struct Console {
 			char* arguments[2];
 			arguments[0] = getNextArgument(&com);
 			arguments[1] = getNextArgument(&com);
-			if(!(arguments + 0) || !(arguments + 1)) {
+			if((!arguments[0]) || (!arguments[1])) {
 				pushToMainBuffer(fillString("Function is missing arguments."));
+				return;
+			}
+
+			char* afterArgument = getNextArgument(&com);
+			if(getNextArgument(&com)) {
+				pushToMainBuffer(fillString("Too many arguments."));
 				return;
 			}
 
