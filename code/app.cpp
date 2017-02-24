@@ -630,6 +630,25 @@ extern "C" APPMAINFUNCTION(appMain) {
 	if(reload) {
 		loadFunctions();
 		SetWindowLongPtr(systemData->windowHandle, GWLP_WNDPROC, (LONG_PTR)mainWindowCallBack);
+
+		if(HOTRELOAD_SHADERS) {
+			for(int i = 0; i < SHADER_SIZE; i++) {
+				MakeShaderInfo* info = makeShaderInfo + i; 
+				Shader* s = gs->shaders + i;
+
+				s->program = createShader(info->vertexString, info->fragmentString, &s->vertex, &s->fragment);
+				s->uniformCount = info->uniformCount;
+				s->uniforms = getPArray(ShaderUniform, s->uniformCount);
+
+				for(int i = 0; i < s->uniformCount; i++) {
+					ShaderUniform* uni = s->uniforms + i;
+					uni->type = info->uniformNameMap[i].type;	
+					uni->vertexLocation = glGetUniformLocation(s->vertex, info->uniformNameMap[i].name);
+					uni->fragmentLocation = glGetUniformLocation(s->fragment, info->uniformNameMap[i].name);
+				}
+			}
+		}
+
 	}
 
 	TIMER_BLOCK_BEGIN(Main)
@@ -2885,6 +2904,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			con->update(ds->input, vec2(wSettings->currentRes), ad->dt);
 
 			// Execute commands.
+
 			if(con->commandAvailable) {
 				con->commandAvailable = false;
 
@@ -2924,90 +2944,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 				}
 				if(pushResult) con->pushToMainBuffer(resultString);
 			}
-
-
-			#if 0
-
-			Rect r = rectULDim(vec2(100,-100), vec2(70,200));
-			// Rect r = rectULDim(vec2(100,-100), vec2(400,200));
-			dcRect(r, vec4(0,0,0,1));
- 
-			char* te = "ABCD EFG AA        AAA";
-			// char* te = "ABCD \nE f ghiAAA A\n AA AA AA\n  AA   AA \nAA AA AAA\n   AA";
-			Font* tf = getFont(FONT_ARIAL, 24);
-
-
-
-
-
-			static int textIndex1 = 0;
-			if(input->mouseButtonPressed[0]) {
-				textIndex1 = getTextPosWrapping(te, tf, rectGetUL(r), rectGetDim(r).w, input->mousePosNegative);
-			}
-
-			static int textIndex2 = 0;
-			if(input->mouseButtonReleased[0]) {
-				textIndex2 = getTextPosWrapping(te, tf, rectGetUL(r), rectGetDim(r).w, input->mousePosNegative);
-			}
-
-			// drawTextSelection(char* text, Font* font, Vec2 startPos, int index1, int index2, int wrapWidth) {
-
-			drawTextSelection(te, tf, rectGetUL(r), textIndex1, textIndex2, vec4(0.5f,0.5f,0.5f,1), rectGetDim(r).w);
-
-
-			Vec2 point = vec2(100,-100);
-			point = getTextMousePos(te, tf, rectGetUL(r), textIndex1, rectGetDim(r).w);
-			dcRect(rectCenDim(point - vec2(0, tf->height/2), vec2(4,24)), vec4(1,0,0,1));
-
-			point = getTextMousePos(te, tf, rectGetUL(r), textIndex2, rectGetDim(r).w);
-			dcRect(rectCenDim(point - vec2(0, tf->height/2), vec2(4,24)), vec4(0,1,0,1));
-
-			if(input->keysPressed[KEYCODE_C]) {
-// void textSelectionToString(char* text, Font* font, int index1, int index2) {
-				char* str = textSelectionToString(te, tf, textIndex1, textIndex2);
-
-				setClipboard(str);
-			}
-
-
-			dcText(te, tf, rectGetUL(r), vec4(1,1,0,1), 0, 2, 0, vec4(0,0,0,0), rectGetDim(r).w);
-
-			#endif
-
-
-
-
-			#if 0
-
-			Rect r = rectULDim(vec2(100,-100), vec2(70,200));
-			// Rect r = rectULDim(vec2(100,-100), vec2(400,200));
-			dcRect(r, vec4(0,0,0,1));
- 
-			char* te = "Abc \nDeF Ztihog";
-			// char* te = "ABCD \nE f ghiAAA A\n AA AA AA\n  AA   AA \nAA AA AAA\n   AA";
-			Font* tf = getFont(FONT_ARIAL, 24);
-
-			Vec2i align = vec2i(-1,1);
-
-			static int textIndex1 = 0;
-			if(input->mouseButtonPressed[0]) {
-				textIndex1 = textMouseToIndex(te, tf, rectGetUL(r), input->mousePosNegative, align, rectGetDim(r).w);
-			}
-
-			static int textIndex2 = 0;
-			if(input->mouseButtonDown[0]) {
-				textIndex2 = textMouseToIndex(te, tf, rectGetUL(r), input->mousePosNegative, align, rectGetDim(r).w);
-			}
-
-			testdrawTextSelection(te, tf, rectGetUL(r), textIndex1, textIndex2, vec4(0.5f,0.5f,0.5f,1), align, rectGetDim(r).w);
-
-			Vec2 point = vec2(100,-100);
-			drawTextCursor(te, tf, rectGetUL(r), textIndex1, 4, vec4(1,0,0,1), align, rectGetDim(r).w);
-			drawTextCursor(te, tf, rectGetUL(r), textIndex2, 4, vec4(0,1,0,1), align, rectGetDim(r).w);
-
-			dcText(te, tf, rectGetUL(r), vec4(1,1,0,1), align.x, align.y, 0, vec4(0,0,0,0), rectGetDim(r).w);
-
-			#endif
 
 		}
 

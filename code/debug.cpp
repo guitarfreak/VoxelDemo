@@ -94,9 +94,9 @@ struct Console {
 		* Add function with string/float as argument.
 		* Make adding functions more robust.
 		* Move evaluate() too appMain to have acces to functionality.
-
 		* Select inside console output.
-		  - Clean this up once it's solid.
+
+	    - Clean this up once it's solid.
 	*/
 
 	void init(float windowHeight) {

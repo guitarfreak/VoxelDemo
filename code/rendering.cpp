@@ -307,6 +307,7 @@ void dcDisable(int state, DrawCommandList* drawList = 0) {
 
 
 
+#define HOTRELOAD_SHADERS 0
 
 const char* vertexShaderCube = GLSL (
 	out gl_PerVertex { vec4 gl_Position; };
