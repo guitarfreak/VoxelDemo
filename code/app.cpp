@@ -60,7 +60,7 @@ additionally:
 Changing course for now:
  * Split up main app.cpp into mutliple files.
  * Implement hotloading of text files -> textures, variables and so on.
- - Implement hotloading for shader.
+ * Implement hotloading for shader.
  - Dropdown console.
    - Make sure to clean it up once your satified with the functionality it.
  - Multiline text editing.
