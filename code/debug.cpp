@@ -85,10 +85,8 @@ struct Console {
 		* Input cursor vertical scrolling.
 		* Command hint on tab.
 		* Lag when inputting.
-
-		- Add function with string as argument.
-		- Add function with float as argument.
-		- Make adding functions more robust.
+		* Add function with string/float as argument.
+		* Make adding functions more robust.
 
 		* Select inside console output.
 		  - Clean this up once it's solid.
@@ -861,7 +859,8 @@ struct Console {
 
 			case ATYPE_BOOL: {
 				if(strCompare(s, "true") || strCompare(s, "True") ||
-				   strCompare(s, "false") || strCompare(s, "False")) {
+				   strCompare(s, "false") || strCompare(s, "False") ||
+				   s[0] == '0' || s[0] == '1') {
 					return true;
 				} else {
 					return false;
