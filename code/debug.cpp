@@ -3,7 +3,34 @@
 #define CONSOLE_SMALL_PERCENT 0.3f
 #define CONSOLE_BIG_PERCENT 0.8f
 
-const char* consoleFunctionNames[] = {"add", "cls", "doNothing"};
+#define CONSOLE_ARGUMENT_COUNT_MAX 10
+
+enum ArgumentTypes {
+	ATYPE_INT = 0,
+	ATYPE_FLOAT,
+	ATYPE_BOOL,
+	ATYPE_STRING,
+
+	ATYPE_SIZE,
+};
+
+char* argumentTypeStrings[] = { "Int", "Float", "Bool", "String", };
+
+struct FunctionInfo {
+	char* name;
+	int typeCount;
+	int types[10];
+};
+
+FunctionInfo functionInfo[] = { 
+	{"add", 		2, ATYPE_INT, ATYPE_INT}, 
+	{"addFloat", 	2, ATYPE_FLOAT, ATYPE_FLOAT}, 
+	{"cls", 		0}, 
+	{"print", 		1, ATYPE_STRING},
+	{"doNothing", 	0},
+};
+
+
 
 struct Console {
 	float pos;
@@ -499,13 +526,13 @@ struct Console {
 				
 				if(autoCompleteMode) {
 					if(tab) {
-						int nameCount = arrayCount(consoleFunctionNames);
+						int nameCount = arrayCount(functionInfo);
 						bool found = false;
 						for(int i = 0; i < nameCount; i++) {
 							int index = mod(autoCompleteIndex+i, nameCount);
 							bool result;
 							if(strLen(autoCompleteWord) == 0) result = true;
-							else result = strStartsWith((char*)consoleFunctionNames[index], autoCompleteWord);
+							else result = strStartsWith(functionInfo[index].name, autoCompleteWord);
 
 							if(result) {
 								autoCompleteIndex = index;
@@ -514,7 +541,7 @@ struct Console {
 								int amount = cursorIndex - autoCompleteCursor;
 								strRemoveX(inputBuffer, autoCompleteCursor, amount);
 
-								char* word = (char*)consoleFunctionNames[autoCompleteIndex];
+								char* word = functionInfo[autoCompleteIndex].name;
 								int wordLength = strLen(word);
 
 								strInsert(inputBuffer, autoCompleteCursor, word);
@@ -528,7 +555,7 @@ struct Console {
 
 						if(!found) autoCompleteMode = false;
 
-						autoCompleteIndex = mod(autoCompleteIndex+1, arrayCount(consoleFunctionNames));
+						autoCompleteIndex = mod(autoCompleteIndex+1, nameCount);
 
 					} else if(input->anyKey) {
 						autoCompleteMode = false;
@@ -767,6 +794,15 @@ struct Console {
 		return (c >= (int)'0') && (c <= (int)'9');
 	}
 
+	bool charIsLetter(char c) {
+		return ((c >= (int)'a') && (c <= (int)'z') || 
+		        (c >= (int)'A') && (c <= (int)'Z'));
+	}
+
+	bool charIsDigitOrLetter(char c) {
+		return charIsDigit(c) || charIsLetter(c);
+	}
+
 	char* eatDigits(char* str) {
 		while(charIsDigit(str[0])) str++;
 		return str;
@@ -797,14 +833,93 @@ struct Console {
 		mainBufferSize++;
 	}
 
-	bool strIsInteger(char* str) {
-		char* s = str;
-		s = eatSign(s);
-		if(!charIsDigit(s[0])) return false;
-		s = eatDigits(s);
+	bool strIsType(char* s, int type) {
+		switch(type) {
+			case ATYPE_INT: {
+				s = eatSign(s);
+				if(!charIsDigit(s[0])) return false;
+				s = eatDigits(s);
 
-		if(s[0] != '\0') return false;
+				if(s[0] != '\0') return false;
 
+				return true;
+			} break;
+
+			case ATYPE_FLOAT: {
+				s = eatSign(s);
+				if(!charIsDigit(s[0])) return false;
+				s = eatDigits(s);
+				if(!(s[0] == '.')) return false;
+				s++;
+				if(!charIsDigit(s[0])) return false;
+				s = eatDigits(s);
+
+				if(s[0] != '\0') return false;
+
+				return true;
+			} break;
+
+			case ATYPE_BOOL: {
+				if(strCompare(s, "true") || strCompare(s, "True") ||
+				   strCompare(s, "false") || strCompare(s, "False")) {
+					return true;
+				} else {
+					return false;
+				}
+			} break;
+
+			case ATYPE_STRING: {
+				if(!charIsDigit(s[0])) {
+					
+					int sl = strLen(s);
+					for(int i = 0; i < sl; i++) {
+						char c = s[i];
+						if(!charIsDigitOrLetter(c)) {
+							return false;
+							break;
+						}
+					}
+
+					return true;
+				} else {
+					return false;
+				}
+			} break;
+
+			default: return false;
+		}
+	}
+
+	bool checkTypes(char* str, int* types, int typeCount, char** arguments) {
+		int argCount = 0;
+		while(true) {
+			char* argument = getNextArgument(&str);
+			if(argument == 0) break;
+
+			arguments[argCount] = argument;
+			argCount++;
+
+			if(argCount >= CONSOLE_ARGUMENT_COUNT_MAX) break;
+		}
+
+		if(argCount != typeCount) {
+			char* plural = argCount == 1 ? "" : "s";
+			pushToMainBuffer(fillString("Error: Function needs %i argument%s but received %i.", typeCount, plural, argCount));
+			return false;
+		}
+
+		for(int i = 0; i < typeCount; i++) {
+			char* str = arguments[i];
+			int type = types[i];
+
+			bool correctType = strIsType(str, type);
+			if(!correctType) {
+				char* argString = argumentTypeStrings[type];
+				pushToMainBuffer(fillString("Error: Argument %i is not of type \'%s\'.", i+1, argString));
+				return false;
+			}
+		}
+		
 		return true;
 	}
 
@@ -814,37 +929,43 @@ struct Console {
 		char* argument = getNextArgument(&com);
 		if(argument == 0) return;
 
+		FunctionInfo* fInfo = 0;
+		for(int i = 0; i < arrayCount(functionInfo); i++) {
+			if(strCompare(functionInfo[i].name, argument)) {
+				fInfo = functionInfo + i;
+			}
+		}
+
+		if(!fInfo) {
+			pushToMainBuffer(fillString("Error: Unknown command \"%s\".", argument));
+			return;
+		}
+
+		char* args[CONSOLE_ARGUMENT_COUNT_MAX];
+		bool correctTypes = checkTypes(com, fInfo->types, fInfo->typeCount, args);
+		if(!correctTypes) return;
+
 		if(strCompare(argument, "add")) {
-			char* arguments[2];
-			arguments[0] = getNextArgument(&com);
-			arguments[1] = getNextArgument(&com);
-			if((!arguments[0]) || (!arguments[1])) {
-				pushToMainBuffer(fillString("Function is missing arguments."));
-				return;
-			}
+			int a = strToInt(args[0]);
+			int b = strToInt(args[1]);
 
-			char* afterArgument = getNextArgument(&com);
-			if(getNextArgument(&com)) {
-				pushToMainBuffer(fillString("Too many arguments."));
-				return;
-			}
+			pushToMainBuffer(fillString("%i + %i = %i.", a, b, a+b));
+		} else if(strCompare(argument, "addFloat")) {
+			float a = strToFloat(args[0]);
+			float b = strToFloat(args[1]);
 
-			if(!strIsInteger(arguments[0]) || !strIsInteger(arguments[1])) {
-				pushToMainBuffer(fillString("Arguments are not integers."));
-				return;
-			}
+			pushToMainBuffer(fillString("%f + %f = %f.", a, b, a+b));
 
-			int a = strToInt(arguments[0]);
-			int b = strToInt(arguments[1]);
+		} else if(strCompare(argument, "print")) {
+			pushToMainBuffer(fillString("\"%s\"", args[0]));
 
-			pushToMainBuffer(fillString("%i + %i = %i", a, b, a+b));
 		} else if(strCompare(argument, "cls")) {
 			mainBufferSize = 0;
+
 		} else if(strCompare(argument, "doNothing")) {
 			pushToMainBuffer("");
-		} else {
-			pushToMainBuffer(fillString("Unknown command \"%s\"", argument));
 		}
+
 	}
 };
 
