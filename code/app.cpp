@@ -59,9 +59,11 @@ additionally:
 
 Changing course for now:
  * Split up main app.cpp into mutliple files.
- * Implement hotloading of text files -> shaders, textures, variables and so on.
+ * Implement hotloading of text files -> textures, variables and so on.
+ - Implement hotloading for shader.
  - Dropdown console.
    - Make sure to clean it up once your satified with the functionality it.
+ - Multiline text editing.
  - 3d animation system. (Search Opengl vertex skinning)
  - Sound perturbation (Whatever that is). 
 
@@ -2881,6 +2883,47 @@ extern "C" APPMAINFUNCTION(appMain) {
 			}
 
 			con->update(ds->input, vec2(wSettings->currentRes), ad->dt);
+
+			// Execute commands.
+			if(con->commandAvailable) {
+				con->commandAvailable = false;
+
+				char* comName = con->comName;
+				char** args = con->comArgs;
+				char* resultString = "";
+				bool pushResult = true;
+
+				if(strCompare(comName, "add")) {
+					int a = strToInt(args[0]);
+					int b = strToInt(args[1]);
+
+					resultString = fillString("%i + %i = %i.", a, b, a+b);
+
+				} else if(strCompare(comName, "addFloat")) {
+					float a = strToFloat(args[0]);
+					float b = strToFloat(args[1]);
+
+					resultString = fillString("%f + %f = %f.", a, b, a+b);
+
+				} else if(strCompare(comName, "print")) {
+					resultString = fillString("\"%s\"", args[0]);
+
+				} else if(strCompare(comName, "cls")) {
+					con->mainBufferSize = 0;
+					pushResult = false;
+
+				} else if(strCompare(comName, "doNothing")) {
+					// Hmm....
+
+				} else if(strCompare(comName, "setGuiAlpha")) {
+					ad->guiAlpha = strToFloat(args[0]);
+
+				} else if(strCompare(comName, "exit")) {
+					*isRunning = false;
+
+				}
+				if(pushResult) con->pushToMainBuffer(resultString);
+			}
 
 
 			#if 0

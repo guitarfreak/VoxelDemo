@@ -26,8 +26,10 @@ FunctionInfo functionInfo[] = {
 	{"add", 		2, ATYPE_INT, ATYPE_INT}, 
 	{"addFloat", 	2, ATYPE_FLOAT, ATYPE_FLOAT}, 
 	{"cls", 		0}, 
-	{"print", 		1, ATYPE_STRING},
 	{"doNothing", 	0},
+	{"exit", 		0},
+	{"print", 		1, ATYPE_STRING},
+	{"setGuiAlpha", 1, ATYPE_FLOAT},
 };
 
 
@@ -47,6 +49,10 @@ struct Console {
 	int mainBufferSize;
 
 	char inputBuffer[1024];
+
+	bool commandAvailable;
+	char* comName;
+	char* comArgs[CONSOLE_ARGUMENT_COUNT_MAX];
 
 	int cursorIndex;
 	int markerIndex;
@@ -87,6 +93,7 @@ struct Console {
 		* Lag when inputting.
 		* Add function with string/float as argument.
 		* Make adding functions more robust.
+		* Move evaluate() too appMain to have acces to functionality.
 
 		* Select inside console output.
 		  - Clean this up once it's solid.
@@ -110,6 +117,7 @@ struct Console {
 		for(int i = 0; i < arrayCount(historyBuffer); i++) historyBuffer[i][0] = '\0';
 
 		autoCompleteMode = false;
+		commandAvailable = false;
 
 
 
@@ -706,6 +714,7 @@ struct Console {
 						// Copy over input buffer to console buffer.
 
 						pushToMainBuffer(inputBuffer);
+						
 						evaluateInput();
 
 						strClear(inputBuffer);
@@ -889,13 +898,14 @@ struct Console {
 		}
 	}
 
-	bool checkTypes(char* str, int* types, int typeCount, char** arguments) {
+	bool checkTypes(char* str, int* types, int typeCount) {
+
 		int argCount = 0;
 		while(true) {
 			char* argument = getNextArgument(&str);
 			if(argument == 0) break;
 
-			arguments[argCount] = argument;
+			comArgs[argCount] = argument;
 			argCount++;
 
 			if(argCount >= CONSOLE_ARGUMENT_COUNT_MAX) break;
@@ -908,7 +918,7 @@ struct Console {
 		}
 
 		for(int i = 0; i < typeCount; i++) {
-			char* str = arguments[i];
+			char* str = comArgs[i];
 			int type = types[i];
 
 			bool correctType = strIsType(str, type);
@@ -925,47 +935,28 @@ struct Console {
 	void evaluateInput() {
 		char* com = inputBuffer;
 
-		char* argument = getNextArgument(&com);
-		if(argument == 0) return;
+		char* cName = getNextArgument(&com);
+		if(cName == 0) return;
 
 		FunctionInfo* fInfo = 0;
 		for(int i = 0; i < arrayCount(functionInfo); i++) {
-			if(strCompare(functionInfo[i].name, argument)) {
+			if(strCompare(functionInfo[i].name, cName)) {
 				fInfo = functionInfo + i;
 			}
 		}
 
 		if(!fInfo) {
-			pushToMainBuffer(fillString("Error: Unknown command \"%s\".", argument));
+			pushToMainBuffer(fillString("Error: Unknown command \"%s\".", cName));
 			return;
 		}
 
-		char* args[CONSOLE_ARGUMENT_COUNT_MAX];
-		bool correctTypes = checkTypes(com, fInfo->types, fInfo->typeCount, args);
+		bool correctTypes = checkTypes(com, fInfo->types, fInfo->typeCount);
 		if(!correctTypes) return;
 
-		if(strCompare(argument, "add")) {
-			int a = strToInt(args[0]);
-			int b = strToInt(args[1]);
-
-			pushToMainBuffer(fillString("%i + %i = %i.", a, b, a+b));
-		} else if(strCompare(argument, "addFloat")) {
-			float a = strToFloat(args[0]);
-			float b = strToFloat(args[1]);
-
-			pushToMainBuffer(fillString("%f + %f = %f.", a, b, a+b));
-
-		} else if(strCompare(argument, "print")) {
-			pushToMainBuffer(fillString("\"%s\"", args[0]));
-
-		} else if(strCompare(argument, "cls")) {
-			mainBufferSize = 0;
-
-		} else if(strCompare(argument, "doNothing")) {
-			pushToMainBuffer("");
-		}
-
+		comName = cName;
+		commandAvailable = true;
 	}
+
 };
 
 
