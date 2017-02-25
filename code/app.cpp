@@ -179,8 +179,11 @@ struct Asset {
 	FILETIME lastWriteTime;
 };
 
-
-
+struct AppData;
+void testFunction(Console* con, AppData* ad) {
+	int a = 324;
+	return;
+}
 
 
 struct AppData {
@@ -2929,7 +2932,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 					resultString = fillString("\"%s\"", args[0]);
 
 				} else if(strCompare(comName, "cls")) {
-					con->mainBufferSize = 0;
+					con->clearMainBuffer();
 					pushResult = false;
 
 				} else if(strCompare(comName, "doNothing")) {
@@ -2944,6 +2947,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 				}
 				if(pushResult) con->pushToMainBuffer(resultString);
 			}
+
+			con->updateBody();
 
 		}
 

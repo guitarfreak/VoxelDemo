@@ -1413,6 +1413,18 @@ int textSim(char* text, Font* font, TextSimInfo* tsi, TextInfo* ti, Vec2 startPo
 	return 1;
 }
 
+float getTextHeight(char* text, Font* font, Vec2 startPos = vec2(0,0), int wrapWidth = 0) {
+
+	TextSimInfo tsi = initTextSimInfo(startPos);
+	while(true) {
+		TextInfo ti;
+		if(!textSim(text, font, &tsi, &ti, startPos, wrapWidth)) break;
+	}
+
+	float height = startPos.y - (tsi.pos.y - font->height);
+	return height;
+}
+
 Vec2 getTextDim(char* text, Font* font, Vec2 startPos = vec2(0,0), int wrapWidth = 0) {
 	float maxX = startPos.x;
 
