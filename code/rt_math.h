@@ -2275,6 +2275,14 @@ inline Rect rectMinDim(Vec2 min, Vec2 dim) {
 	return r;
 }
 
+inline Rect rectULDim(float ulx, float uly, float dimw, float dimh) {
+	Rect r;
+	r.min = vec2(ulx, uly - dimh);
+	r.max = r.min + vec2(dimw, dimh);
+
+	return r;
+}
+
 inline Rect rectULDim(Vec2 ul, Vec2 dim) {
 	Rect r;
 	r.min = vec2(ul.x, ul.y - dim.h);
@@ -2370,10 +2378,10 @@ bool rectGetIntersection(Rect * intersectionRect, Rect r1, Rect r2) {
 };
 
 bool pointInRect(Vec2 p, Rect r) {
-	bool inRect = ( p.x > r.min.x &&
-					p.x < r.max.x &&
-					p.y > r.min.y &&
-					p.y < r.max.y   );
+	bool inRect = ( p.x >= r.min.x &&
+					p.x <= r.max.x &&
+					p.y >= r.min.y &&
+					p.y <= r.max.y   );
 
 	return inRect;
 }
@@ -2436,6 +2444,15 @@ Rect mapRect(Rect r, Rect oldInterp, Rect newInterp) {
 	result.min = mapVec2(result.min, oldInterp.min, oldInterp.max, newInterp.min, newInterp.max);
 	result.max = mapVec2(result.max, oldInterp.min, oldInterp.max, newInterp.min, newInterp.max);
 
+	return result;
+}
+
+Vec2 rectDistancePos(Rect r, Vec2 p) {
+	Vec2 result;
+		 if(p.x >= r.max.x) result.x = p.x - r.max.x;
+	else if(p.x <= r.min.x) result.x = p.x - r.min.x;
+		 if(p.y >= r.max.y) result.y = p.y - r.max.y;
+	else if(p.y <= r.min.y) result.y = p.y - r.min.y;
 	return result;
 }
 

@@ -71,30 +71,6 @@ struct ConsoleSettings {
 
 struct Console {
 
-/*
-	TODO's:
-	* Ctrl backspace, Ctrl Delete.
-	* Ctrl Left/Right not jumping multiple spaces.
-	* Selection Left/Right not working propberly.
-	* Ctrl + a.
-	* Clipboard.
-	* Mouse selection.
-	* Mouse release.
-	* Cleanup.
-	* Scrollbar.
-	* Line wrap.
-	* Command history.
-	* Input cursor vertical scrolling.
-	* Command hint on tab.
-	* Lag when inputting.
-	* Add function with string/float as argument.
-	* Make adding functions more robust.
-	* Move evaluate() too appMain to have acces to functionality.
-	* Select inside console output.
-	* Fix result display lag by moving things.
-    * Clean this up once it's solid. (More or less.)
-*/
-
 	ConsoleSettings cs;
 
 	// Temporary.
@@ -113,11 +89,12 @@ struct Console {
 
 	float scrollMode;
 	float scrollPercent;
-	float lastDiff;
+	// float lastDiff;
 	float mouseAnchor;
 
 	char* mainBuffer[256];
 	int mainBufferSize;
+	float mainBufferTextHeight;
 
 	char inputBuffer[1024];
 
@@ -154,8 +131,8 @@ struct Console {
 		float smallPos = -windowHeight * CONSOLE_SMALL_PERCENT;
 		targetPos = smallPos;
 
-		mode = 1;
-		// mode = 0;
+		// mode = 1;
+		mode = 0;
 		cursorIndex = 0;
 		markerIndex = 0;
 		scrollPercent = 1;
@@ -644,7 +621,9 @@ struct Console {
 
 			if(cursorAtEnd) cursorRect = rectAddOffset(cursorRect, vec2(rectGetDim(cursorRect).w/2, 0));
 			dcRect(cursorRect, cs.cursorColor + cmod);
+
 		}
+
 	}
 
 	void updateBody() {
@@ -667,8 +646,12 @@ struct Console {
 			dcRect(consoleBody, cs.bodyColor);
 
 			float scrollOffset = 0;
-			if(lastDiff >= 0) {
-				scrollOffset = scrollPercent*lastDiff; 
+
+			float consoleTextHeight = rectGetDim(consoleBody).h - cs.consolePadding.h*2;
+			float heightDiff = mainBufferTextHeight - consoleTextHeight;
+
+			if(heightDiff >= 0) {
+				scrollOffset = scrollPercent*heightDiff; 
 				
 				// Scrollbar background.
 
@@ -678,14 +661,14 @@ struct Console {
 				// Scrollbar cursor.
 
 				float consoleHeight = rectGetDim(consoleBody).h;
-				float scrollCursorHeight = (consoleHeight / (consoleHeight + lastDiff)) * consoleHeight;
+				float scrollCursorHeight = (consoleHeight / (consoleHeight + heightDiff)) * consoleHeight;
 				clampMin(&scrollCursorHeight, cs.scrollCursorMinHeight);
 
 
 				if(input->mouseWheel && pointInRect(input->mousePosNegative, consoleBody)) {
 					if(input->keysDown[KEYCODE_CTRL]) cs.scrollWheelAmount *= cs.scrollWheelAmountMod;
 
-					scrollPercent += -input->mouseWheel * (cs.scrollWheelAmount / lastDiff);
+					scrollPercent += -input->mouseWheel * (cs.scrollWheelAmount / heightDiff);
 					clamp(&scrollPercent, 0, 1);
 				}
 
@@ -698,7 +681,7 @@ struct Console {
 						if(input->keysPressed[KEYCODE_PAGEUP]) dir = -1;
 						else dir = 1;
 
-						scrollPercent += dir * (consoleHeight*0.8f / lastDiff);
+						scrollPercent += dir * (consoleHeight*0.8f / heightDiff);
 					}
 
 					clamp(&scrollPercent, 0, 1);
@@ -755,7 +738,7 @@ struct Console {
 
 				Rect consoleTextRect = consoleBody;
 				consoleTextRect = rectExpand(consoleTextRect, -cs.consolePadding*2);
-				if(lastDiff >= 0) consoleTextRect.max.x -= cs.scrollBarWidth;
+				if(heightDiff >= 0) consoleTextRect.max.x -= cs.scrollBarWidth;
 
 				dcScissor(scissorRectScreenSpace(consoleTextRect, res.h));
 
@@ -822,8 +805,6 @@ struct Console {
 
 					textPos.y -= textHeight;
 				}
-
-				lastDiff = textStart - textPos.y - rectGetDim(consoleTextRect).h;
 
 				if(cursorIndex != markerIndex) {
 					bodySelectionIndex = -1;
@@ -896,13 +877,13 @@ struct Console {
 		mainBufferSize++;
 
 		float height = getTextHeight(newString, cs.bodyFont, vec2(0,0), bodyTextWrapWidth);
-		lastDiff += height;
+		mainBufferTextHeight += height;
 	}
 
 
 	void clearMainBuffer() {
 		mainBufferSize = 0;
-		lastDiff = 0;
+		mainBufferTextHeight = 0;
 	}
 
 	bool strIsType(char* s, int type) {
@@ -1068,6 +1049,283 @@ struct DebugState {
 	Console console;
 };
 
+
+
+
+struct TextEditVars {
+	int cursorIndex;
+	int markerIndex;
+	Vec2 scrollOffset;
+
+	bool cursorChanged;
+};
+
+struct TextEditSettings {
+	bool wrapping;
+	bool singleLine;
+
+	float screenHeight;
+	float cursorWidth;
+
+	Vec4 colorBackground;
+	Vec4 colorSelection;
+	Vec4 colorText;
+	Vec4 colorCursor;
+};
+
+void textEditBox(char* text, int textMaxSize, Font* font, Rect textRect, Input* input, Vec2i align, TextEditSettings tes, TextEditVars* tev) {
+
+	if(tes.singleLine) tes.wrapping = false;
+
+	Vec2 startPos = rectGetUL(textRect) + tev->scrollOffset;
+	int wrapWidth = tes.wrapping ? rectGetDim(textRect).w : 0;
+
+	int cursorIndex = tev->cursorIndex;
+	int markerIndex = tev->markerIndex;
+
+	int mouseIndex = textMouseToIndex(text, font, startPos, input->mousePosNegative, align, wrapWidth);
+
+	if(input->mouseButtonPressed[0]) {
+		if(pointInRect(input->mousePosNegative, textRect)) {
+			markerIndex = mouseIndex;
+		}
+	}
+
+	if(input->mouseButtonDown[0]) {
+		cursorIndex = mouseIndex;
+	}
+
+
+
+	bool left = input->keysPressed[KEYCODE_LEFT];
+	bool right = input->keysPressed[KEYCODE_RIGHT];
+	bool up = input->keysPressed[KEYCODE_UP];
+	bool down = input->keysPressed[KEYCODE_DOWN];
+
+	bool a = input->keysPressed[KEYCODE_A];
+	bool x = input->keysPressed[KEYCODE_X];
+	bool c = input->keysPressed[KEYCODE_C];
+	bool v = input->keysPressed[KEYCODE_V];
+	
+	bool home = input->keysPressed[KEYCODE_HOME];
+	bool end = input->keysPressed[KEYCODE_END];
+	bool backspace = input->keysPressed[KEYCODE_BACKSPACE];
+	bool del = input->keysPressed[KEYCODE_DEL];
+	bool enter = input->keysPressed[KEYCODE_RETURN];
+	bool tab = input->keysPressed[KEYCODE_TAB];
+
+	bool ctrl = input->keysDown[KEYCODE_CTRL];
+	bool shift = input->keysDown[KEYCODE_SHIFT];
+
+	// Main navigation and things.
+
+	int startCursorIndex = cursorIndex;
+
+	if(ctrl && backspace) {
+		shift = true;
+		left = true;
+	}
+
+	if(ctrl && del) {
+		shift = true;
+		right = true;
+	}
+
+	if(!tes.singleLine) {
+		if(up || down) {
+			float cursorYOffset;
+			if(up) cursorYOffset = font->height;
+			else if(down) cursorYOffset = -font->height;
+
+			Vec2 cPos = textIndexToPos(text, font, startPos, cursorIndex, align, wrapWidth);
+			cPos.y += cursorYOffset;
+			int newCursorIndex = textMouseToIndex(text, font, startPos, cPos, align, wrapWidth);
+			cursorIndex = newCursorIndex;
+		}
+	}
+
+
+	if(left) {
+		if(ctrl) {
+			if(cursorIndex > 0) {
+				while(text[cursorIndex-1] == ' ') cursorIndex--;
+
+				if(cursorIndex > 0)
+			 		cursorIndex = strFindBackwards(text, ' ', cursorIndex-1);
+			}
+		} else {
+			bool isSelected = cursorIndex != markerIndex;
+			if(isSelected && !shift) {
+				if(cursorIndex < markerIndex) {
+					markerIndex = cursorIndex;
+				} else {
+					cursorIndex = markerIndex;
+				}
+			} else {
+				if(cursorIndex > 0) cursorIndex--;
+			}
+		}
+	}
+
+	if(right) {
+		if(ctrl) {
+			while(text[cursorIndex] == ' ') cursorIndex++;
+			if(cursorIndex <= strLen(text)) {
+				cursorIndex = strFindOrEnd(text, ' ', cursorIndex+1);
+				if(cursorIndex != strLen(text)) cursorIndex--;
+			}
+		} else {
+			bool isSelected = cursorIndex != markerIndex;
+			if(isSelected && !shift) {
+				if(cursorIndex > markerIndex) {
+					markerIndex = cursorIndex;
+				} else {
+					cursorIndex = markerIndex;
+				}
+			} else {
+				if(cursorIndex < strLen(text)) cursorIndex++;
+			}
+		}
+	}
+
+	if(tes.singleLine) {
+		if(home) {
+			cursorIndex = 0;
+		}
+
+		if(end) {
+			cursorIndex = strLen(text);
+		}
+	}
+
+	if((startCursorIndex != cursorIndex) && !shift) {
+		markerIndex = cursorIndex;
+	}
+
+	if(ctrl && a) {
+		cursorIndex = 0;
+		markerIndex = strLen(text);
+	}
+
+	bool isSelected = cursorIndex != markerIndex;
+
+	if((ctrl && x) && isSelected) {
+		c = true;
+		del = true;
+	}
+
+	if((ctrl && c) && isSelected) {
+		char* selection = textSelectionToString(text, cursorIndex, markerIndex);
+		setClipboard(selection);
+	}
+
+	if(enter) {
+		if(tes.singleLine) {
+			strClear(text);
+			cursorIndex = 0;
+			markerIndex = 0;
+		} else {
+			input->inputCharacters[input->inputCharacterCount++] = '\n';
+		}
+	}
+
+	if(backspace || del || (input->inputCharacterCount > 0) || (ctrl && v)) {
+		if(isSelected) {
+			int delIndex = min(cursorIndex, markerIndex);
+			int delAmount = abs(cursorIndex - markerIndex);
+			strRemoveX(text, delIndex, delAmount);
+			cursorIndex = delIndex;
+		}
+
+		markerIndex = cursorIndex;
+	}
+
+	if(ctrl && v) {
+		char* clipboard = (char*)getClipboard();
+		int clipboardSize = strLen(clipboard);
+		if(clipboardSize + strLen(text) < textMaxSize) {
+			strInsert(text, cursorIndex, clipboard);
+			cursorIndex += clipboardSize;
+			markerIndex = cursorIndex;
+		}
+	}
+
+	// Add input characters to input buffer.
+	if(input->inputCharacterCount > 0) {
+		if(input->inputCharacterCount + strLen(text) < textMaxSize) {
+			strInsert(text, cursorIndex, input->inputCharacters, input->inputCharacterCount);
+			cursorIndex += input->inputCharacterCount;
+			markerIndex = cursorIndex;
+		}
+	}
+
+	if(backspace && !isSelected) {
+		if(cursorIndex > 0) {
+			strRemove(text, cursorIndex);
+			cursorIndex--;
+		}
+		markerIndex = cursorIndex;
+	}
+
+	if(del && !isSelected) {
+		if(cursorIndex+1 <= strLen(text)) {
+			strRemove(text, cursorIndex+1);
+		}
+		markerIndex = cursorIndex;
+	}
+
+	// Scrolling.
+	{
+		Vec2 cursorPos = textIndexToPos(text, font, startPos, cursorIndex, align, wrapWidth);
+
+		float ch = font->height;
+		if(		cursorPos.x 	   < textRect.min.x) tev->scrollOffset.x += textRect.min.x - (cursorPos.x);
+		else if(cursorPos.x 	   > textRect.max.x) tev->scrollOffset.x += textRect.max.x - (cursorPos.x);
+		if(		cursorPos.y - ch/2 < textRect.min.y) tev->scrollOffset.y += textRect.min.y - (cursorPos.y - ch/2);
+		else if(cursorPos.y + ch/2 > textRect.max.y) tev->scrollOffset.y += textRect.max.y - (cursorPos.y + ch/2);
+
+		clampMax(&tev->scrollOffset.x, 0);
+		clampMin(&tev->scrollOffset.y, 0);
+	}
+
+
+
+	// Draw.
+
+	startPos = rectGetUL(textRect) + tev->scrollOffset;
+
+	// Background.
+
+	float g = 0.1f;
+	dcRect(textRect, tes.colorBackground);
+
+	// Selection.
+
+	dcEnable(STATE_SCISSOR);
+	dcScissor(scissorRectScreenSpace(textRect, tes.screenHeight));
+
+	drawTextSelection(text, font, startPos, cursorIndex, markerIndex, tes.colorSelection, align, wrapWidth);
+
+	// Text.
+
+	dcText(text, font, startPos, tes.colorText, align, wrapWidth);
+
+	dcDisable(STATE_SCISSOR);
+
+	// Cursor.
+
+	// tev->cursorTime += tes.dt * tes.cursorSpeed;
+	// Vec4 cmod = vec4(0,cos(tev->cursorTime)*tes.cursorColorMod - tes.cursorColorMod,0,0);
+
+	Vec2 cPos = textIndexToPos(text, font, startPos, cursorIndex, align, wrapWidth);
+	Rect cRect = rectCenDim(cPos, vec2(tes.cursorWidth, font->height));
+	dcRect(cRect, tes.colorCursor);
+
+	tev->cursorChanged = (tev->cursorIndex != cursorIndex || tev->markerIndex != markerIndex);
+
+	tev->cursorIndex = cursorIndex;
+	tev->markerIndex = markerIndex;
+}
 
 
 

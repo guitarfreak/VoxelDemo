@@ -1345,18 +1345,18 @@ TextSimInfo initTextSimInfo(Vec2 startPos) {
 }
 
 int textSim(char* text, Font* font, TextSimInfo* tsi, TextInfo* ti, Vec2 startPos = vec2(0,0), int wrapWidth = 0) {
-	if(text[tsi->index] == '\0') {
-		ti->pos = tsi->pos;
-		ti->index = tsi->index;
-		return 0;
-	}
-
 	ti->lineBreak = false;
 
 	if(tsi->lineBreak) {
 		ti->lineBreak = true;
 		ti->breakPos = tsi->breakPos;
 		tsi->lineBreak = false;
+	}
+
+	if(text[tsi->index] == '\0') {
+		ti->pos = tsi->pos;
+		ti->index = tsi->index;
+		return 0;
 	}
 
 	Vec2 oldPos = tsi->pos;
@@ -1501,8 +1501,10 @@ void drawTextSelection(char* text, Font* font, Vec2 startPos, int index1, int in
 		if(drawSelection) {
 			if(ti.lineBreak || endReached) {
 
-				Vec2 lineEnd = ti.lineBreak ? ti.breakPos : ti.pos;
-				if(!result) lineEnd = tsi.pos;
+				Vec2 lineEnd;
+				if(ti.lineBreak) lineEnd = ti.breakPos;
+				else if(!result) lineEnd = tsi.pos;
+				else lineEnd = ti.pos;
 
 				Rect r = rect(lineStart - vec2(0,font->height), lineEnd);
 				dcRect(r, color, drawList);
@@ -1531,7 +1533,7 @@ int textMouseToIndex(char* text, Font* font, Vec2 startPos, Vec2 mousePos, Vec2i
 	TextSimInfo tsi = initTextSimInfo(startPos);
 	while(true) {
 		TextInfo ti;
-		if(!textSim(text, font, &tsi, &ti, startPos, wrapWidth)) break;
+		int result = textSim(text, font, &tsi, &ti, startPos, wrapWidth);
 		
 		bool fLine = valueBetween(mousePos.y, ti.pos.y - font->height, ti.pos.y);
 		if(fLine) foundLine = true;
@@ -1541,6 +1543,8 @@ int textMouseToIndex(char* text, Font* font, Vec2 startPos, Vec2 mousePos, Vec2i
 	    	float charMid = ti.pos.x + ti.posAdvance.x*0.5f;
 			if(mousePos.x < charMid) return ti.index;
 		}
+
+		if(!result) break;
 	}
 
 	return tsi.index;

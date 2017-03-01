@@ -90,7 +90,6 @@ void guiSaveAll(Gui* gui, int slot);
 void guiLoadAll(Gui* gui, int slot);
 
 struct Font;
-
 struct Gui {
 	GuiColors colors;
 	GuiSettings settings;

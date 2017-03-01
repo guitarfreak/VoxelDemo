@@ -55,20 +55,40 @@ additionally:
 - make settings pushable as a whole
   -> doesn't that remove the need for explicit stacking in scrollbars and such?
 - top menu bar
+- Clean up the gui to make it more usable.
+- Make entities watchable and changeable in Gui.
 
 
 Changing course for now:
  * Split up main app.cpp into mutliple files.
  * Implement hotloading of text files -> textures, variables and so on.
  * Implement hotloading for shader.
- - Dropdown console.
-   - Make sure to clean it up once your satified with the functionality it.
- - Multiline text editing.
- - 3d animation system. (Search Opengl vertex skinning)
- - Sound perturbation (Whatever that is). 
+ * Dropdown console.
+ 	* Ctrl backspace, Ctrl Delete.
+ 	* Ctrl Left/Right not jumping multiple spaces.
+ 	* Selection Left/Right not working propberly.
+ 	* Ctrl + a.
+ 	* Clipboard.
+ 	* Mouse selection.
+ 	* Mouse release.
+ 	* Cleanup.
+ 	* Scrollbar.
+ 	* Line wrap.
+ 	* Command history.
+ 	* Input cursor vertical scrolling.
+ 	* Command hint on tab.
+ 	* Lag when inputting.
+ 	* Add function with string/float as argument.
+ 	* Make adding functions more robust.
+ 	* Move evaluate() too appMain to have acces to functionality.
+ 	* Select inside console output.
+ 	* Fix result display lag by moving things.
+	* Multiline text editing.
 
- - Clean up the gui to make it more usable.
- - Make entities watchable and changeable in Gui.
+ - 3d animation system. (Search Opengl vertex skinning.)
+
+ - Sound perturbation. (Whatever that is.) 
+
 
 
 //-------------------------------------
@@ -90,7 +110,7 @@ Changing course for now:
 - threadqueue do next work from main thread bug
 
 - Water lags behind one frame when drawing. Noticeable when pushing lower FPS on higher view distances. 
-- Fonts look bad (Whatever that means).
+- Fonts look bad. (Whatever that means.)
 
 */
 
@@ -2951,6 +2971,43 @@ extern "C" APPMAINFUNCTION(appMain) {
 			con->updateBody();
 
 		}
+
+
+		if(false)
+		{
+			int textMax = 1024;
+			static char* text = getPArrayDebug(char, 1024); 
+			Font* font = getFont(FONT_CONSOLAS, 22);
+			// Rect textRect = rectULDim(100,-100, 400, 300);
+			Rect textRect = rectULDim(100,-100, 100, 100);
+
+			if(second) {
+				strClear(text);
+				// char* testText = "This is a test text!\nLook and see this wonderfull stuff that is happening!\n dgrgterg re gserg\n serg seserg  esrg sergesrg\n\n re \nertg";
+				// char* testText = "\n";
+				// strCpy(text, testText);
+			}
+
+			static float cursorTime = 0;
+			cursorTime += ad->dt * 3;
+			Vec4 cursorColor = vec4(0,0.8f,0,1);
+			float cursorColorMod = 0.2f;
+			cursorColor.g += cos(cursorTime)*cursorColorMod - cursorColorMod;
+
+
+			static TextEditVars tev = {0, 0, vec2(0,0), false};
+			TextEditSettings tes = {true, false, wSettings->currentRes.h, 2, 
+									vec4(0.2f,0.2f,0.2f,1), vec4(0.2f,0.7f,0.1f,1), vec4(1,1,1,1), cursorColor};
+
+			textEditBox(text, textMax, font, textRect, ds->input, vec2i(-1,1), tes, &tev);
+
+			if(tev.cursorChanged) cursorTime = 0;
+
+
+
+			dcText(fillString("%i %i.", tev.cursorIndex, tev.markerIndex), font, vec2(50,-50), vec4(0,0,0,1), vec2i(-1,1), 0);
+		}
+
 
 		//
 		// save timer buffer
