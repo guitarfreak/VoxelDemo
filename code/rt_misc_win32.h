@@ -37,7 +37,7 @@ int getThreadQueueId(ThreadQueue* queue) {
 		}
 	}
 
-	assert(id != -1);
+	myAssert(id != -1);
 	return id;
 }
 
@@ -108,7 +108,7 @@ bool threadQueueAdd(ThreadQueue* queue, void (*function)(void*), void* data, boo
     // if(skipIfFull) {
     	// if(newWriteIndex == queue->readIndex) return false;
     // } else {
-	    assert(newWriteIndex != queue->readIndex);
+	    myAssert(newWriteIndex != queue->readIndex);
     // }
     ThreadJob* job = queue->jobs + queue->writeIndex;
     job->function = function;

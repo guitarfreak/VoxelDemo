@@ -85,6 +85,8 @@ Changing course for now:
  	* Fix result display lag by moving things.
 	* Multiline text editing.
 
+ - The Big Cleanup.
+
  - 3d animation system. (Search Opengl vertex skinning.)
 
  - Sound perturbation. (Whatever that is.) 
@@ -119,10 +121,9 @@ Changing course for now:
 	using namedBufferSubData vs uniforms for vertices -> 2400 ticks vs 400 ticks
 */
 
-
-
-// #pragma optimize( "", off )
 #pragma optimize( "", on )
+
+// Intrinsics.
 
 #include <iacaMarks.h>
 #include <xmmintrin.h>
@@ -134,18 +135,12 @@ Changing course for now:
 #include <gl\gl.h>
 // #include "glext.h"
 
-#include "rt_misc.h"
-#include "rt_math.h"
-#include "rt_hotload.h"
-#include "rt_misc_win32.h"
-#include "rt_platformWin32.h"
-
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
 #define STBI_ONLY_BMP
 #define STBI_ONLY_JPEG
-
 #include "stb_image.h"
+
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "stb_truetype.h"
 
@@ -156,14 +151,77 @@ Changing course for now:
 #define STBVOX_CONFIG_MODE 1
 #include "stb_voxel_render.h"
 
- 
-// #pragma optimize( "", off )
-// #pragma optimize( "", on )
+#include "rt_misc.h"
+#include "rt_math.h"
+#include "rt_hotload.h"
+#include "rt_misc_win32.h"
+#include "rt_platformWin32.h"
 
-#include "openglDefines.cpp"
-#include "memory.cpp"
+#include "memory.h"
+#include "openglDefines.h"
+
+
+char* fillString(char* text, ...) {
+	va_list vl;
+	va_start(vl, text);
+
+	int length = strLen(text);
+	char* buffer = getTString(length+1);
+
+	char valueBuffer[20] = {};
+
+	int ti = 0;
+	int bi = 0;
+	while(true) {
+		char t = text[ti];
+
+		if(text[ti] == '%' && text[ti+1] == 'f') {
+			float v = va_arg(vl, double);
+			floatToStr(valueBuffer, v, 2);
+			int sLen = strLen(valueBuffer);
+			memCpy(buffer + bi, valueBuffer, sLen);
+
+			ti += 2;
+			bi += sLen;
+			getTString(sLen);
+		} else if(text[ti] == '%' && text[ti+1] == 'i') {
+			int v = va_arg(vl, int);
+			intToStr(valueBuffer, v);
+			int sLen = strLen(valueBuffer);
+			memCpy(buffer + bi, valueBuffer, sLen);
+
+			ti += 2;
+			bi += sLen;
+			getTString(sLen);
+		} if(text[ti] == '%' && text[ti+1] == 's') {
+			char* str = va_arg(vl, char*);
+			int sLen = strLen(str);
+			memCpy(buffer + bi, str, sLen);
+
+			ti += 2;
+			bi += sLen;
+			getTString(sLen);
+		} if(text[ti] == '%' && text[ti+1] == '%') {
+			buffer[bi++] = '%';
+			ti += 2;
+			getTString(1);
+		} else {
+			buffer[bi++] = text[ti++];
+			getTString(1);
+
+			if(buffer[bi-1] == '\0') break;
+		}
+	}
+
+	return buffer;
+}
+
 
 #include "rendering.cpp"
+
+
+
+
 #include "gui.cpp"
 #include "debug.cpp"
 
@@ -171,10 +229,7 @@ Changing course for now:
 #include "voxel.cpp"
 
 
-
-
 #define USE_SRGB 1
-
 const int INTERNAL_TEXTURE_FORMAT = USE_SRGB ? GL_SRGB8_ALPHA8 : GL_RGBA8;
 
 
@@ -188,8 +243,6 @@ const char* miscTextureFolderPath = "..\\data\\Textures\\Misc\\";
 const char* cubeMapFolderPath = "..\\data\\Textures\\Skyboxes\\";
 const char* minecraftTextureFolderPath = "..\\data\\Textures\\Minecraft\\";
 
-const int currentSkybox = CUBEMAP_5;
-
 
 
 struct Asset {
@@ -199,11 +252,6 @@ struct Asset {
 	FILETIME lastWriteTime;
 };
 
-struct AppData;
-void testFunction(Console* con, AppData* ad) {
-	int a = 324;
-	return;
-}
 
 
 struct AppData {
@@ -278,6 +326,8 @@ struct AppData {
 	char* testBuffer;
 	int testBufferSize;
 };
+
+
 
 #pragma optimize( "", off )
 
@@ -1701,6 +1751,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 	// draw cubemap
+	int currentSkybox = CUBEMAP_5;
+
 	bindShader(SHADER_CUBEMAP);
 	glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 	glBindTextures(0, 1, &getCubemap(currentSkybox)->id);
@@ -3119,9 +3171,4 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 }
 
-POSTMAINFUNCTION(postMain) {
-	
-}
-
-// #pragma optimize( "", off)
 #pragma optimize( "", on ) 

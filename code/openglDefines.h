@@ -1,5 +1,4 @@
 
-
 #define GL_TEXTURE_CUBE_MAP_SEAMLESS      0x884F
 #define GL_FRAMEBUFFER_SRGB               0x8DB9
 #define GL_FRAMEBUFFER_SRGB               0x8DB9
@@ -145,9 +144,6 @@ typedef ptrdiff_t GLintptr;
 
 
 
-
-
-
 // typedef HGLRC wglCreateContextAttribsARBFunction(HDC hDC, HGLRC hshareContext, const int *attribList);
 // wglCreateContextAttribsARBFunction* wglCreateContextAttribsARB;
 
@@ -159,11 +155,9 @@ wglGetSwapIntervalEXTFunction* wglGetSwapIntervalEXT;
 typedef int wglSwapIntervalEXTFunction(int);
 wglSwapIntervalEXTFunction* wglSwapIntervalEXT;
 
-
 #define GLOP(returnType, name, ...) makeGLFunction(returnType, name, __VA_ARGS__) 
 	GL_FUNCTION_LIST
 #undef GLOP
-
 
 void loadFunctions() {
 #define GLOP(returnType, name, ...) loadGLFunction(name)

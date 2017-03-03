@@ -11,7 +11,11 @@ typedef uint64_t u64;
 typedef int64_t i64;
 typedef double f64;
 
-void assert(bool check) {
+#define arrayCount(array) (sizeof(array) / sizeof((array)[0]))
+#define addPointer(ptr, int) ptr = (char*)ptr + int
+#define memberSize(type, member) sizeof(((type *)0)->member)
+
+int myAssert(bool check) {
 	if(!check) {
 
 		printf("Assert fired!\n");
@@ -20,12 +24,8 @@ void assert(bool check) {
 		}
 		exit(1);
 	}
+	return 234;
 }
-
-#define arrayCount(array) (sizeof(array) / sizeof((array)[0]))
-#define addPointer(ptr, int) ptr = (char*)ptr + int
-#define memberSize(type, member) sizeof(((type *)0)->member)
-
 
 void memSet(void* dest, int value, int numOfBytes) {
 	char* destPointer = (char*)dest;
@@ -507,7 +507,7 @@ int readFileSectionToBuffer(char* buffer, char* fileName, int offsetInBytes, int
 	int size = ftell(file);
 	fseek(file, 0, SEEK_SET);
 
-	assert(offsetInBytes+sizeInBytes < size);
+	myAssert(offsetInBytes+sizeInBytes < size);
 
 	fseek(file, offsetInBytes, SEEK_SET);
 	fread(buffer, sizeInBytes, 1, file);
@@ -520,7 +520,7 @@ void readFileToString(String* str, char* fileName) {
 	str->size = readFileToBuffer(str->data, fileName);
 	str->setEndZero();
 
-	assert(str->size <= str->maxSize);
+	myAssert(str->size <= str->maxSize);
 }
 
 int writeBufferToFile(char* buffer, char* fileName, int size = -1) {
@@ -549,7 +549,7 @@ int writeBufferSectionToFile(char* buffer, char* fileName, int offsetInBytes, in
 	int size = ftell(file);
 	fseek(file, 0, SEEK_SET);
 
-	assert(offsetInBytes+sizeInBytes < size);
+	myAssert(offsetInBytes+sizeInBytes < size);
 
 	fseek(file, offsetInBytes, SEEK_SET);
 	fwrite(buffer, sizeInBytes, 1, file);
@@ -626,7 +626,7 @@ void initMemoryArray(MemoryArray * memory, int slotSize, void* baseAddress = 0) 
 	    int errorCode = GetLastError();
     } else memory->data = (char*)malloc(slotSize);
 
-    assert(memory->data);
+    myAssert(memory->data);
 
     memory->index = 0;
     memory->size = slotSize;
@@ -636,7 +636,7 @@ MemoryArray* globalMemoryArray;
 
 void* getMemoryArray(int size, MemoryArray * memory = 0) {
     if(!memory) memory = globalMemoryArray;
-    assert(memory->index + size <= memory->size);
+    myAssert(memory->index + size <= memory->size);
 
     void * location = memory->data + memory->index;
     memory->index += size;
@@ -646,7 +646,7 @@ void* getMemoryArray(int size, MemoryArray * memory = 0) {
 
 void freeMemoryArray(int size, MemoryArray * memory = 0) {
     if(!memory) memory = globalMemoryArray;
-    assert(memory->size >= memory->index);
+    myAssert(memory->size >= memory->index);
 
     memory->index -= size;
 }
@@ -677,12 +677,12 @@ ExtendibleMemoryArray* globalExtendibleMemoryArray;
 
 void* getExtendibleMemoryArray(int size, ExtendibleMemoryArray* memory = 0) {
 	if(!memory) memory = globalExtendibleMemoryArray;
-	assert(size <= memory->slotSize);
+	myAssert(size <= memory->slotSize);
 
 	MemoryArray* currentArray = memory->arrays + memory->index;
 	if(currentArray->index + size > currentArray->size) {
 		memory->index++;
-		assert(memory->index < arrayCount(memory->arrays));
+		myAssert(memory->index < arrayCount(memory->arrays));
 		i64 baseOffset = (i64)memory->index*(i64)memory->slotSize;
 		initMemoryArray(&memory->arrays[memory->index], memory->slotSize, (char*)memory->startAddress + baseOffset);
 		currentArray = memory->arrays + memory->index;
@@ -718,7 +718,7 @@ void initBucketMemory(BucketMemory* memory, int pageSize, int slotSize, void* ba
 		// memory->data = (char*)malloc(slotSize + memory->count);
 	}
 	else memory->data = (char*)malloc(slotSize + memory->count);
-	assert(memory->data);
+	myAssert(memory->data);
 
 	memory->used = (bool*)memory->data + slotSize;
 	memSet(memory->used, 0, memory->count);
@@ -733,7 +733,7 @@ BucketMemory* globalBucketMemory;
 
 void* getBucketMemory(BucketMemory* memory = 0) {
 	if(memory == 0) memory = globalBucketMemory;
-	assert(memory);
+	myAssert(memory);
 
 	if(memory->useCount == memory->count) return 0;
 
@@ -747,13 +747,13 @@ void* getBucketMemory(BucketMemory* memory = 0) {
 		}
 	}
 
-	assert(address);
+	myAssert(address);
 
 	if(address) {
 		memory->used[index] = true;
 
 		memory->useCount++;
-		assert(memory->useCount <= memory->count);
+		myAssert(memory->useCount <= memory->count);
 
 		return address;
 	}
@@ -763,10 +763,10 @@ void* getBucketMemory(BucketMemory* memory = 0) {
 
 void freeBucketMemory(void* address, BucketMemory* memory = 0) {
 	if(memory == 0) memory = globalBucketMemory;
-	assert(memory);
+	myAssert(memory);
 
 	memory->useCount--;
-	assert(memory->useCount >= 0);
+	myAssert(memory->useCount >= 0);
 
 	int dataOffset = ((char*)address - memory->data) / memory->pageSize;
 	memory->used[dataOffset] = false;
@@ -821,7 +821,7 @@ void* getExtendibleBucketMemory(ExtendibleBucketMemory* memory = 0) {
 			}
 		}
 
-		assert(availableBucket);
+		myAssert(availableBucket);
 
 		int slotSize = memory->slotSize;
 		i64 baseOffset = arrayIndex * memory->fullSize;
@@ -862,8 +862,6 @@ struct AppMemory {
 	int extendibleBucketMemoryCount;
 };
 
-
-
 //
 //
 //
@@ -883,11 +881,6 @@ bool flagCheck(uint flags, int flagType)
 //
 //
 //
-
-
-
-
-
 
 enum TimerType {
 	TIMER_TYPE_BEGIN,

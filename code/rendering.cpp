@@ -1,80 +1,12 @@
 
 struct DrawCommandList;
-struct GraphicsState;
 extern DrawCommandList* globalCommandList;
+struct GraphicsState;
 extern GraphicsState* globalGraphicsState;
 
-#define getPStruct(type) 		(type*)(getPMemory(sizeof(type)))
-#define getPArray(type, count) 	(type*)(getPMemory(sizeof(type) * count))
-#define getTStruct(type) 		(type*)(getTMemory(sizeof(type)))
-#define getTArray(type, count) 	(type*)(getTMemory(sizeof(type) * count))
-#define getTString(size) 		(char*)(getTMemory(size)) 
-#define getDStruct(type) 		(type*)(getDMemory(sizeof(type)))
-#define getDArray(type, count) 	(type*)(getDMemory(sizeof(type) * count))
-
-// @Cleanup
-
-struct MemoryBlock;
-void* getPMemory(int size, MemoryBlock * memory = 0);
-void* getTMemory(int size, MemoryBlock * memory = 0);
-
-
-char* fillString(char* text, ...) {
-	va_list vl;
-	va_start(vl, text);
-
-	int length = strLen(text);
-	char* buffer = getTString(length+1);
-
-	char valueBuffer[20] = {};
-
-	int ti = 0;
-	int bi = 0;
-	while(true) {
-		char t = text[ti];
-
-		if(text[ti] == '%' && text[ti+1] == 'f') {
-			float v = va_arg(vl, double);
-			floatToStr(valueBuffer, v, 2);
-			int sLen = strLen(valueBuffer);
-			memCpy(buffer + bi, valueBuffer, sLen);
-
-			ti += 2;
-			bi += sLen;
-			getTString(sLen);
-		} else if(text[ti] == '%' && text[ti+1] == 'i') {
-			int v = va_arg(vl, int);
-			intToStr(valueBuffer, v);
-			int sLen = strLen(valueBuffer);
-			memCpy(buffer + bi, valueBuffer, sLen);
-
-			ti += 2;
-			bi += sLen;
-			getTString(sLen);
-		} if(text[ti] == '%' && text[ti+1] == 's') {
-			char* str = va_arg(vl, char*);
-			int sLen = strLen(str);
-			memCpy(buffer + bi, str, sLen);
-
-			ti += 2;
-			bi += sLen;
-			getTString(sLen);
-		} if(text[ti] == '%' && text[ti+1] == '%') {
-			buffer[bi++] = '%';
-			ti += 2;
-			getTString(1);
-		} else {
-			buffer[bi++] = text[ti++];
-			getTString(1);
-
-			if(buffer[bi-1] == '\0') break;
-		}
-	}
-
-	return buffer;
-}
-
-
+//
+// CommandList.
+//
 
 enum CommandState {
 	STATE_SCISSOR,
@@ -268,33 +200,54 @@ void dcDisable(int state, DrawCommandList* drawList = 0) {
 	command->state = state;
 }
 
+//
+// Shaders.
+//
 
+struct ShaderUniform {
+	int type;
+	int vertexLocation;
+	int fragmentLocation;
+};
 
+struct Shader {
+	uint program;
+	uint vertex;
+	uint fragment;
+	int uniformCount;
+	ShaderUniform* uniforms;
+};
 
+struct ShaderUniformType {
+	uint type;
+	char* name;
+};
 
+struct MakeShaderInfo {
+	char* vertexString;
+	char* fragmentString;
 
-// #define GLSL(src) "#version 330\n \
-// 	#extension GL_ARB_gpu_shader5               : enable\n \
-// 	#extension GL_ARB_gpu_shader_fp64           : enable\n \
-// 	#extension GL_ARB_shader_precision          : enable\n \
-// 	#extension GL_ARB_conservative_depth        : enable\n \
-// 	#extension GL_ARB_texture_cube_map_array    : enable\n \
-// 	#extension GL_ARB_separate_shader_objects   : enable\n \
-// 	#extension GL_ARB_shading_language_420pack  : enable\n \
-// 	#extension GL_ARB_shading_language_packing  : enable\n \
-// 	#extension GL_ARB_explicit_uniform_location : enable\n" #src
+	int uniformCount;
+	ShaderUniformType* uniformNameMap;
+};
 
+enum UniformType {
+	UNIFORM_TYPE_VEC4 = 0,
+	UNIFORM_TYPE_VEC3,
+	UNIFORM_TYPE_VEC2,
+	UNIFORM_TYPE_MAT4,
+	UNIFORM_TYPE_INT,
+	UNIFORM_TYPE_FLOAT,
 
-// #define GLSL(src) "#version 330\n \
+	UNIFORM_TYPE_SIZE,
+};
+
+#define HOTRELOAD_SHADERS 0
 
 #define GLSL(src) "#version 430\n \
 	#extension GL_ARB_bindless_texture 			: enable\n \
-	#extension GL_NV_command_list 				: enable\n \
 	#extension GL_ARB_shading_language_include 	: enable\n \
 	#extension GL_ARB_uniform_buffer_object 	: enable\n \
-	#extension GL_NV_vertex_buffer_unified_memory : enable\n \
-	#extension GL_NV_uniform_buffer_unified_memory : enable\n \
-	#extension GL_NV_shader_buffer_load : enable\n \
 	#extension GL_ARB_gpu_shader5               : enable\n \
 	#extension GL_ARB_gpu_shader_fp64           : enable\n \
 	#extension GL_ARB_shader_precision          : enable\n \
@@ -305,9 +258,34 @@ void dcDisable(int state, DrawCommandList* drawList = 0) {
 	#extension GL_ARB_shading_language_packing  : enable\n \
 	#extension GL_ARB_explicit_uniform_location : enable\n" #src
 
+//
 
+enum CubeUniforms {
+	CUBE_UNIFORM_MODEL = 0,
+	CUBE_UNIFORM_VIEW,
+	CUBE_UNIFORM_PROJ,
+	CUBE_UNIFORM_COLOR,
+	CUBE_UNIFORM_MODE,
+	CUBE_UNIFORM_VERTICES,
+	CUBE_UNIFORM_CPLANE,
+	CUBE_UNIFORM_UV,
+	CUBE_UNIFORM_ALPHA_TEST,
+	CUBE_UNIFORM_ALPHA,
+	CUBE_UNIFORM_SIZE,
+};
 
-#define HOTRELOAD_SHADERS 0
+ShaderUniformType cubeShaderUniformType[] = {
+	{UNIFORM_TYPE_MAT4, "model"},
+	{UNIFORM_TYPE_MAT4, "view"},
+	{UNIFORM_TYPE_MAT4, "proj"},
+	{UNIFORM_TYPE_VEC4, "setColor"},
+	{UNIFORM_TYPE_INT,  "mode"},
+	{UNIFORM_TYPE_VEC3, "vertices"},
+	{UNIFORM_TYPE_VEC4, "cPlane"},
+	{UNIFORM_TYPE_VEC2, "setUV"},
+	{UNIFORM_TYPE_FLOAT, "alpha"},
+	{UNIFORM_TYPE_INT, "alphaTest"},
+};
 
 const char* vertexShaderCube = GLSL (
 	out gl_PerVertex { vec4 gl_Position; };
@@ -365,8 +343,24 @@ const char* fragmentShaderCube = GLSL (
 	}
 );
 
+//
 
+enum QuadUniforms {
+	QUAD_UNIFORM_UV = 0,
+	QUAD_UNIFORM_TEXZ,
+	QUAD_UNIFORM_MOD,
+	QUAD_UNIFORM_COLOR,
+	QUAD_UNIFORM_CAMERA,
+	QUAD_UNIFORM_SIZE,
+};
 
+ShaderUniformType quadShaderUniformType[] = {
+	{UNIFORM_TYPE_VEC4, "setUV"},
+	{UNIFORM_TYPE_FLOAT, "texZ"},
+	{UNIFORM_TYPE_VEC4, "mod"},
+	{UNIFORM_TYPE_VEC4, "setColor"},
+	{UNIFORM_TYPE_VEC4, "camera"},
+};
 
 const char* vertexShaderQuad = GLSL (
 	const vec2 quad[] = vec2[] (
@@ -424,7 +418,11 @@ const char* fragmentShaderQuad = GLSL (
 	}
 );
 
+//
 
+enum TestUniforms {
+	TEST_UNIFORM_SIZE = 0,
+};
 
 // struct {
 //   ResourceGLuint  
@@ -535,6 +533,21 @@ const char* fragmentShaderTest = GLSL (
 	}
 );
 
+//
+
+enum ParticleUniforms {
+	PARTICLE_UNIFORM_MODEL = 0,
+	PARTICLE_UNIFORM_VIEW,
+	PARTICLE_UNIFORM_PROJ,
+
+	PARTICLE_UNIFORM_SIZE,
+};
+
+ShaderUniformType particleShaderUniformType[] = {
+	{UNIFORM_TYPE_MAT4, "model"},
+	{UNIFORM_TYPE_MAT4, "view"},
+	{UNIFORM_TYPE_MAT4, "proj"},
+};
 
 struct ParticleVertex {
 	Mat4 m;
@@ -591,9 +604,23 @@ const char* fragmentShaderParticle = GLSL (
 	}
 );
 
+//
 
+enum CubemapUniforms {
+	CUBEMAP_UNIFORM_VIEW = 0,
+	CUBEMAP_UNIFORM_PROJ,
+	CUBEMAP_UNIFORM_CLIPPLANE,
+	CUBEMAP_UNIFORM_CPLANE1,
 
+	CUBEMAP_UNIFORM_SIZE,
+};
 
+ShaderUniformType cubemapShaderUniformType[] = {
+	{UNIFORM_TYPE_MAT4, "view"},
+	{UNIFORM_TYPE_MAT4, "proj"},
+	{UNIFORM_TYPE_INT, "clipPlane"},
+	{UNIFORM_TYPE_VEC4, "cPlane"},
+};
 
 const char* vertexShaderCubeMap = GLSL (
 	const vec3 cube[] = vec3[] (
@@ -681,93 +708,7 @@ const char* fragmentShaderCubeMap = GLSL (
 	}
 );
 
-
-
-
-struct ShaderUniform {
-	int type;
-	int vertexLocation;
-	int fragmentLocation;
-};
-
-enum UniformType {
-	UNIFORM_TYPE_VEC4 = 0,
-	UNIFORM_TYPE_VEC3,
-	UNIFORM_TYPE_VEC2,
-	UNIFORM_TYPE_MAT4,
-	UNIFORM_TYPE_INT,
-	UNIFORM_TYPE_FLOAT,
-
-	UNIFORM_TYPE_SIZE,
-};
-
-struct ShaderUniformType {
-	uint type;
-	char* name;
-};
-
-struct MakeShaderInfo {
-	char* vertexString;
-	char* fragmentString;
-
-	int uniformCount;
-	ShaderUniformType* uniformNameMap;
-};
-
-enum ShaderProgram {
-	SHADER_CUBE = 0,
-	SHADER_QUAD,
-	SHADER_VOXEL,
-	SHADER_TEST,
-	SHADER_PARTICLE,
-	SHADER_CUBEMAP,
-
-	SHADER_SIZE,
-};
-
-enum CubeUniforms {
-	CUBE_UNIFORM_MODEL = 0,
-	CUBE_UNIFORM_VIEW,
-	CUBE_UNIFORM_PROJ,
-	CUBE_UNIFORM_COLOR,
-	CUBE_UNIFORM_MODE,
-	CUBE_UNIFORM_VERTICES,
-	CUBE_UNIFORM_CPLANE,
-	CUBE_UNIFORM_UV,
-	CUBE_UNIFORM_ALPHA_TEST,
-	CUBE_UNIFORM_ALPHA,
-	CUBE_UNIFORM_SIZE,
-};
-
-ShaderUniformType cubeShaderUniformType[] = {
-	{UNIFORM_TYPE_MAT4, "model"},
-	{UNIFORM_TYPE_MAT4, "view"},
-	{UNIFORM_TYPE_MAT4, "proj"},
-	{UNIFORM_TYPE_VEC4, "setColor"},
-	{UNIFORM_TYPE_INT,  "mode"},
-	{UNIFORM_TYPE_VEC3, "vertices"},
-	{UNIFORM_TYPE_VEC4, "cPlane"},
-	{UNIFORM_TYPE_VEC2, "setUV"},
-	{UNIFORM_TYPE_FLOAT, "alpha"},
-	{UNIFORM_TYPE_INT, "alphaTest"},
-};
-
-enum QuadUniforms {
-	QUAD_UNIFORM_UV = 0,
-	QUAD_UNIFORM_TEXZ,
-	QUAD_UNIFORM_MOD,
-	QUAD_UNIFORM_COLOR,
-	QUAD_UNIFORM_CAMERA,
-	QUAD_UNIFORM_SIZE,
-};
-
-ShaderUniformType quadShaderUniformType[] = {
-	{UNIFORM_TYPE_VEC4, "setUV"},
-	{UNIFORM_TYPE_FLOAT, "texZ"},
-	{UNIFORM_TYPE_VEC4, "mod"},
-	{UNIFORM_TYPE_VEC4, "setColor"},
-	{UNIFORM_TYPE_VEC4, "camera"},
-};
+//
 
 enum VoxelUniforms {
 	VOXEL_UNIFORM_FACE_DATA = 0,
@@ -812,41 +753,20 @@ ShaderUniformType voxelShaderUniformType[] = {
 	{UNIFORM_TYPE_FLOAT, "alphaTest"},
 };
 
-enum TestUniforms {
-	TEST_UNIFORM_SIZE = 0,
+// Shader defined in stb_voxel_render.h
+
+enum ShaderProgram {
+	SHADER_CUBE = 0,
+	SHADER_QUAD,
+	SHADER_VOXEL,
+	SHADER_TEST,
+	SHADER_PARTICLE,
+	SHADER_CUBEMAP,
+
+	SHADER_SIZE,
 };
 
-enum ParticleUniforms {
-	PARTICLE_UNIFORM_MODEL = 0,
-	PARTICLE_UNIFORM_VIEW,
-	PARTICLE_UNIFORM_PROJ,
-
-	PARTICLE_UNIFORM_SIZE,
-};
-
-ShaderUniformType particleShaderUniformType[] = {
-	{UNIFORM_TYPE_MAT4, "model"},
-	{UNIFORM_TYPE_MAT4, "view"},
-	{UNIFORM_TYPE_MAT4, "proj"},
-};
-
-enum CubemapUniforms {
-	CUBEMAP_UNIFORM_VIEW = 0,
-	CUBEMAP_UNIFORM_PROJ,
-	CUBEMAP_UNIFORM_CLIPPLANE,
-	CUBEMAP_UNIFORM_CPLANE1,
-
-	CUBEMAP_UNIFORM_SIZE,
-};
-
-ShaderUniformType cubemapShaderUniformType[] = {
-	{UNIFORM_TYPE_MAT4, "view"},
-	{UNIFORM_TYPE_MAT4, "proj"},
-	{UNIFORM_TYPE_INT, "clipPlane"},
-	{UNIFORM_TYPE_VEC4, "cPlane"},
-};
-
-MakeShaderInfo makeShaderInfo[] = {
+MakeShaderInfo makeShaderInfo[SHADER_SIZE] = {
 	{(char*)vertexShaderCube, (char*)fragmentShaderCube, CUBE_UNIFORM_SIZE, cubeShaderUniformType},
 	{(char*)vertexShaderQuad, (char*)fragmentShaderQuad, QUAD_UNIFORM_SIZE, quadShaderUniformType},
 	{(char*)stbvox_get_vertex_shader(), (char*)stbvox_get_fragment_shader(), VOXEL_UNIFORM_SIZE, voxelShaderUniformType},
@@ -855,13 +775,9 @@ MakeShaderInfo makeShaderInfo[] = {
 	{(char*)vertexShaderCubeMap, (char*)fragmentShaderCubeMap, CUBEMAP_UNIFORM_SIZE, cubemapShaderUniformType},
 };
 
-struct Shader {
-	uint program;
-	uint vertex;
-	uint fragment;
-	int uniformCount;
-	ShaderUniform* uniforms;
-};
+//
+// Textures.
+// 
 
 enum TextureId {
 	TEXTURE_WHITE = 0,
@@ -977,6 +893,9 @@ void loadCubeMapFromFile(Texture* texture, char* filePath, int mipLevels, int in
 	stbi_image_free(stbData);
 }
 
+//
+// Fonts.
+//
 
 enum FontId {
 	FONT_LIBERATION_MONO = 0,
@@ -1003,6 +922,10 @@ struct Font {
 	int height;
 	float baseOffset;
 };
+
+// 
+// Meshes.
+//
 
 enum MeshId {
 	MESH_CUBE = 0,
@@ -1074,6 +997,10 @@ struct Mesh {
 	int elementCount;
 };
 
+// 
+// Samplers.
+//
+
 enum SamplerType {
 	SAMPLER_NORMAL = 0,
 	SAMPLER_VOXEL_1,
@@ -1081,6 +1008,10 @@ enum SamplerType {
 	SAMPLER_VOXEL_3,
 	SAMPLER_SIZE,
 };
+
+//
+// Data.
+//
 
 struct GraphicsState {
 	Shader shaders[SHADER_SIZE];
@@ -1670,9 +1601,7 @@ uint createSampler(float ani, int wrapS, int wrapT, int magF, int minF, int wrap
 
 
 
-#define dcGetStructAndIncrement(structType) \
-	Draw_Command_##structType dc = *((Draw_Command_##structType*)drawListIndex); \
-	drawListIndex += sizeof(Draw_Command_##structType); \
+
 
 int stateSwitch(int state) {
 	switch(state) {
@@ -1681,6 +1610,10 @@ int stateSwitch(int state) {
 	}
 	return 0;
 }
+
+#define dcGetStructAndIncrement(structType) \
+	Draw_Command_##structType dc = *((Draw_Command_##structType*)drawListIndex); \
+	drawListIndex += sizeof(Draw_Command_##structType); \
 
 void executeCommandList(DrawCommandList* list, bool print = false) {
 	// TIMER_BLOCK();

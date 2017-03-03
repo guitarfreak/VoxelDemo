@@ -78,8 +78,3 @@ struct ThreadQueue;
 #define APPMAINFUNCTION(name) void name(bool init, int second, bool reload, bool* isRunning, WindowsData windowsData, ThreadQueue* threadQueue, AppMemory* appMemory)
 typedef APPMAINFUNCTION(appMainType);
 appMainType* platform_appMain;
-
-
-#define POSTMAINFUNCTION(name) void name(bool init, int second, bool reload, bool* isRunning, WindowsData windowsData, ThreadQueue* threadQueue)
-typedef POSTMAINFUNCTION(postMainType);
-postMainType* platform_postMain;

@@ -22,14 +22,14 @@ extern MemoryBlock* globalMemory;
 // void* getPMemory(int size, MemoryBlock * memory = 0);
 // void* getTMemory(int size, MemoryBlock * memory = 0);
 
-void *getPMemory(int size, MemoryBlock * memory) {
+void *getPMemory(int size, MemoryBlock * memory = 0) {
 	if(memory == 0) memory = globalMemory;
 
 	void* location = getExtendibleMemoryArray(size, memory->pMemory);
     return location;
 }
 
-void * getTMemory(int size, MemoryBlock * memory) {
+void * getTMemory(int size, MemoryBlock * memory = 0) {
 	if(memory == 0) memory = globalMemory;
 
 	void* location = getMemoryArray(size, memory->tMemory);

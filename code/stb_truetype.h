@@ -2578,24 +2578,24 @@ STBTT_DEF int stbtt_BakeFontBitmap(const unsigned char *data, int offset,  // fo
    return bottom_y;
 }
 
-STBTT_DEF Vec2 stbtt_GetTextDim(stbtt_bakedchar* cData, int fontHeight, int glyphStart, char* text) {
-	Vec2 dim = vec2(0,fontHeight);
+// STBTT_DEF Vec2 stbtt_GetTextDim(stbtt_bakedchar* cData, int fontHeight, int glyphStart, char* text) {
+// 	Vec2 dim = vec2(0,fontHeight);
 
-	int length = strLen(text);
-	for(int i = 0; i < length; i++) {
-		int cIndex = text[i];
-		stbtt_bakedchar *b = cData + cIndex - glyphStart;
-		dim.w += b->xadvance;
-		if(cIndex == (int)'\n') dim.h += fontHeight;
-	}
+// 	int length = strLen(text);
+// 	for(int i = 0; i < length; i++) {
+// 		int cIndex = text[i];
+// 		stbtt_bakedchar *b = cData + cIndex - glyphStart;
+// 		dim.w += b->xadvance;
+// 		if(cIndex == (int)'\n') dim.h += fontHeight;
+// 	}
 
-	return dim;
-}
+// 	return dim;
+// }
 
 STBTT_DEF float stbtt_GetTextHeight(stbtt_bakedchar* cData, int fontHeight, int glyphStart, char* text) {
 	float height = fontHeight;
 
-	int length = strLen(text);
+	int length = STBTT_strlen((char *) text);
 	for(int i = 0; i < length; i++) {
 		if(text[i] == (int)'\n') height += fontHeight;
 	}
