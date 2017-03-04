@@ -184,6 +184,11 @@ inline bool valueBetween(float v, float min, float max) {
 	return result;
 }
 
+inline bool valueBetween(int v, int min, int max) {
+	bool result = (v >= min && v <= max);
+	return result;
+}
+
 inline bool valueBetween2(float v, float min, float max) {
 	bool result = (v > min && v <= max);
 	return result;

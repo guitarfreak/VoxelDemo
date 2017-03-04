@@ -822,6 +822,12 @@ struct Texture {
 	Vec2i dim;
 	int channels;
 	int levels;
+	int internalFormat;
+	int channelType;
+	int channelFormat;
+
+	bool isRenderBuffer;
+	int msaa;
 };
 
 int getMaximumMipmapsFromSize(int size) {
@@ -891,6 +897,18 @@ void loadCubeMapFromFile(Texture* texture, char* filePath, int mipLevels, int in
 	// glGenerateTextureMipmap(ad->cubemapTextureId);
 
 	stbi_image_free(stbData);
+}
+
+void createTexture(Texture* texture, bool isRenderBuffer = false) {	
+	if(!isRenderBuffer) glCreateTextures(GL_TEXTURE_2D, 1, &texture->id);
+	else glCreateRenderbuffers(1, &texture->id);
+}
+
+void recreateTexture(Texture* t) {
+	glDeleteTextures(1, &t->id);
+	glCreateTextures(GL_TEXTURE_2D, 1, &t->id);
+
+	glTextureStorage2D(t->id, 1, t->internalFormat, t->dim.w, t->dim.h);
 }
 
 //
@@ -1010,24 +1028,159 @@ enum SamplerType {
 };
 
 //
+// Framebuffers.
+//
+
+enum FrameBufferType {
+	FRAMEBUFFER_3dMsaa = 0,
+	FRAMEBUFFER_3dNoMsaa,
+	FRAMEBUFFER_Reflection,
+	FRAMEBUFFER_2d,
+	FRAMEBUFFER_Debug,
+
+	FRAMEBUFFER_SIZE,
+};
+
+enum FrameBufferSlot {
+	FRAMEBUFFER_SLOT_COLOR,
+	FRAMEBUFFER_SLOT_DEPTH,
+	FRAMEBUFFER_SLOT_STENCIL,
+	FRAMEBUFFER_SLOT_DEPTH_STENCIL,
+};
+
+struct FrameBuffer {
+	uint id;
+
+	union {
+		struct {
+			Texture* colorSlot[4];
+			Texture* depthSlot[4];
+			Texture* stencilSlot[4];
+			Texture* depthStencilSlot[4];
+		};
+
+		struct {
+			Texture* slots[16];
+		};
+	};
+};
+
+FrameBuffer* getFrameBuffer(int id);
+Texture* addTexture(Texture tex);
+
+void initFrameBuffer(FrameBuffer* fb) {
+	glCreateFramebuffers(1, &fb->id);
+
+	for(int i = 0; i < arrayCount(fb->slots); i++) {
+		fb->slots[i] = 0;
+	}
+}
+
+void attachToFrameBuffer(int id, int slot, int internalFormat, int w, int h, int msaa = 0) {
+	FrameBuffer* fb = getFrameBuffer(id);
+
+	bool isRenderBuffer = msaa > 0;
+
+	Texture t;
+	createTexture(&t, isRenderBuffer);
+	t.internalFormat = internalFormat;
+	t.dim.w = w;
+	t.dim.h = h;
+	t.isRenderBuffer = isRenderBuffer;
+	t.msaa = msaa;
+
+	Texture* tex = addTexture(t);
+
+	Vec2i indexRange;
+	if(slot == FRAMEBUFFER_SLOT_COLOR) indexRange = vec2i(0,4);
+	else if(slot == FRAMEBUFFER_SLOT_DEPTH) indexRange = vec2i(4,8);
+	else if(slot == FRAMEBUFFER_SLOT_STENCIL) indexRange = vec2i(8,12);
+	else if(slot == FRAMEBUFFER_SLOT_DEPTH_STENCIL) indexRange = vec2i(12,16);
+
+	for(int i = indexRange.x; i <= indexRange.y; i++) {
+		if(fb->slots[i] == 0) {
+			fb->slots[i] = tex;
+			break;
+		}
+	}
+
+}
+
+void reloadFrameBuffer(int id) {
+	FrameBuffer* fb = getFrameBuffer(id);
+
+	for(int i = 0; i < arrayCount(fb->slots); i++) {
+		if(!fb->slots[i]) continue;
+		Texture* t = fb->slots[i];
+
+		int slot;
+		if(valueBetween(i, 0, 3)) slot = GL_COLOR_ATTACHMENT0 + i;
+		else if(valueBetween(i, 4, 7)) slot = GL_DEPTH_ATTACHMENT;
+		else if(valueBetween(i, 8, 11)) slot = GL_STENCIL_ATTACHMENT;
+		else if(valueBetween(i, 12, 15)) slot = GL_DEPTH_STENCIL_ATTACHMENT;
+
+		if(t->isRenderBuffer) {
+			glNamedRenderbufferStorageMultisample(t->id, t->msaa, t->internalFormat, t->dim.w, t->dim.h);
+			glNamedFramebufferRenderbuffer(fb->id, slot, GL_RENDERBUFFER, t->id);
+		} else {
+			glDeleteTextures(1, &t->id);
+			glCreateTextures(GL_TEXTURE_2D, 1, &t->id);
+			glTextureStorage2D(t->id, 1, t->internalFormat, t->dim.w, t->dim.h);
+			glNamedFramebufferTexture(fb->id, slot, t->id, 0);
+		}
+	}
+
+}
+
+void blitFrameBuffers(int id1, int id2, Vec2i dim, int bufferBit, int filter) {
+	FrameBuffer* fb1 = getFrameBuffer(id1);
+	FrameBuffer* fb2 = getFrameBuffer(id2);
+
+	glBlitNamedFramebuffer (fb1->id, fb2->id, 0,0, dim.x, dim.y, 0,0, dim.x, dim.y, bufferBit, filter);
+}
+
+void bindFrameBuffer(int id, int slot = GL_FRAMEBUFFER) {
+	FrameBuffer* fb = getFrameBuffer(id);
+	glBindFramebuffer(slot, fb->id);
+}
+
+void setDimForFrameBufferAttachmentsAndUpdate(int id, int w, int h) {
+	FrameBuffer* fb = getFrameBuffer(id);
+
+	for(int i = 0; i < arrayCount(fb->slots); i++) {
+		if(!fb->slots[i]) continue;
+		Texture* t = fb->slots[i];
+
+		t->dim = vec2i(w, h);
+	}
+
+	reloadFrameBuffer(id);
+}
+
+uint checkStatusFrameBuffer(int id) {
+	FrameBuffer* fb = getFrameBuffer(id);
+	GLenum result = glCheckNamedFramebufferStatus(fb->id, GL_FRAMEBUFFER);
+	return result;
+}
+
+//
 // Data.
 //
 
 struct GraphicsState {
 	Shader shaders[SHADER_SIZE];
-	Texture textures[TEXTURE_SIZE];
-
+	Texture textures[32]; //TEXTURE_SIZE
+	int textureCount;
 	Texture cubeMaps[CUBEMAP_SIZE];
-
 	Texture textures3d[2];
 	GLuint samplers[SAMPLER_SIZE];
-
 	Font fonts[FONT_SIZE][20];
-
 	Mesh meshs[MESH_SIZE];
 
 	GLuint textureUnits[16];
 	GLuint samplerUnits[16];
+
+	FrameBuffer frameBuffers[FRAMEBUFFER_SIZE];
 };
 
 Shader* getShader(int shaderId) {
@@ -1045,9 +1198,31 @@ Texture* getTexture(int textureId) {
 	return t;
 }
 
+Texture* getTextureX(int textureId) {
+	GraphicsState* gs = globalGraphicsState;
+	for(int i = 0; i < arrayCount(gs->textures); i++) {
+		if(gs->textures[i].id == textureId) {
+			return gs->textures + i;
+		}
+	}
+
+	return 0;
+}
+
+Texture* addTexture(Texture tex) {
+	GraphicsState* gs = globalGraphicsState;
+	gs->textures[gs->textureCount++] = tex;
+	return gs->textures + (gs->textureCount - 1);
+}
+
 Texture* getCubemap(int textureId) {
 	Texture* t = globalGraphicsState->cubeMaps + textureId;
 	return t;
+}
+
+FrameBuffer* getFrameBuffer(int id) {
+	FrameBuffer* fb = globalGraphicsState->frameBuffers + id;
+	return fb;
 }
 
 Font* getFont(int fontId, int height) {

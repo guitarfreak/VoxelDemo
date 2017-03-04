@@ -23,6 +23,8 @@
 #define GL_R8                             0x8229
 #define GL_ARRAY_BUFFER                   0x8892
 
+#define GL_NUM_EXTENSIONS                 0x821D
+
 #define GL_CLAMP_TO_EDGE                  0x812F
 #define GL_TEXTURE_MAX_ANISOTROPY_EXT     0x84FE
 #define GL_TEXTURE_WRAP_R                 0x8072
@@ -33,9 +35,11 @@
 #define GL_TEXTURE_2D_ARRAY               0x8C1A
 #define GL_FRAMEBUFFER                    0x8D40
 #define GL_COLOR_ATTACHMENT0              0x8CE0
+#define GL_STENCIL_ATTACHMENT             0x8D20
+#define GL_DEPTH_ATTACHMENT               0x8D00
+#define GL_DEPTH_STENCIL_ATTACHMENT       0x821A
 #define GL_RENDERBUFFER                   0x8D41
 #define GL_DEPTH_STENCIL                  0x84F9
-#define GL_DEPTH_STENCIL_ATTACHMENT       0x821A
 #define GL_DEPTH24_STENCIL8               0x88F0
 #define GL_DEBUG_OUTPUT_SYNCHRONOUS       0x8242
 #define GL_DEBUG_SEVERITY_HIGH            0x9146
@@ -142,25 +146,33 @@ typedef ptrdiff_t GLintptr;
 	GLOP(void, DrawArraysInstanced, GLenum mode, GLint first, GLsizei count, GLsizei primcount) \
 	GLOP(void, VertexAttribDivisor, GLuint index, GLuint divisor)
 
+#define GLOP(returnType, name, ...) makeGLFunction(returnType, name, __VA_ARGS__) 
+	GL_FUNCTION_LIST
+#undef GLOP
+
 
 
 // typedef HGLRC wglCreateContextAttribsARBFunction(HDC hDC, HGLRC hshareContext, const int *attribList);
 // wglCreateContextAttribsARBFunction* wglCreateContextAttribsARB;
-
-// wglGetSwapIntervalEXT = (wglGetSwapIntervalEXTFunction*)wglGetProcAddress("wglGetSwapIntervalEXT");
-
-
 typedef int wglGetSwapIntervalEXTFunction(void);
 wglGetSwapIntervalEXTFunction* wglGetSwapIntervalEXT;
 typedef int wglSwapIntervalEXTFunction(int);
 wglSwapIntervalEXTFunction* wglSwapIntervalEXT;
 
-#define GLOP(returnType, name, ...) makeGLFunction(returnType, name, __VA_ARGS__) 
-	GL_FUNCTION_LIST
-#undef GLOP
+
 
 void loadFunctions() {
 #define GLOP(returnType, name, ...) loadGLFunction(name)
 	GL_FUNCTION_LIST
+
+	wglGetSwapIntervalEXT = (wglGetSwapIntervalEXTFunction*)wglGetProcAddress("wglGetSwapIntervalEXT");
+	wglSwapIntervalEXT = (wglSwapIntervalEXTFunction*)wglGetProcAddress("wglSwapIntervalEXT");
 #undef GLOP
+}
+
+void printGlExtensions() {
+	for(int i = 0; i < GL_NUM_EXTENSIONS; i++) {
+		char* s = (char*)glGetStringi(GL_EXTENSIONS, i);
+		printf("%s\n", s);
+	}
 }

@@ -653,7 +653,7 @@ void makeMeshThreaded(void* data) {
 	d->inProgress = false;
 }
 
-MakeMeshThreadedData* threadData;
+MakeMeshThreadedData* voxelThreadData;
 
 void makeMesh(VoxelMesh* m, VoxelNode** voxelHash, int voxelHashSize) {
 	// int threadJobsMax = 20;
@@ -695,19 +695,19 @@ void makeMesh(VoxelMesh* m, VoxelNode** voxelHash, int voxelHashSize) {
 
 				MakeMeshThreadedData* data;
 				for(int i = 0; i < 256; i++) {
-					if(!threadData[i].inProgress) {
-						threadData[i] = {m, voxelHash, voxelHashSize, true};
-						// data = threadData + i;
+					if(!voxelThreadData[i].inProgress) {
+						voxelThreadData[i] = {m, voxelHash, voxelHashSize, true};
+						// data = voxelThreadData + i;
 						
 						atomicAdd(&m->activeMaking);
-						threadQueueAdd(globalThreadQueue, makeMeshThreaded, &threadData[i]);
+						threadQueueAdd(globalThreadQueue, makeMeshThreaded, &voxelThreadData[i]);
 
 						break;
 					}
 				}
 			} else {
-				threadData[1] = {m, voxelHash, voxelHashSize, true};
-				makeMeshThreaded(&threadData[1]);
+				voxelThreadData[1] = {m, voxelHash, voxelHashSize, true};
+				makeMeshThreaded(&voxelThreadData[1]);
 			}
 		}
 

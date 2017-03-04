@@ -1033,6 +1033,7 @@ struct DebugState {
 	GuiInput gInput;
 	Gui* gui;
 	Gui* gui2;
+	float guiAlpha;
 
 	Input* recordedInput;
 	int inputCapacity;

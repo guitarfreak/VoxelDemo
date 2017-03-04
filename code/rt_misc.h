@@ -597,10 +597,6 @@ inline int kiloBytes(int count)
 	return result;
 }
 
-//
-//
-//
-
 inline int roundDown(int i, int size) {
 	int val = (i/size) * size;
 	return val;
@@ -612,6 +608,9 @@ inline int roundUp(int i, int size) {
 	return val;	
 }
 
+//
+//
+//
 
 struct MemoryArray {
 	char * data;
@@ -655,6 +654,13 @@ void clearMemoryArray(MemoryArray* memory = 0) {
     if(!memory) memory = globalMemoryArray;
 	memory->index = 0;
 }
+
+void* getBaseMemoryArray(MemoryArray* ma) {
+	void* base = ma->data;
+	return base;
+}
+
+
 
 struct ExtendibleMemoryArray {
 	void* startAddress;
