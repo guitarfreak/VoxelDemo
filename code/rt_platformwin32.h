@@ -261,6 +261,8 @@ struct WindowSettings {
 
 	Vec2i currentRes;
 	float aspectRatio;
+
+	bool rePaint;	
 };
 
 void initSystem(SystemData* systemData, WindowSettings* ws, WindowsData wData, Vec2i res, bool resizable, bool maximizable, bool visible) {
@@ -477,10 +479,6 @@ void updateInput(Input* input, bool* isRunning, HWND windowHandle) {
                 *isRunning = false;
             } break;
 
-            case WM_ACTIVATEAPP: {
-
-            } break;
-
             default: {
                 TranslateMessage(&message); 
                 DispatchMessage(&message); 
@@ -589,6 +587,11 @@ DWORD getWindowStyle(HWND hwnd) {
 	return GetWindowLong(hwnd, GWL_STYLE);
 }
 
+void updateResolution(HWND windowHandle, WindowSettings* ws) {
+	getWindowProperties(windowHandle, &ws->currentRes.x, &ws->currentRes.y,0,0,0,0);
+	ws->aspectRatio = ws->currentRes.x / (float)ws->currentRes.y;
+}
+
 void setWindowMode(HWND hwnd, WindowSettings* wSettings, int mode) {
 	if(mode == WINDOW_MODE_FULLBORDERLESS && !wSettings->fullscreen) {
 		wSettings->g_wpPrev = {};
@@ -619,13 +622,36 @@ void setWindowMode(HWND hwnd, WindowSettings* wSettings, int mode) {
 
 		wSettings->fullscreen = false;
 	}
-
-	getWindowProperties(hwnd, &wSettings->currentRes.x, &wSettings->currentRes.y,0,0,0,0);
-	wSettings->aspectRatio = wSettings->currentRes.x / (float)wSettings->currentRes.y;
 }
 
 void swapBuffers(SystemData* systemData) {
     SwapBuffers(systemData->deviceContext);
+}
+
+void captureMouse(HWND windowHandle, bool t) {
+	if(t) {
+		int w,h;
+		Vec2i wPos;
+		getWindowProperties(windowHandle, &w, &h, 0, 0, &wPos.x, &wPos.y);
+		SetCursorPos(wPos.x + w/2, wPos.y + h/2);
+
+		while(ShowCursor(false) >= 0);
+	} else {
+		while(ShowCursor(true) < 0);
+	}
+}
+
+bool windowHasFocus(HWND windowHandle) {
+	bool result = GetFocus() == windowHandle;
+	return result;
+}
+
+bool windowSizeChanged(HWND windowHandle, WindowSettings* ws) {
+	Vec2i cr;
+	getWindowProperties(windowHandle, &cr.x, &cr.y, 0, 0, 0, 0);
+
+	bool result = cr != ws->currentRes;
+	return result;
 }
 
 // MetaPlatformFunction();

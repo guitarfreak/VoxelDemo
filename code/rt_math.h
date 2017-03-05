@@ -2136,11 +2136,25 @@ inline void viewMatrix(Mat4* m, Vec3 cPos, Vec3 cLook, Vec3 cUp, Vec3 cRight) {
 			0, 		  0, 		0, 		  1 };
 }
 
+inline Mat4 viewMatrix(Vec3 cPos, Vec3 cLook, Vec3 cUp, Vec3 cRight) {
+	Mat4 m;
+	viewMatrix(&m, cPos, cLook, cUp, cRight);
+
+	return m;
+}
+
 inline void projMatrix(Mat4* m, float fov, float ar, float n, float f) {
 	*m = { 	1/(ar*tan(fov*0.5f)), 0, 				 0, 			 0,
 			0, 					  1/(tan(fov*0.5f)), 0, 			 0,
 			0, 					  0, 				 -((f+n)/(f-n)), -((2*f*n)/(f-n)),
 			0, 					  0, 				 -1, 			 0 };
+}
+
+inline Mat4 projMatrix(float fov, float ar, float n, float f) {
+	Mat4 m;
+	projMatrix(&m, fov, ar, n, f);
+	
+	return m;
 }
 
 //
@@ -2726,6 +2740,13 @@ Vec4 colorSRGB(Vec4 color) {
 	color.g = powf(color.g, 2.2f);
 	color.b = powf(color.b, 2.2f);
 	// color.a = powf(color.a, 2.2f);
+	return color;
+}
+
+Vec3 colorSRGB(Vec3 color) {
+	color.x = powf(color.x, 2.2f);
+	color.y = powf(color.y, 2.2f);
+	color.z = powf(color.z, 2.2f);
 	return color;
 }
 

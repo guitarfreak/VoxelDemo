@@ -255,46 +255,47 @@ struct Asset {
 
 
 struct AppData {
+	
+	// General.
+
 	Asset assets[100];
 	int assetCount;
-
-	bool captureMouse;
-	bool updateFrameBuffers;
 
 	SystemData systemData;
 	Input input;
 	WindowSettings wSettings;
-
 	GraphicsState graphicsState;
-	DrawCommandList commandList2d;
-	DrawCommandList commandList3d;
 
-	LONGLONG lastTimeStamp;
 	float dt;
 	float time;
 
-	bool* treeNoise;
+	DrawCommandList commandList2d;
+	DrawCommandList commandList3d;
 
-	EntityList entityList;
-	Entity* player;
-	Entity* cameraEntity;
+	// 
+
+	bool captureMouse;
+	bool fpsMode;
 
 	Camera activeCam;
 
-	uint samplers[16];
-	uint frameBuffers[16];
-	uint renderBuffers[16];
-	uint frameBufferTextures[16];
+	Vec2i cur3dBufferRes;
+	int msaaSamples;
+	Vec2i fboRes;
+	bool useNativeRes;
 
 	float aspectRatio;
 	float fieldOfView;
 	float nearPlane;
 	float farPlane;
 
-	Vec2i curRes;
-	int msaaSamples;
-	Vec2i fboRes;
-	bool useNativeRes;
+	// Game.
+
+	EntityList entityList;
+	Entity* player;
+	Entity* cameraEntity;
+
+	bool* treeNoise;
 
 	bool playerMode;
 	bool pickMode;
@@ -321,23 +322,51 @@ struct AppData {
 
 	bool reloadWorld;
 
+	int voxelDrawCount;
+	int voxelTriangleCount;
+
+	int skyBoxId;
+	Vec3 fogColor;
+
+	// Particles.
+
 	GLuint testBufferId;
 	char* testBuffer;
 	int testBufferSize;
-
-	int voxelDrawCount;
-	int voxelTriangleCount;
 };
 
 
 
-#pragma optimize( "", off )
+void updateFrameBuffers(AppData* ad, WindowSettings* ws) {
+	ad->aspectRatio = ws->aspectRatio;
+	
+	ad->fboRes.x = ad->fboRes.y*ad->aspectRatio;
+
+	if(ad->useNativeRes) ad->cur3dBufferRes = ws->currentRes;
+	else ad->cur3dBufferRes = ad->fboRes;
+
+	Vec2i s = ad->cur3dBufferRes;
+	Vec2 reflectionRes = vec2(s);
+
+	setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_3dMsaa, s.w, s.h);
+	setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_3dNoMsaa, s.w, s.h);
+	setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_Reflection, reflectionRes.w, reflectionRes.h);
+	setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_2d, ws->currentRes.w, ws->currentRes.h);
+	setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_Debug, ws->currentRes.w, ws->currentRes.h);
+}
+
+
 
 void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, bool* isRunning, bool init);
 void debugUpdatePlayback(DebugState* ds, AppMemory* appMemory);
+
+#pragma optimize( "", off )
 extern "C" APPMAINFUNCTION(appMain) {
 
 	if(init) {
+
+		// Init memory.
+
 		SYSTEM_INFO info;
 		GetSystemInfo(&info);
 
@@ -364,6 +393,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ExtendibleMemoryArray* debugMemory = &appMemory->extendibleMemoryArrays[appMemory->extendibleMemoryArrayCount++];
 		initExtendibleMemoryArray(debugMemory, megaBytes(512), info.dwAllocationGranularity, baseAddress + gigaBytes(34));
 	}
+
+	// Setup memory and globals.
 
 	MemoryBlock gMemory = {};
 	gMemory.pMemory = &appMemory->extendibleMemoryArrays[0];
@@ -444,6 +475,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ds->showHud = false;
 		ds->guiAlpha = 0.95f;
 
+		ad->dt = 1/(float)60;
+
 		//
 		// Init Folder Handles.
 		//
@@ -464,8 +497,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		//
 		
 		initInput(&ad->input);
-		ad->dt = 1/(float)60;
-		ad->updateFrameBuffers = true;
 
 		// ad->fieldOfView = 55;
 		ad->fieldOfView = 60;
@@ -475,6 +506,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->nearPlane = 0.1f;
 		// ad->farPlane = 2000;
 		ad->farPlane = 3000;
+		ad->skyBoxId = CUBEMAP_5;
+		ad->fogColor = colorSRGB(vec3(0.43f,0.38f,0.44f));
 
 		ad->voxelHashSize = sizeof(arrayCount(ad->voxelHash));
 		for(int i = 0; i < ad->voxelHashSize; i++) {
@@ -611,10 +644,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// Samplers.
 		//
 
+		gs->samplers[SAMPLER_NORMAL] = createSampler(16.0f, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
 		gs->samplers[SAMPLER_VOXEL_1] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_NEAREST, GL_NEAREST_MIPMAP_LINEAR);
 		gs->samplers[SAMPLER_VOXEL_2] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_NEAREST, GL_NEAREST_MIPMAP_LINEAR);
 		gs->samplers[SAMPLER_VOXEL_3] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
-		ad->samplers[0] = createSampler(16.0f, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
 
 		//
 		// FrameBuffers.
@@ -637,6 +670,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			attachToFrameBuffer(FRAMEBUFFER_2d, FRAMEBUFFER_SLOT_COLOR, GL_RGBA8, 0, 0);
 			attachToFrameBuffer(FRAMEBUFFER_Debug, FRAMEBUFFER_SLOT_COLOR, GL_RGBA8, 0, 0);
+
+			updateFrameBuffers(ad, ws);
 		}
 
 		//
@@ -672,6 +707,31 @@ extern "C" APPMAINFUNCTION(appMain) {
 			asset->folderIndex = 2;
 			strCpy(asset->filePath, path);
 		}
+
+
+
+		// Load voxel meshes around the player at startup.
+		{
+			Vec2i pPos = coordToMesh(ad->player->pos);
+			for(int y = -1; y < 2; y++) {
+				for(int x = -1; x < 2; x++) {
+					Vec2i coord = pPos - vec2i(x,y);
+
+					VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
+					makeMesh(m, ad->voxelHash, ad->voxelHashSize);
+				}
+			}
+
+			threadQueueComplete(globalThreadQueue);
+
+			// Push the player up until he is right above the ground.
+
+			Entity* player = ad->player;
+
+			while(collisionVoxelWidthBox(ad->voxelHash, ad->voxelHashSize, player->pos, player->dim)) {
+				player->pos.z += 2;
+			}
+		}	
 	}
 
 	if(reload) {
@@ -700,125 +760,126 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	TIMER_BLOCK_BEGIN(Main)
 
+	// Update timer.
+	{
+		LARGE_INTEGER counter;
+		LARGE_INTEGER frequency;
+		QueryPerformanceFrequency(&frequency); 
+
+		if(init) {
+			QueryPerformanceCounter(&counter);
+			ds->lastTimeStamp = counter.QuadPart;
+			ds->dt = 1/(float)60;
+		} else {
+			QueryPerformanceCounter(&counter);
+			float timeStamp = counter.QuadPart;
+			ds->dt = (timeStamp - ds->lastTimeStamp);
+			ds->dt *= 1000000;
+			ds->dt = ds->dt/frequency.QuadPart;
+			ds->dt = ds->dt / 1000000;
+			ds->dt = clampMax(ds->dt, 1/(float)20);
+
+			ds->lastTimeStamp = timeStamp;
+
+			ds->time += ds->dt;
+		}
+	}
+
 	clearTMemory();
 
-	LARGE_INTEGER counter;
-	LARGE_INTEGER frequency;
-	QueryPerformanceFrequency(&frequency); 
+	// Allocate drawCommandlist.
 
-	if(init) {
-		QueryPerformanceCounter(&counter);
-		ad->lastTimeStamp = counter.QuadPart;
-		ad->dt = 1/(float)60;
-	} else {
-		QueryPerformanceCounter(&counter);
-		float timeStamp = counter.QuadPart;
-		ad->dt = (timeStamp - ad->lastTimeStamp);
-		ad->dt *= 1000000;
-		ad->dt = ad->dt/frequency.QuadPart;
-		ad->dt = ad->dt / 1000000;
-		ad->dt = clampMax(ad->dt, 1/(float)20);
-
-		ad->lastTimeStamp = timeStamp;
-
-		ad->time += ad->dt;
-	}
-	// printf("%f \n", ad->dt);
-	// ad->dt = 0.016f;
-
-
-
-	// alloc drawcommandlist	
 	int clSize = kiloBytes(1000);
 	drawCommandListInit(&ad->commandList3d, (char*)getTMemory(clSize), clSize);
 	drawCommandListInit(&ad->commandList2d, (char*)getTMemory(clSize), clSize);
 	globalCommandList = &ad->commandList3d;
 
+	// Hotload changed files.
+	{
+		// Todo: Get ReadDirectoryChangesW to work instead of FindNextChangeNotification.
 
+		/*
+		// HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+		// HANDLE directory = CreateFile("C:\\Projects", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
+		// HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
+		HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
+		// HANDLE directory = CreateFile("C:\\Projects\\", FILE_LIST_DIRECTORY, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+		if(directory == INVALID_HANDLE_VALUE) {
+			printf("Could not open directory.\n");
+		}
 
-	// Todo: Get ReadDirectoryChangesW to work instead of FindNextChangeNotification.
+		FILE_NOTIFY_INFORMATION notifyInformation[1024];
+		DWORD bytesReturned = 0;
+		bool result = ReadDirectoryChangesW(directory, (LPVOID)&notifyInformation, sizeof(notifyInformation), false, FILE_NOTIFY_CHANGE_LAST_WRITE, &bytesReturned, 0, 0);
+		CloseHandle(directory);
+		*/
 
-	/*
-	// HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-	// HANDLE directory = CreateFile("C:\\Projects", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
-	// HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
-	HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
-	// HANDLE directory = CreateFile("C:\\Projects\\", FILE_LIST_DIRECTORY, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-	if(directory == INVALID_HANDLE_VALUE) {
-		printf("Could not open directory.\n");
+		DWORD fileStatus = WaitForMultipleObjects(arrayCount(systemData->folderHandles), systemData->folderHandles, false, 0);
+		if(fileStatus == WAIT_OBJECT_0) {
+			FindNextChangeNotification(systemData->folderHandles[0]);
+
+			for(int i = 0; i < ad->assetCount; i++) {
+				Asset* asset = ad->assets + i;
+				if(asset->folderIndex != 0) continue;
+
+				FILETIME newWriteTime = getLastWriteTime(asset->filePath);
+				if(CompareFileTime(&asset->lastWriteTime, &newWriteTime) != 0) {
+					loadTextureFromFile(globalGraphicsState->textures + asset->index, texturePaths[asset->index], -1, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE, true);
+
+					asset->lastWriteTime = newWriteTime;
+				}
+			}
+
+		} else if(fileStatus == WAIT_OBJECT_0 + 1) {
+			FindNextChangeNotification(systemData->folderHandles[1]);
+			
+			for(int i = 0; i < ad->assetCount; i++) {
+				Asset* asset = ad->assets + i;
+				if(asset->folderIndex != 1) continue;
+				
+				int index = asset->index;
+				FILETIME newWriteTime = getLastWriteTime(asset->filePath);
+				if(CompareFileTime(&asset->lastWriteTime, &newWriteTime) != 0) {
+					loadCubeMapFromFile(globalGraphicsState->cubeMaps + index, (char*)cubeMapPaths[index], 5, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE, true);
+
+					asset->lastWriteTime = newWriteTime;
+				}
+			}
+
+		} else if(fileStatus == WAIT_OBJECT_0 + 2) {
+			FindNextChangeNotification(systemData->folderHandles[2]);
+
+			for(int i = 0; i < ad->assetCount; i++) {
+				Asset* asset = ad->assets + i;
+				if(asset->folderIndex != 2) continue;
+				
+				int index = asset->index;
+				FILETIME newWriteTime = getLastWriteTime(asset->filePath);
+				if(CompareFileTime(&asset->lastWriteTime, &newWriteTime) != 0) {
+					loadVoxelTextures((char*)minecraftTextureFolderPath, INTERNAL_TEXTURE_FORMAT, true, index);
+
+					asset->lastWriteTime = newWriteTime;
+				}
+			}
+		}
 	}
 
-	FILE_NOTIFY_INFORMATION notifyInformation[1024];
-	DWORD bytesReturned = 0;
-	bool result = ReadDirectoryChangesW(directory, (LPVOID)&notifyInformation, sizeof(notifyInformation), false, FILE_NOTIFY_CHANGE_LAST_WRITE, &bytesReturned, 0, 0);
-	CloseHandle(directory);
-	*/
-
-	#if 1
-	DWORD fileStatus = WaitForMultipleObjects(arrayCount(systemData->folderHandles), systemData->folderHandles, false, 0);
-	if(fileStatus == WAIT_OBJECT_0) {
-		FindNextChangeNotification(systemData->folderHandles[0]);
-
-		for(int i = 0; i < ad->assetCount; i++) {
-			Asset* asset = ad->assets + i;
-			if(asset->folderIndex != 0) continue;
-
-			FILETIME newWriteTime = getLastWriteTime(asset->filePath);
-			if(CompareFileTime(&asset->lastWriteTime, &newWriteTime) != 0) {
-				loadTextureFromFile(globalGraphicsState->textures + asset->index, texturePaths[asset->index], -1, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE, true);
-
-				asset->lastWriteTime = newWriteTime;
-			}
-		}
-
-	} else if(fileStatus == WAIT_OBJECT_0 + 1) {
-		FindNextChangeNotification(systemData->folderHandles[1]);
-		
-		for(int i = 0; i < ad->assetCount; i++) {
-			Asset* asset = ad->assets + i;
-			if(asset->folderIndex != 1) continue;
-			
-			int index = asset->index;
-			FILETIME newWriteTime = getLastWriteTime(asset->filePath);
-			if(CompareFileTime(&asset->lastWriteTime, &newWriteTime) != 0) {
-				loadCubeMapFromFile(globalGraphicsState->cubeMaps + index, (char*)cubeMapPaths[index], 5, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE, true);
-
-				asset->lastWriteTime = newWriteTime;
-			}
-		}
-
-	} else if(fileStatus == WAIT_OBJECT_0 + 2) {
-		FindNextChangeNotification(systemData->folderHandles[2]);
-
-		for(int i = 0; i < ad->assetCount; i++) {
-			Asset* asset = ad->assets + i;
-			if(asset->folderIndex != 2) continue;
-			
-			int index = asset->index;
-			FILETIME newWriteTime = getLastWriteTime(asset->filePath);
-			if(CompareFileTime(&asset->lastWriteTime, &newWriteTime) != 0) {
-				loadVoxelTextures((char*)minecraftTextureFolderPath, INTERNAL_TEXTURE_FORMAT, true, index);
-
-				asset->lastWriteTime = newWriteTime;
-			}
-		}
-	}
-
-	#endif
-
-
-
-
+	// Update input.
 	{
 		// TIMER_BLOCK_NAMED("Input");
 		updateInput(ds->input, isRunning, windowHandle);
+
 		ad->input = *ds->input;
 		if(ds->console.isActive) {
 			memSet(ad->input.keysPressed, 0, sizeof(ad->input.keysPressed));
 			memSet(ad->input.keysDown, 0, sizeof(ad->input.keysDown));
 		}
+
+		ad->dt = ds->dt;
+		ad->time = ds->time;
 	}
 
+	// Handle recording.
 	{
 		if(ds->recordingInput) {
 			memCpy(ds->recordedInput + ds->inputIndex, &ad->input, sizeof(Input));
@@ -844,8 +905,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		if(ws->fullscreen) mode = WINDOW_MODE_WINDOWED;
 		else mode = WINDOW_MODE_FULLBORDERLESS;
 		setWindowMode(windowHandle, ws, mode);
-
-		ad->updateFrameBuffers = true;
 	}
 
 	if(input->keysPressed[KEYCODE_F2]) {
@@ -858,61 +917,87 @@ extern "C" APPMAINFUNCTION(appMain) {
 		switchMonitor = !switchMonitor;
 
 		setWindowMode(windowHandle, ws, WINDOW_MODE_FULLBORDERLESS);
-
-		ad->updateFrameBuffers = true;
 	}
+
+	if(windowSizeChanged(windowHandle, ws)) {
+		updateResolution(windowHandle, ws);
+		updateFrameBuffers(ad, ws);
+	}
+
+	// Opengl Debug settings.
+	{
+		glEnable(GL_DEBUG_OUTPUT);
+		glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+
+		const int count = 10;
+		GLenum sources;
+		GLenum types;
+		GLuint ids;
+		GLenum severities;
+		GLsizei lengths;
+
+		int bufSize = 1000;
+		char* messageLog = getTString(bufSize);
+
+		uint fetchedLogs = 1;
+		while(fetchedLogs = glGetDebugMessageLog(count, bufSize, &sources, &types, &ids, &severities, &lengths, messageLog)) {
+			if(severities == GL_DEBUG_SEVERITY_NOTIFICATION) continue;
+
+			if(severities == GL_DEBUG_SEVERITY_HIGH) printf("HIGH: \n");
+			else if(severities == GL_DEBUG_SEVERITY_MEDIUM) printf("MEDIUM: \n");
+			else if(severities == GL_DEBUG_SEVERITY_LOW) printf("LOW: \n");
+			else if(severities == GL_DEBUG_SEVERITY_NOTIFICATION) printf("NOTE: \n");
+
+			printf("\t%s \n", messageLog);
+		}
+	}
+
+	// Clear all the framebuffers and window backbuffer.
+	{
+		glClearColor(0,0,0,0);
+
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		glClear(GL_COLOR_BUFFER_BIT);
+
+		for(int i = 0; i < arrayCount(gs->frameBuffers); i++) {
+			bindFrameBuffer(i);
+			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+		}
+	}
+
+	// Setup opengl.
+	{
+		// glDepthRange(-1.0,1.0);
+		glFrontFace(GL_CW);
+		glEnable(GL_DEPTH_TEST);
+		glEnable(GL_CULL_FACE);
+		glDisable(GL_SCISSOR_TEST);
+		glEnable(GL_LINE_SMOOTH);
+		glEnable(GL_TEXTURE_2D);
+		// glEnable(GL_ALPHA_TEST);
+		// glAlphaFunc(GL_GREATER, 0.9);
+		// glDisable(GL_LIGHTING);
+		// glDepthFunc(GL_LESS);
+		// glClearDepth(1);
+		// glDepthMask(GL_TRUE);
+		glEnable(GL_MULTISAMPLE);
+		// glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		glBlendEquation(GL_FUNC_ADD);
+
+		glViewport(0,0, ad->cur3dBufferRes.x, ad->cur3dBufferRes.y);
+	}
+
+
+
 
 	if(input->keysPressed[KEYCODE_F3]) {
 		ad->captureMouse = !ad->captureMouse;
 	}
 
-	bool focus = GetFocus() == windowHandle;
-	bool fpsMode = ad->captureMouse && focus;
-
-	if(fpsMode) {
-		int w,h;
-		Vec2i wPos;
-		getWindowProperties(systemData->windowHandle, &w, &h, 0, 0, &wPos.x, &wPos.y);
-		SetCursorPos(wPos.x + ws->currentRes.x/2, wPos.y + ws->currentRes.y/2);
-
-		while(ShowCursor(false) >= 0);
-	} else {
-		while(ShowCursor(true) < 0);
-	}
-
-	if(ad->updateFrameBuffers) {
-		ad->updateFrameBuffers = false;
-		ad->aspectRatio = ws->aspectRatio;
-		
-		ad->fboRes.x = ad->fboRes.y*ad->aspectRatio;
-
-		if(ad->useNativeRes) ad->curRes = ws->currentRes;
-		else ad->curRes = ad->fboRes;
-
-		Vec2i s = ad->curRes;
-		Vec2 reflectionRes = vec2(s);
-
-		setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_3dMsaa, s.w, s.h);
-		setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_3dNoMsaa, s.w, s.h);
-		setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_Reflection, reflectionRes.w, reflectionRes.h);
-		setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_2d, ws->currentRes.w, ws->currentRes.h);
-		setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_Debug, ws->currentRes.w, ws->currentRes.h);
-
-	}
-
-
-	// 2d camera controls
-	// Vec3* cam = &ad->camera;	
-	// if(input->mouseButtonDown[0]) {
-	// 	cam->x += input->mouseDeltaX*(cam->z/ws->currentRes.w);
-	// 	cam->y -= input->mouseDeltaY*((cam->z/ws->currentRes.h)/ad->aspectRatio);
-	// }
-
-	// if(input->mouseWheel) {
-	// 	float zoom = cam->z;
-	// 	zoom -= input->mouseWheel/(float)1;
-	// 	cam->z = zoom;
-	// }
+	ad->fpsMode = ad->captureMouse && windowHasFocus(windowHandle);
+	captureMouse(windowHandle, ad->fpsMode);
 
 	Entity* player = ad->player;
 	Entity* camera = ad->cameraEntity;
@@ -981,31 +1066,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 		addEntity(&ad->entityList, &b);
 	}
 
-	// make sure the meshs around the player are loaded at startup
-	if(init) {
-		// Vec2i pPos = coordToMesh(ad->activeCam.pos);
-		Vec2i pPos = coordToMesh(ad->player->pos);
-		// for(int i = 0; i < 2; i++) {
-			for(int y = -1; y < 2; y++) {
-				for(int x = -1; x < 2; x++) {
-					Vec2i coord = pPos - vec2i(x,y);
 
-					VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
-					makeMesh(m, ad->voxelHash, ad->voxelHashSize);
-				}
-			}
 
-			threadQueueComplete(globalThreadQueue);
-		// }
 
-		// Push the player up until he is right above the ground.
 
-		Entity* player = ad->player;
-
-		while(collisionVoxelWidthBox(ad->voxelHash, ad->voxelHashSize, player->pos, player->dim)) {
-			player->pos.z += 2;
-		}
-	}	
 
 	// TIMER_BLOCK_BEGIN_NAMED(entities, "Upd Entities");
 	// @update entities
@@ -1027,7 +1091,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				float runBoost = 1.5f;
 				float speed = 30;
 
-				if((!fpsMode && input->mouseButtonDown[1]) || fpsMode) {
+				if((!ad->fpsMode && input->mouseButtonDown[1]) || ad->fpsMode) {
 					float turnRate = ad->dt*0.3f;
 					e->rot.y += turnRate * input->mouseDeltaY;
 					e->rot.x += turnRate * input->mouseDeltaX;
@@ -1223,7 +1287,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				float speed = 150;
 				if(input->keysDown[KEYCODE_T]) speed = 1000;
 
-				if((!fpsMode && input->mouseButtonDown[1]) || fpsMode) {
+				if((!ad->fpsMode && input->mouseButtonDown[1]) || ad->fpsMode) {
 					float turnRate = ad->dt*0.3f;
 					e->rot.y += turnRate * input->mouseDeltaY;
 					e->rot.x += turnRate * input->mouseDeltaX;
@@ -1409,7 +1473,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->activeCam = getCamData(ad->cameraEntity->pos, ad->cameraEntity->rot, ad->cameraEntity->camOff);
 	}
 
-	// selecting blocks and modifying them
+	// Selecting blocks and modifying them.
 	if(ad->playerMode) {
 		ad->blockSelected = false;
 
@@ -1500,7 +1564,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			else if(intersectionFace == 5) faceDir = vec3(0,0,1);
 			ad->selectedBlockFaceDir = faceDir;
 
-			if(ad->playerMode && fpsMode) {
+			if(ad->playerMode && ad->fpsMode) {
 				VoxelMesh* vm = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordToMesh(intersectionBox));
 
 				uchar* block = getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, intersectionBox);
@@ -1508,8 +1572,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 				bool mouse1 = input->mouseButtonPressed[0];
 				bool mouse2 = input->mouseButtonPressed[1];
-				bool placeBlock = (!fpsMode && ad->pickMode && mouse1) || (fpsMode && mouse1);
-				bool removeBlock = (!fpsMode && !ad->pickMode && mouse1) || (fpsMode && mouse2);
+				bool placeBlock = (!ad->fpsMode && ad->pickMode && mouse1) || (ad->fpsMode && mouse1);
+				bool removeBlock = (!ad->fpsMode && !ad->pickMode && mouse1) || (ad->fpsMode && mouse2);
 
 				if(placeBlock || removeBlock) {
 					vm->upToDate = false;
@@ -1577,187 +1641,44 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 	}
 
-	// opengl init
+	// Main view proj setup.
+	Mat4 view, proj;
+	{
+		viewMatrix(&view, ad->activeCam.pos, -ad->activeCam.look, ad->activeCam.up, ad->activeCam.right);
+		projMatrix(&proj, degreeToRadian(ad->fieldOfView), ad->aspectRatio, ad->nearPlane, ad->farPlane);
 
-	glEnable(GL_DEBUG_OUTPUT);
-	glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+		bindFrameBuffer(FRAMEBUFFER_3dMsaa);
 
-	const int count = 10;
-	GLenum sources;
-	GLenum types;
-	GLuint ids;
-	GLenum severities;
-	GLsizei lengths;
+		pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_VIEW, view);
+		pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_PROJ, proj);
+	}	
 
-	int bufSize = 1000;
-	char* messageLog = getTString(bufSize);
+	// Draw cubemap.
+	{
+		bindShader(SHADER_CUBEMAP);
+		glBindTextures(0, 1, &getCubemap(ad->skyBoxId)->id);
+		glBindSamplers(0, 1, gs->samplers);
 
-	uint fetchedLogs = 1;
-	while(fetchedLogs = glGetDebugMessageLog(count, bufSize, &sources, &types, &ids, &severities, &lengths, messageLog)) {
-		if(severities == GL_DEBUG_SEVERITY_NOTIFICATION) continue;
+		Vec3 skyBoxRot;
+		if(ad->playerMode) skyBoxRot = ad->player->rot;
+		else skyBoxRot = ad->cameraEntity->rot;
+		skyBoxRot.x += M_PI;
 
-		if(severities == GL_DEBUG_SEVERITY_HIGH) printf("HIGH: \n");
-		else if(severities == GL_DEBUG_SEVERITY_MEDIUM) printf("MEDIUM: \n");
-		else if(severities == GL_DEBUG_SEVERITY_LOW) printf("LOW: \n");
-		else if(severities == GL_DEBUG_SEVERITY_NOTIFICATION) printf("NOTE: \n");
+		Camera skyBoxCam = getCamData(vec3(0,0,0), skyBoxRot, vec3(0,0,0), vec3(0,1,0), vec3(0,0,1));
+		pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_VIEW, viewMatrix(skyBoxCam.pos, -skyBoxCam.look, skyBoxCam.up, skyBoxCam.right));
+		pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_PROJ, projMatrix(degreeToRadian(ad->fieldOfView), ad->aspectRatio, 0.001f, 2));
+		pushUniform(SHADER_CUBEMAP, 2, CUBEMAP_UNIFORM_CLIPPLANE, false);
 
-		printf("\t%s \n", messageLog);
+		glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+		glDepthMask(false);
+		glFrontFace(GL_CCW);
+			glDrawArrays(GL_TRIANGLES, 0, 6*6);
+		glFrontFace(GL_CW);
+		glDepthMask(true);
+		glDisable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 	}
 
-	// glEnable(GL_FRAMEBUFFER_SRGB);
-	glEnable(GL_CULL_FACE);
-
-	// Vec3 skyColor = vec3(0.90f, 0.90f, 0.95f);
-	// Vec3 skyColor = vec3(0.95f);
-	Vec3 skyColor = vec3(0.90f);
-	// Vec3 fogColor = vec3(0.75f, 0.85f, 0.95f);
-	// Vec3 fogColor = vec3(0.43f,0.38f,0.44f);
-	Vec3 fogColor = vec3(0.43f,0.38f,0.44f);
-	fogColor.x = powf(fogColor.x, (float)2.2f);
-	fogColor.y = powf(fogColor.y, (float)2.2f);
-	fogColor.z = powf(fogColor.z, (float)2.2f);
-
-	// for tech showcase
-	#ifdef STBVOX_CONFIG_LIGHTING_SIMPLE
-	skyColor = skyColor * vec3(0.3f);
-	fogColor = fogColor * vec3(0.3f);
-	#endif 
-
-	glViewport(0,0, ad->curRes.x, ad->curRes.y);
-	// glClearColor(0,0,0, 1.0f);
-	// glClearColor(skyColor.x, skyColor.y, skyColor.z, 1.0f);
-
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-	bindFrameBuffer(FRAMEBUFFER_Debug);
-	glClearColor(0,0,0,0);
-	glClear(GL_COLOR_BUFFER_BIT);
-
-	bindFrameBuffer(FRAMEBUFFER_3dNoMsaa);
-	glClearColor(0,0,0,0);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-	bindFrameBuffer(FRAMEBUFFER_3dMsaa);
-	glClearColor(skyColor.x, skyColor.y, skyColor.z, 1.0f);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-	// glDepthRange(-1.0,1.0);
-	glFrontFace(GL_CW);
-
-	glEnable(GL_DEPTH_TEST);
-	glEnable(GL_CULL_FACE);
-	glDisable(GL_SCISSOR_TEST);
-	glEnable(GL_LINE_SMOOTH);
-
-	glEnable(GL_TEXTURE_2D);
-
-	// glEnable(GL_ALPHA_TEST);
-	// glAlphaFunc(GL_GREATER, 0.9);
-
-	// glDisable(GL_LIGHTING);
-	// glDepthFunc(GL_LESS);
-	// glClearDepth(1);
-	// glDepthMask(GL_TRUE);
-
-	glEnable(GL_MULTISAMPLE);
-	// glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	glBlendEquation(GL_FUNC_ADD);
-
-	lookAt(ad->activeCam.pos, -ad->activeCam.look, ad->activeCam.up, ad->activeCam.right);
-	perspective(degreeToRadian(ad->fieldOfView), ad->aspectRatio, ad->nearPlane, ad->farPlane);
-
-	Mat4 view, proj; 
-	viewMatrix(&view, ad->activeCam.pos, -ad->activeCam.look, ad->activeCam.up, ad->activeCam.right);
-	projMatrix(&proj, degreeToRadian(ad->fieldOfView), ad->aspectRatio, ad->nearPlane, ad->farPlane);
-
-	globalGraphicsState->textureUnits[0] = gs->textures3d[0].id;
-	globalGraphicsState->textureUnits[1] = gs->textures3d[1].id;
-	globalGraphicsState->samplerUnits[0] = gs->samplers[SAMPLER_VOXEL_1];
-	globalGraphicsState->samplerUnits[1] = gs->samplers[SAMPLER_VOXEL_2];
-	globalGraphicsState->samplerUnits[2] = gs->samplers[SAMPLER_VOXEL_3];
-
-	setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, fogColor);
-
-
-
-	// draw cubemap
-	int currentSkybox = CUBEMAP_5;
-
-	bindShader(SHADER_CUBEMAP);
-	glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
-	glBindTextures(0, 1, &getCubemap(currentSkybox)->id);
-	glBindSamplers(0, 1, ad->samplers);
-
-	Vec3 skyBoxRot;
-	if(ad->playerMode) skyBoxRot = ad->player->rot;
-	else skyBoxRot = ad->cameraEntity->rot;
-	skyBoxRot.x += M_PI;
-
-	Camera skyBoxCam = getCamData(vec3(0,0,0), skyBoxRot, vec3(0,0,0), vec3(0,1,0), vec3(0,0,1));
-
-	Mat4 viewMat; viewMatrix(&viewMat, skyBoxCam.pos, -skyBoxCam.look, skyBoxCam.up, skyBoxCam.right);
-	Mat4 projMat; projMatrix(&projMat, degreeToRadian(ad->fieldOfView), ad->aspectRatio, 0.001f, 2);
-	pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_VIEW, viewMat.e);
-	pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_PROJ, projMat.e);
-
-	pushUniform(SHADER_CUBEMAP, 2, CUBEMAP_UNIFORM_CLIPPLANE, false);
-
-	glDepthMask(false);
-	glFrontFace(GL_CCW);
-	glDrawArrays(GL_TRIANGLES, 0, 6*6);
-	glFrontFace(GL_CW);
-	glDepthMask(true);
-	glDisable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
-
-
-	// #if 1
-
-
-
-	// static float worldTimer = 0;
-	// worldTimer += ad->dt;
-
-	// if(worldTimer >= 1) {
-	// 	worldTimer = 0;
-
-	// 	int radius = VIEW_DISTANCE/VOXEL_X;
-
-	// 	for(int y = -radius; y < radius; y++) {
-	// 		for(int x = -radius; x < radius; x++) {
-	// 			Vec2i coord = vec2i(y, x);
-	// 			// Vec2i coord = vec2i(0,0);	
-	// 			VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
-	// 			m->upToDate = false;
-	// 			m->meshUploaded = false;
-	// 			m->generated = false;
-	// 		}
-	// 	}
-	// }
-
-	// bool worldLoaded = false;
-	// while(worldLoaded == false) {
-	// 	int radius = VIEW_DISTANCE/VOXEL_X;
-
-	// 	worldLoaded = true;
-
-	// 	for(int y = -radius; y < radius; y++) {
-	// 		for(int x = -radius; x < radius; x++) {
-	// 			Vec2i coord = vec2i(y, x);
-	// 			VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
-
-	// 			if(!m->meshUploaded) {
-	// 				makeMesh(m, ad->voxelHash, ad->voxelHashSize);
-
-	// 				worldLoaded = false;
-	// 			}
-	// 		}
-	// 	}
-	// }
-
-	if(ad->reloadWorld) {	
+	if(ad->reloadWorld) {
 		ad->reloadWorld = false;
 
 		if(threadQueueFinished(threadQueue)) {
@@ -1777,147 +1698,130 @@ extern "C" APPMAINFUNCTION(appMain) {
 					makeMesh(m, ad->voxelHash, ad->voxelHashSize);
 				}
 			}
-			// return;
 		} 
 	}
-
-
-	#if 0
-	// @worldgen
-	if(reload) {
-		int radius = VIEW_DISTANCE/VOXEL_X;
-
-		for(int y = -radius; y < radius; y++) {
-			for(int x = -radius; x < radius; x++) {
-				Vec2i coord = vec2i(y, x);
-				// Vec2i coord = vec2i(0,0);	
-				VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
-				// m->upToDate = false;
-				// m->meshUploaded = false;
-				// m->generated = false;
-			}
-		}
-		return;
-	}
-	#endif
 
 	// TIMER_BLOCK_BEGIN_NAMED(world, "Upd World");
 
 	Vec2i* coordList = (Vec2i*)getTMemory(sizeof(Vec2i)*2000);
 	int coordListSize = 0;
 
-	int meshGenerationCount = 0;
-	int radCounter = 0;
-	ad->voxelTriangleCount = 0;
-	ad->voxelDrawCount = 0;
+	// Collect voxel meshes to draw.
+	{
+		int meshGenerationCount = 0;
+		int radCounter = 0;
 
-	Vec2i pPos = coordToMesh(ad->activeCam.pos);
-	int radius = VIEW_DISTANCE/VOXEL_X;
+		ad->voxelTriangleCount = 0;
+		ad->voxelDrawCount = 0;
 
-	// generate the meshes around the player in a spiral by drawing lines and rotating
-	// the directing every time we reach a corner
-	for(int r = 0; r < radius; r++) {
-		int lineLength = r == 0? 1 : 8*r;
-		int segment = r*2;
+		Vec2i pPos = coordToMesh(ad->activeCam.pos);
+		int radius = VIEW_DISTANCE/VOXEL_X;
 
-		Vec2i lPos = pPos+r;
+		// generate the meshes around the player in a spiral by drawing lines and rotating
+		// the directing every time we reach a corner
+		for(int r = 0; r < radius; r++) {
+			int lineLength = r == 0? 1 : 8*r;
+			int segment = r*2;
 
-		int lLength = 0;
-		Vec2i lDir = vec2i(0,-1);
+			Vec2i lPos = pPos+r;
 
-		for(int lineId = 0; lineId < lineLength; lineId++) {
-			if(r == 0) lPos = pPos;
-			else {
-				if(lLength == segment) {
-					lLength = 0;
-					lDir = vec2i(lDir.y, -lDir.x);
+			int lLength = 0;
+			Vec2i lDir = vec2i(0,-1);
+
+			for(int lineId = 0; lineId < lineLength; lineId++) {
+				if(r == 0) lPos = pPos;
+				else {
+					if(lLength == segment) {
+						lLength = 0;
+						lDir = vec2i(lDir.y, -lDir.x);
+					}
+					lLength++;
+
+					lPos += lDir;
 				}
-				lLength++;
 
-				lPos += lDir;
-			}
+				radCounter++;
 
-			radCounter++;
+				Vec2i coord = lPos;
+				VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
 
-			Vec2i coord = lPos;
-			VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
+				if(!m->meshUploaded) {
+					makeMesh(m, ad->voxelHash, ad->voxelHashSize);
+					meshGenerationCount++;
 
-			if(!m->meshUploaded) {
-				makeMesh(m, ad->voxelHash, ad->voxelHashSize);
-				meshGenerationCount++;
+					if(!m->modifiedByUser) continue;
+				}
 
-				if(!m->modifiedByUser) continue;
-			}
+				// frustum culling
+				Vec3 cp = ad->activeCam.pos;
+				Vec3 cl = ad->activeCam.look;
+				Vec3 cu = ad->activeCam.up;
+				Vec3 cr = ad->activeCam.right;
 
-			// frustum culling
-			Vec3 cp = ad->activeCam.pos;
-			Vec3 cl = ad->activeCam.look;
-			Vec3 cu = ad->activeCam.up;
-			Vec3 cr = ad->activeCam.right;
+				float ar = ad->aspectRatio;
+				float fov = degreeToRadian(ad->fieldOfView);
+				// float ne = ad->nearPlane;
+				// float fa = ad->farPlane;
 
-			float ar = ad->aspectRatio;
-			float fov = degreeToRadian(ad->fieldOfView);
-			// float ne = ad->nearPlane;
-			// float fa = ad->farPlane;
+				Vec3 left = rotateVec3(cl, fov*ar, cu);
+				Vec3 right = rotateVec3(cl, -fov*ar, cu);
+				Vec3 top = rotateVec3(cl, fov, cr);
+				Vec3 bottom = rotateVec3(cl, -fov, cr);
 
-			Vec3 left = rotateVec3(cl, fov*ar, cu);
-			Vec3 right = rotateVec3(cl, -fov*ar, cu);
-			Vec3 top = rotateVec3(cl, fov, cr);
-			Vec3 bottom = rotateVec3(cl, -fov, cr);
+				Vec3 normalLeftPlane = cross(cu, left);
+				Vec3 normalRightPlane = cross(right, cu);
+				Vec3 normalTopPlane = cross(cr, top);
+				Vec3 normalBottomPlane = cross(bottom, cr);
 
-			Vec3 normalLeftPlane = cross(cu, left);
-			Vec3 normalRightPlane = cross(right, cu);
-			Vec3 normalTopPlane = cross(cr, top);
-			Vec3 normalBottomPlane = cross(bottom, cr);
+				Vec3 boxPos = vec3(coord.x*VOXEL_X+VOXEL_X*0.5f, coord.y*VOXEL_Y+VOXEL_Y*0.5f, VOXEL_Z*0.5f);
+				Vec3 boxSize = vec3(VOXEL_X, VOXEL_Y, VOXEL_Z);
 
-			Vec3 boxPos = vec3(coord.x*VOXEL_X+VOXEL_X*0.5f, coord.y*VOXEL_Y+VOXEL_Y*0.5f, VOXEL_Z*0.5f);
-			Vec3 boxSize = vec3(VOXEL_X, VOXEL_Y, VOXEL_Z);
+				bool isIntersecting = true;	
+				for(int test = 0; test < 4; test++) {
 
-			bool isIntersecting = true;	
-			for(int test = 0; test < 4; test++) {
+					Vec3 testNormal;
+					if(test == 0) testNormal = normalLeftPlane;
+					else if(test == 1) testNormal = normalRightPlane;
+					else if(test == 2) testNormal = normalTopPlane;
+					else if(test == 3) testNormal = normalBottomPlane;
 
-				Vec3 testNormal;
-				if(test == 0) testNormal = normalLeftPlane;
-				else if(test == 1) testNormal = normalRightPlane;
-				else if(test == 2) testNormal = normalTopPlane;
-				else if(test == 3) testNormal = normalBottomPlane;
+					bool inside = false;
+					for(int i = 0; i < 8; i++) {
+						Vec3 off;
+						switch (i) {
+							case 0: off = vec3( 0.5f,  0.5f, -0.5f); break;
+							case 1: off = vec3(-0.5f,  0.5f, -0.5f); break;
+							case 2: off = vec3( 0.5f, -0.5f, -0.5f); break;
+							case 3: off = vec3(-0.5f, -0.5f, -0.5f); break;
+							case 4: off = vec3( 0.5f,  0.5f,  0.5f); break;
+							case 5: off = vec3(-0.5f,  0.5f,  0.5f); break;
+							case 6: off = vec3( 0.5f, -0.5f,  0.5f); break;
+							case 7: off = vec3(-0.5f, -0.5f,  0.5f); break;
+						}
 
-				bool inside = false;
-				for(int i = 0; i < 8; i++) {
-					Vec3 off;
-					switch (i) {
-						case 0: off = vec3( 0.5f,  0.5f, -0.5f); break;
-						case 1: off = vec3(-0.5f,  0.5f, -0.5f); break;
-						case 2: off = vec3( 0.5f, -0.5f, -0.5f); break;
-						case 3: off = vec3(-0.5f, -0.5f, -0.5f); break;
-						case 4: off = vec3( 0.5f,  0.5f,  0.5f); break;
-						case 5: off = vec3(-0.5f,  0.5f,  0.5f); break;
-						case 6: off = vec3( 0.5f, -0.5f,  0.5f); break;
-						case 7: off = vec3(-0.5f, -0.5f,  0.5f); break;
+						Vec3 boxPoint = boxPos + boxSize*off;
+						Vec3 p = boxPoint - cp;
+
+						if(dot(p, testNormal) < 0) {
+							inside = true;
+							break;
+						}
 					}
 
-					Vec3 boxPoint = boxPos + boxSize*off;
-					Vec3 p = boxPoint - cp;
-
-					if(dot(p, testNormal) < 0) {
-						inside = true;
+					if(!inside) {
+						isIntersecting = false;
 						break;
 					}
 				}
 
-				if(!inside) {
-					isIntersecting = false;
-					break;
+				if(isIntersecting) {
+					// drawVoxelMesh(m);
+					coordList[coordListSize++] = m->coord;
+
+					// triangleCount += m->quadCount*4;
+					ad->voxelTriangleCount += m->quadCount/(float)2;
+					ad->voxelDrawCount++;
 				}
-			}
-
-			if(isIntersecting) {
-				// drawVoxelMesh(m);
-				coordList[coordListSize++] = m->coord;
-
-				// triangleCount += m->quadCount*4;
-				ad->voxelTriangleCount += m->quadCount/(float)2;
-				ad->voxelDrawCount++;
 			}
 		}
 	}
@@ -1925,21 +1829,28 @@ extern "C" APPMAINFUNCTION(appMain) {
 	SortPair* sortList = (SortPair*)getTMemory(sizeof(SortPair)*coordListSize);
 	int sortListSize = 0;
 
-	for(int i = 0; i < coordListSize; i++) {
-		Vec2 c = meshToMeshCoord(coordList[i]).xy;
-		float distanceToCamera = lenVec2(ad->activeCam.pos.xy - c);
-		sortList[sortListSize++] = {distanceToCamera, i};
-	}
+	// Sort voxel meshes.
+	{
+		for(int i = 0; i < coordListSize; i++) {
+			Vec2 c = meshToMeshCoord(coordList[i]).xy;
+			float distanceToCamera = lenVec2(ad->activeCam.pos.xy - c);
+			sortList[sortListSize++] = {distanceToCamera, i};
+		}
 
-	radixSortPair(sortList, sortListSize);
+		radixSortPair(sortList, sortListSize);
 
-	for(int i = 0; i < sortListSize-1; i++) {
-		assert(sortList[i].key <= sortList[i+1].key);
+		for(int i = 0; i < sortListSize-1; i++) {
+			assert(sortList[i].key <= sortList[i+1].key);
+		}
 	}
 
 	// TIMER_BLOCK_END(world);
 
+	// Draw voxel world and reflection.
 	{
+		setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, ad->fogColor);
+
+
 		// TIMER_BLOCK_NAMED("D World");
 		// draw world without water
 		{
@@ -1988,8 +1899,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 			glClearColor(0,0,0,0);
 			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
-			Vec2i reflectionRes = ad->curRes;
-			blitFrameBuffers(FRAMEBUFFER_3dMsaa, FRAMEBUFFER_Reflection, ad->curRes, GL_STENCIL_BUFFER_BIT, GL_NEAREST);
+			Vec2i reflectionRes = ad->cur3dBufferRes;
+			blitFrameBuffers(FRAMEBUFFER_3dMsaa, FRAMEBUFFER_Reflection, ad->cur3dBufferRes, GL_STENCIL_BUFFER_BIT, GL_NEAREST);
 
 			glEnable(GL_CLIP_DISTANCE0);
 			// glEnable(GL_CLIP_DISTANCE1);
@@ -1999,8 +1910,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 				// draw cubemap reflection
 				bindShader(SHADER_CUBEMAP);
 				glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
-				glBindTextures(0, 1, &getCubemap(currentSkybox)->id);
-				glBindSamplers(0, 1, ad->samplers);
+				glBindTextures(0, 1, &getCubemap(ad->skyBoxId)->id);
+				glBindSamplers(0, 1, gs->samplers);
 
 				Vec3 skyBoxRot;
 				if(ad->playerMode) skyBoxRot = ad->player->rot;
@@ -2024,7 +1935,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				glDepthMask(true);
 				glDisable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 
-			setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, fogColor, vec3(0,0,WATER_LEVEL_HEIGHT*2 + 0.01f), vec3(1,1,-1));
+			setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, ad->fogColor, vec3(0,0,WATER_LEVEL_HEIGHT*2 + 0.01f), vec3(1,1,-1));
 			pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CLIPPLANE, true);
 			pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CPLANE1, 0,0,-1,WATER_LEVEL_HEIGHT);
 
@@ -2092,7 +2003,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		// draw water
 		{
-			setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, fogColor);
+			setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, ad->fogColor);
 			pushUniform(SHADER_VOXEL, 1, VOXEL_UNIFORM_ALPHATEST, 0.5f);
 
 			for(int i = sortListSize-1; i >= 0; i--) {
@@ -2102,308 +2013,38 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 	}
 
+	// Draw player and selected block.
+	{
+		dcState(STATE_LINEWIDTH, 3);
+		if(!ad->playerMode) {
+			Camera cam = getCamData(ad->player->pos, ad->player->rot);
+			Vec3 pCamPos = player->pos + player->camOff;
+			float lineLength = 0.5f;
 
-	// Vec3 off = vec3(0.5f, 0.5f, 0.5f);
-	// Vec3 s = vec3(1.01f, 1.01f, 1.01f);
-
-	// for(int i = 0; i < 10; i++) dcCube({vec3(i*10,0,0) + off, s, vec4(0,1,1,1), 0, vec3(1,2,3)});
-	// for(int i = 0; i < 10; i++) dcCube({vec3(0,i*10,0) + off, s, vec4(0,1,1,1), 0, vec3(1,2,3)});
-	// for(int i = 0; i < 10; i++) dcCube({vec3(0,0,i*10) + off, s, vec4(0,1,1,1), 0, vec3(1,2,3)});
-
-	dcState(STATE_LINEWIDTH, 3);
-	if(!ad->playerMode) {
-		Camera cam = getCamData(ad->player->pos, ad->player->rot);
-		Vec3 pCamPos = player->pos + player->camOff;
-		float lineLength = 0.5f;
-
-		dcLine(pCamPos, pCamPos + cam.look*lineLength, vec4(1,0,0,1));
-		dcLine(pCamPos, pCamPos + cam.up*lineLength, vec4(0,1,0,1));
-		dcLine(pCamPos, pCamPos + cam.right*lineLength, vec4(0,0,1,1));
-
-		dcState(STATE_POLYGONMODE, POLYGON_MODE_LINE);
-		dcCube(player->pos, player->dim, vec4(1,1,1,1), 0, vec3(0,0,0));
-		dcState(STATE_POLYGONMODE, POLYGON_MODE_FILL);
-	} else {
-		if(ad->blockSelected) {
-			dcDisable(STATE_CULL);
-			Vec3 vs[4];
-			getPointsFromQuadAndNormal(ad->selectedBlock + ad->selectedBlockFaceDir*0.5f*1.01f, ad->selectedBlockFaceDir, 1, vs);
-
-			dcQuad(vs[0], vs[1], vs[2], vs[3], vec4(1,1,1,0.025f));
-			dcEnable(STATE_CULL);
+			dcLine(pCamPos, pCamPos + cam.look*lineLength, vec4(1,0,0,1));
+			dcLine(pCamPos, pCamPos + cam.up*lineLength, vec4(0,1,0,1));
+			dcLine(pCamPos, pCamPos + cam.right*lineLength, vec4(0,0,1,1));
 
 			dcState(STATE_POLYGONMODE, POLYGON_MODE_LINE);
-			dcCube(ad->selectedBlock, vec3(1.01f), vec4(0.9f), 0, vec3(0,0,0));
+			dcCube(player->pos, player->dim, vec4(1,1,1,1), 0, vec3(0,0,0));
 			dcState(STATE_POLYGONMODE, POLYGON_MODE_FILL);
-		}
-	}
+		} else {
+			if(ad->blockSelected) {
+				dcDisable(STATE_CULL);
+				Vec3 vs[4];
+				getPointsFromQuadAndNormal(ad->selectedBlock + ad->selectedBlockFaceDir*0.5f*1.01f, ad->selectedBlockFaceDir, 1, vs);
 
+				dcQuad(vs[0], vs[1], vs[2], vs[3], vec4(1,1,1,0.025f));
+				dcEnable(STATE_CULL);
 
-
-	bindShader(SHADER_CUBE);
-
-	Vec3 ep = vec3(0,0,80);
-
-	static ParticleEmitter emitter;
-	static bool emitterInit = true; 
-	if(emitterInit) {
-		emitter = {};
-		// emitter.particleListSize = 1024;
-		// emitter.particleListSize = 100000;
-		emitter.particleListSize = 100000;
-		emitter.particleList = getPArray(Particle, emitter.particleListSize);
-		// emitter.spawnRate = 0.0001f;
-		// emitter.spawnRate = 0.001f;
-		emitter.spawnRate = 0.005f;
-		// emitter.spawnRate = 0.0001f;
-
-		emitter.pos = vec3(0,0,70);
-		emitter.friction = 0.5f;
-
-		emitterInit = false;
-	}
-
-	static float dt = 0;
-	// dt += ad->dt;
-	emitter.pos = ep + vec3(sin(dt),0,0);
-	// drawCube(emitter.pos, vec3(0.5f), vec4(0,0,0,0.2f), 0, vec3(0,0,0));
-
-	if(0)
-	{
-		ParticleEmitter* e = &emitter;
-		float dt = ad->dt;
-
-		e->dt += dt;
-		while(e->dt >= 0.1f) {
-			e->dt -= e->spawnRate;
-
-			if(e->particleListCount < e->particleListSize) {
-				Particle p = {};
-
-				p.pos = e->pos;
-				Vec3 dir = normVec3(vec3(randomFloat(-1,1,0.01f), randomFloat(-1,1,0.01f), randomFloat(-1,1,0.01f)));
-				// p.vel = dir * 1.0f;
-				p.vel = dir * 5.0f;
-				// p.acc = dir*0.2f;
-				// p.acc = -dir*0.2f;
-				p.acc = -dir*1.0f;
-
-				// p.color = vec4(0.8f, 0.1f, 0.6f, 1.0f);
-				// p.accColor = vec4(-0.15f,0,0.15f,-0.05f);
-				p.color = vec4(0.8f, 0.8f, 0.1f, 1.0f);
-				p.accColor = vec4(+0.10f,-0.15f,0,-0.05f);
-
-
-				// p.size = vec3(0.1f);
-				p.size = vec3(0.1f, 0.1f, 0.005f);
-
-				p.rot = 0;
-				p.rot2 = degreeToRadian(randomInt(0,360));
-				p.velRot = 20.0f;
-				p.accRot = -4.0f;
-
-				p.timeToLive = 5;
-				// p.timeToLive = randomFloat(2.0f,6.0f, 0.01f);
-
-				e->particleList[e->particleListCount++] = p;
+				dcState(STATE_POLYGONMODE, POLYGON_MODE_LINE);
+				dcCube(ad->selectedBlock, vec3(1.01f), vec4(0.9f), 0, vec3(0,0,0));
+				dcState(STATE_POLYGONMODE, POLYGON_MODE_FILL);
 			}
 		}
 	}
 
-		// particleEmitterUpdate(&emitter, ad->dt);
-
-	// glDisable(GL_CULL_FACE);
-
-	// Vec2 quadUVs[] = {{0,0}, {0,1}, {1,1}, {1,0}};
-	// pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_UV, quadUVs, 4);
-	// pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODE, true);
-
-	// uint tex[2] = {getTexture(TEXTURE_CIRCLE)->id, 0};
-	// glBindTextures(0,2,tex);
-
-	// for(int i = 0; i < emitter.particleListCount; i++) {
-	// 	Particle* p = emitter.particleList + i;
-
-	// 	Vec3 normal = normVec3(p->vel);
-
-	// 	float size = 0.1f;
-	// 	Vec4 color = p->color;
-	// 	Vec3 base = p->pos;
-
-	// 	Vec3 dir1 = normVec3(cross(normal, vec3(1,0,0)));
-	// 	rotateVec3(&dir1, p->rot2, normal);
-	// 	rotateVec3(&normal, p->rot, dir1);
-	// 	Vec3 dir2 = normVec3(cross(normal, dir1));
-
-	// 	dir1 *= size*0.5f;
-	// 	dir2 *= size*0.5f;
-
-	// 	Vec3 verts[4] = {base + dir1+dir2, base + dir1+(-dir2), base + (-dir1)+(-dir2), base + (-dir1)+dir2};
-
-	// 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_VERTICES, verts[0].e, arrayCount(verts));
-	// 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, &color);
-
-	// 	glDrawArrays(GL_QUADS, 0, arrayCount(verts));
-	// }
-	// glEnable(GL_CULL_FACE);
-
-
-
-	// glDisable(GL_CULL_FACE);
-
-	// // Vec2 quadUVs[] = {{0,0}, {0,1}, {1,1}, {1,0}};
-	// // pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_UV, quadUVs, 4);
-	// // pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODE, true);
-
-	// uint tex[2] = {getTexture(TEXTURE_CIRCLE)->id, 0};
-	// glBindTextures(0,2,tex);
-
-	// Mesh* mesh = getMesh(MESH_QUAD);
-	// glBindBuffer(GL_ARRAY_BUFFER, mesh->bufferId);
-
-	// glVertexAttribPointer(0, 3, GL_FLOAT, 0, sizeof(Vertex), (void*)0);
-	// glEnableVertexAttribArray(0);
-	// glVertexAttribPointer(1, 2, GL_FLOAT, 0, sizeof(Vertex), (void*)(sizeof(Vec3)));
-	// glEnableVertexAttribArray(1);
-	// glVertexAttribPointer(2, 3, GL_FLOAT, 0, sizeof(Vertex), (void*)(sizeof(Vec3) + sizeof(Vec2)));
-	// glEnableVertexAttribArray(2);
-
-	// pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODE, false);
-
-	// for(int i = 0; i < emitter.particleListCount; i++) {
-	// 	Particle* p = emitter.particleList + i;
-
-	// 	Vec3 normal = normVec3(p->vel);
-
-	// 	float size = 0.1f;
-	// 	Vec4 color = p->color;
-	// 	Vec3 base = p->pos;
-
-	// 	Vec3 dir1 = normVec3(cross(normal, vec3(1,0,0)));
-	// 	rotateVec3(&dir1, p->rot2, normal);
-	// 	rotateVec3(&normal, p->rot, dir1);
-	// 	Vec3 dir2 = normVec3(cross(normal, dir1));
-
-	// 	dir1 *= size*0.5f;
-	// 	dir2 *= size*0.5f;
-
-	// 	// Vec3 verts[4] = {base + dir1+dir2, base + dir1+(-dir2), base + (-dir1)+(-dir2), base + (-dir1)+dir2};
-
-	// 	// pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_VERTICES, verts[0].e, arrayCount(verts));
-	// 	// pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, &color);
-
-	// 	// glDrawArrays(GL_QUADS, 0, arrayCount(verts));
-
-
-
-	// 	Mat4 model = modelMatrix(p->pos, p->size, p->rot, normal);
-	// 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODEL, model.e);
-	// 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, color.e);
-
-	// 	glDrawArrays(GL_QUADS, 0, mesh->vertCount);
-
-	// }
-	// glEnable(GL_CULL_FACE);
-
-
-
-
-	#if 1
-
-
-		bindShader(SHADER_PARTICLE);
-		pushUniform(SHADER_PARTICLE, 0, PARTICLE_UNIFORM_VIEW, view);
-		pushUniform(SHADER_PARTICLE, 0, PARTICLE_UNIFORM_PROJ, proj);
-
-		uint tex[2] = {getTexture(TEXTURE_CIRCLE)->id, 0};
-		glBindTextures(0,1,tex);
-		glBindSamplers(0,1,ad->samplers);
-
-
-		static float timer = 1;
-		timer += ad->dt;
-
-		// if(timer >= 1) {
-
-			int bufferOffset = 0;
-
-			for(int i = 0; i < emitter.particleListCount; i++) {
-				Particle* p = emitter.particleList + i;
-				Vec3 normal = normVec3(p->vel);
-
-				Mat4 model = modelMatrix(p->pos, p->size, p->rot, normal);
-				// Mat4 model = modelMatrix(p->pos, vec3(p->size.x, p->size.x, p->size.x), p->rot, normal);
-				rowToColumn(&model);
-
-				memCpy(ad->testBuffer + bufferOffset, model.e, sizeof(model)); bufferOffset += sizeof(model);
-				memCpy(ad->testBuffer + bufferOffset, p->color.e, sizeof(p->color)); bufferOffset += sizeof(p->color);
-			}
-
-			// printf("f%i \n", emitter.particleListCount);
-
-
-			timer = 0;
-			glNamedBufferData(ad->testBufferId, ad->testBufferSize, 0, GL_STREAM_DRAW);
-			glNamedBufferSubData(ad->testBufferId, 0, bufferOffset, ad->testBuffer);
-		// }
-
-		// glNamedBufferData(ad->testBufferId, ad->testBufferSize, 0, GL_STREAM_DRAW);
-		// glNamedBufferSubData(ad->testBufferId, 0, bufferOffset, ad->testBuffer);
-
-		Vec3 verts[] = {vec3(-0.5f, -0.5f, 0),vec3(-0.5f, 0.5f, 0),vec3(0.5f, 0.5f, 0),vec3(0.5f, -0.5f, 0)};
-		glProgramUniform3fv(getShader(SHADER_PARTICLE)->vertex, 0, 4, verts[0].e);
-		
-		Vec2 quadUVs[] = {{0,0}, {0,1}, {1,1}, {1,0}};
-		glProgramUniform2fv(getShader(SHADER_PARTICLE)->vertex, 4, 4, quadUVs[0].e);
-
-		glBindBuffer(GL_ARRAY_BUFFER, ad->testBufferId);
-
-		glEnableVertexAttribArray(8);
-		glVertexAttribPointer(8, 4, GL_FLOAT, 0, sizeof(Mat4)+sizeof(Vec4), (void*)(sizeof(Mat4)));
-
-		glEnableVertexAttribArray(9);
-		glVertexAttribPointer(9, 4, GL_FLOAT, 0, sizeof(Mat4)+sizeof(Vec4), (void*)0);
-		glEnableVertexAttribArray(10);
-		glVertexAttribPointer(10, 4, GL_FLOAT, 0, sizeof(Mat4)+sizeof(Vec4), (void*)(sizeof(Vec4)*1));
-		glEnableVertexAttribArray(11);
-		glVertexAttribPointer(11, 4, GL_FLOAT, 0, sizeof(Mat4)+sizeof(Vec4), (void*)(sizeof(Vec4)*2));
-		glEnableVertexAttribArray(12);
-		glVertexAttribPointer(12, 4, GL_FLOAT, 0, sizeof(Mat4)+sizeof(Vec4), (void*)(sizeof(Vec4)*3));
-
-		glVertexAttribDivisor(8, 1);
-		glVertexAttribDivisor(9, 1);
-		glVertexAttribDivisor(10, 1);
-		glVertexAttribDivisor(11, 1);
-		glVertexAttribDivisor(12, 1);
-
-		glDisable(GL_CULL_FACE);
-		// glDrawArrays(GL_QUADS, 0, emitter.particleListCount * 4);
-		glDrawArraysInstanced(GL_QUADS, 0, 4, emitter.particleListCount);
-		// glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, emitter.particleListCount);
-		glEnable(GL_CULL_FACE);
-
-	#endif 
-
-
-	// dcRect({rectCenDim(400,-400,200,200), rect(0,0,1,1), rColor, getTexture(TEXTURE_WHITE)->id});
-	// dcRect({rectCenDim(});
-	// dcRect({rectCenDim(});
-
-		// dcText({fillString("Pos  : (%f,%f,%f)", PVEC3(ad->activeCam.pos)), font, vec2(tp.x,-fontSize*pi++), c, ali, 2, shadow});
-
-	// Vec2 tPos = vec2(900,-300);
-	// char* text = "This is a Test String!";
-	// // Font* f = getFont(FONT_ARIAL);
-	// Font* f = getFont(FONT_ARIAL, 40);
-	// dcText({text, f, tPos, vec4(1,1,0,1), 0, 2, 1});
-	// // dcRect({rectCenDim(tPos-vec2(0,10), vec2(1,20)), rect(0,0,1,1), vec4(1,0,0,1), getTexture(TEXTURE_WHITE)->id});
-
-	// float xOff = getTextPos(text, 5, f);
-	// dcRect({rectCenDim(tPos + vec2(xOff,-20), vec2(1,40)), rect(0,0,1,1), vec4(1,0,0,1), getTexture(TEXTURE_WHITE)->id});
-
-
-
-	// @Menu.
+	// Block selection menu.
 	if(ad->playerMode) {
 		globalCommandList = &ad->commandList2d;
 
@@ -2443,12 +2084,257 @@ extern "C" APPMAINFUNCTION(appMain) {
 		globalCommandList = &ad->commandList3d;
 	}
 
+	// Particle test.
+	if(false)
+	{
+		bindShader(SHADER_CUBE);
 
+		Vec3 ep = vec3(0,0,80);
+
+		static ParticleEmitter emitter;
+		static bool emitterInit = true; 
+		if(emitterInit) {
+			emitter = {};
+			// emitter.particleListSize = 1024;
+			// emitter.particleListSize = 100000;
+			emitter.particleListSize = 100000;
+			emitter.particleList = getPArray(Particle, emitter.particleListSize);
+			// emitter.spawnRate = 0.0001f;
+			// emitter.spawnRate = 0.001f;
+			emitter.spawnRate = 0.005f;
+			// emitter.spawnRate = 0.0001f;
+
+			emitter.pos = vec3(0,0,70);
+			emitter.friction = 0.5f;
+
+			emitterInit = false;
+		}
+
+		static float dt = 0;
+		// dt += ad->dt;
+		emitter.pos = ep + vec3(sin(dt),0,0);
+		// drawCube(emitter.pos, vec3(0.5f), vec4(0,0,0,0.2f), 0, vec3(0,0,0));
+
+		if(0)
+		{
+			ParticleEmitter* e = &emitter;
+			float dt = ad->dt;
+
+			e->dt += dt;
+			while(e->dt >= 0.1f) {
+				e->dt -= e->spawnRate;
+
+				if(e->particleListCount < e->particleListSize) {
+					Particle p = {};
+
+					p.pos = e->pos;
+					Vec3 dir = normVec3(vec3(randomFloat(-1,1,0.01f), randomFloat(-1,1,0.01f), randomFloat(-1,1,0.01f)));
+					// p.vel = dir * 1.0f;
+					p.vel = dir * 5.0f;
+					// p.acc = dir*0.2f;
+					// p.acc = -dir*0.2f;
+					p.acc = -dir*1.0f;
+
+					// p.color = vec4(0.8f, 0.1f, 0.6f, 1.0f);
+					// p.accColor = vec4(-0.15f,0,0.15f,-0.05f);
+					p.color = vec4(0.8f, 0.8f, 0.1f, 1.0f);
+					p.accColor = vec4(+0.10f,-0.15f,0,-0.05f);
+
+
+					// p.size = vec3(0.1f);
+					p.size = vec3(0.1f, 0.1f, 0.005f);
+
+					p.rot = 0;
+					p.rot2 = degreeToRadian(randomInt(0,360));
+					p.velRot = 20.0f;
+					p.accRot = -4.0f;
+
+					p.timeToLive = 5;
+					// p.timeToLive = randomFloat(2.0f,6.0f, 0.01f);
+
+					e->particleList[e->particleListCount++] = p;
+				}
+			}
+		}
+
+			// particleEmitterUpdate(&emitter, ad->dt);
+
+		// glDisable(GL_CULL_FACE);
+
+		// Vec2 quadUVs[] = {{0,0}, {0,1}, {1,1}, {1,0}};
+		// pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_UV, quadUVs, 4);
+		// pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODE, true);
+
+		// uint tex[2] = {getTexture(TEXTURE_CIRCLE)->id, 0};
+		// glBindTextures(0,2,tex);
+
+		// for(int i = 0; i < emitter.particleListCount; i++) {
+		// 	Particle* p = emitter.particleList + i;
+
+		// 	Vec3 normal = normVec3(p->vel);
+
+		// 	float size = 0.1f;
+		// 	Vec4 color = p->color;
+		// 	Vec3 base = p->pos;
+
+		// 	Vec3 dir1 = normVec3(cross(normal, vec3(1,0,0)));
+		// 	rotateVec3(&dir1, p->rot2, normal);
+		// 	rotateVec3(&normal, p->rot, dir1);
+		// 	Vec3 dir2 = normVec3(cross(normal, dir1));
+
+		// 	dir1 *= size*0.5f;
+		// 	dir2 *= size*0.5f;
+
+		// 	Vec3 verts[4] = {base + dir1+dir2, base + dir1+(-dir2), base + (-dir1)+(-dir2), base + (-dir1)+dir2};
+
+		// 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_VERTICES, verts[0].e, arrayCount(verts));
+		// 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, &color);
+
+		// 	glDrawArrays(GL_QUADS, 0, arrayCount(verts));
+		// }
+		// glEnable(GL_CULL_FACE);
+
+
+
+		// glDisable(GL_CULL_FACE);
+
+		// // Vec2 quadUVs[] = {{0,0}, {0,1}, {1,1}, {1,0}};
+		// // pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_UV, quadUVs, 4);
+		// // pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODE, true);
+
+		// uint tex[2] = {getTexture(TEXTURE_CIRCLE)->id, 0};
+		// glBindTextures(0,2,tex);
+
+		// Mesh* mesh = getMesh(MESH_QUAD);
+		// glBindBuffer(GL_ARRAY_BUFFER, mesh->bufferId);
+
+		// glVertexAttribPointer(0, 3, GL_FLOAT, 0, sizeof(Vertex), (void*)0);
+		// glEnableVertexAttribArray(0);
+		// glVertexAttribPointer(1, 2, GL_FLOAT, 0, sizeof(Vertex), (void*)(sizeof(Vec3)));
+		// glEnableVertexAttribArray(1);
+		// glVertexAttribPointer(2, 3, GL_FLOAT, 0, sizeof(Vertex), (void*)(sizeof(Vec3) + sizeof(Vec2)));
+		// glEnableVertexAttribArray(2);
+
+		// pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODE, false);
+
+		// for(int i = 0; i < emitter.particleListCount; i++) {
+		// 	Particle* p = emitter.particleList + i;
+
+		// 	Vec3 normal = normVec3(p->vel);
+
+		// 	float size = 0.1f;
+		// 	Vec4 color = p->color;
+		// 	Vec3 base = p->pos;
+
+		// 	Vec3 dir1 = normVec3(cross(normal, vec3(1,0,0)));
+		// 	rotateVec3(&dir1, p->rot2, normal);
+		// 	rotateVec3(&normal, p->rot, dir1);
+		// 	Vec3 dir2 = normVec3(cross(normal, dir1));
+
+		// 	dir1 *= size*0.5f;
+		// 	dir2 *= size*0.5f;
+
+		// 	// Vec3 verts[4] = {base + dir1+dir2, base + dir1+(-dir2), base + (-dir1)+(-dir2), base + (-dir1)+dir2};
+
+		// 	// pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_VERTICES, verts[0].e, arrayCount(verts));
+		// 	// pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, &color);
+
+		// 	// glDrawArrays(GL_QUADS, 0, arrayCount(verts));
+
+
+
+		// 	Mat4 model = modelMatrix(p->pos, p->size, p->rot, normal);
+		// 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODEL, model.e);
+		// 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, color.e);
+
+		// 	glDrawArrays(GL_QUADS, 0, mesh->vertCount);
+
+		// }
+		// glEnable(GL_CULL_FACE);
+
+
+
+
+		#if 1
+
+
+			bindShader(SHADER_PARTICLE);
+			pushUniform(SHADER_PARTICLE, 0, PARTICLE_UNIFORM_VIEW, view);
+			pushUniform(SHADER_PARTICLE, 0, PARTICLE_UNIFORM_PROJ, proj);
+
+			uint tex[2] = {getTexture(TEXTURE_CIRCLE)->id, 0};
+			glBindTextures(0,1,tex);
+			glBindSamplers(0,1,gs->samplers);
+
+
+			static float timer = 1;
+			timer += ad->dt;
+
+			// if(timer >= 1) {
+
+				int bufferOffset = 0;
+
+				for(int i = 0; i < emitter.particleListCount; i++) {
+					Particle* p = emitter.particleList + i;
+					Vec3 normal = normVec3(p->vel);
+
+					Mat4 model = modelMatrix(p->pos, p->size, p->rot, normal);
+					// Mat4 model = modelMatrix(p->pos, vec3(p->size.x, p->size.x, p->size.x), p->rot, normal);
+					rowToColumn(&model);
+
+					memCpy(ad->testBuffer + bufferOffset, model.e, sizeof(model)); bufferOffset += sizeof(model);
+					memCpy(ad->testBuffer + bufferOffset, p->color.e, sizeof(p->color)); bufferOffset += sizeof(p->color);
+				}
+
+				// printf("f%i \n", emitter.particleListCount);
+
+
+				timer = 0;
+				glNamedBufferData(ad->testBufferId, ad->testBufferSize, 0, GL_STREAM_DRAW);
+				glNamedBufferSubData(ad->testBufferId, 0, bufferOffset, ad->testBuffer);
+			// }
+
+			// glNamedBufferData(ad->testBufferId, ad->testBufferSize, 0, GL_STREAM_DRAW);
+			// glNamedBufferSubData(ad->testBufferId, 0, bufferOffset, ad->testBuffer);
+
+			Vec3 verts[] = {vec3(-0.5f, -0.5f, 0),vec3(-0.5f, 0.5f, 0),vec3(0.5f, 0.5f, 0),vec3(0.5f, -0.5f, 0)};
+			glProgramUniform3fv(getShader(SHADER_PARTICLE)->vertex, 0, 4, verts[0].e);
+			
+			Vec2 quadUVs[] = {{0,0}, {0,1}, {1,1}, {1,0}};
+			glProgramUniform2fv(getShader(SHADER_PARTICLE)->vertex, 4, 4, quadUVs[0].e);
+
+			glBindBuffer(GL_ARRAY_BUFFER, ad->testBufferId);
+
+			glEnableVertexAttribArray(8);
+			glVertexAttribPointer(8, 4, GL_FLOAT, 0, sizeof(Mat4)+sizeof(Vec4), (void*)(sizeof(Mat4)));
+
+			glEnableVertexAttribArray(9);
+			glVertexAttribPointer(9, 4, GL_FLOAT, 0, sizeof(Mat4)+sizeof(Vec4), (void*)0);
+			glEnableVertexAttribArray(10);
+			glVertexAttribPointer(10, 4, GL_FLOAT, 0, sizeof(Mat4)+sizeof(Vec4), (void*)(sizeof(Vec4)*1));
+			glEnableVertexAttribArray(11);
+			glVertexAttribPointer(11, 4, GL_FLOAT, 0, sizeof(Mat4)+sizeof(Vec4), (void*)(sizeof(Vec4)*2));
+			glEnableVertexAttribArray(12);
+			glVertexAttribPointer(12, 4, GL_FLOAT, 0, sizeof(Mat4)+sizeof(Vec4), (void*)(sizeof(Vec4)*3));
+
+			glVertexAttribDivisor(8, 1);
+			glVertexAttribDivisor(9, 1);
+			glVertexAttribDivisor(10, 1);
+			glVertexAttribDivisor(11, 1);
+			glVertexAttribDivisor(12, 1);
+
+			glDisable(GL_CULL_FACE);
+			// glDrawArrays(GL_QUADS, 0, emitter.particleListCount * 4);
+			glDrawArraysInstanced(GL_QUADS, 0, 4, emitter.particleListCount);
+			// glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, emitter.particleListCount);
+			glEnable(GL_CULL_FACE);
+
+		#endif 
+	}
 
 	TIMER_BLOCK_END(Main)
 
 
-	// @Debug.
 
 	debugMain(ds, appMemory, ad, reload, isRunning, init);
 
@@ -2459,63 +2345,55 @@ extern "C" APPMAINFUNCTION(appMain) {
 		bindShader(SHADER_CUBE);
 		executeCommandList(&ad->commandList3d);
 
+		bindShader(SHADER_QUAD);
+		glDisable(GL_DEPTH_TEST);
 		ortho(rect(0, -ws->currentRes.h, ws->currentRes.w, 0));
-		glDisable(GL_DEPTH_TEST);
-		bindShader(SHADER_QUAD);
-		blitFrameBuffers(FRAMEBUFFER_3dMsaa, FRAMEBUFFER_3dNoMsaa, ad->curRes, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+		blitFrameBuffers(FRAMEBUFFER_3dMsaa, FRAMEBUFFER_3dNoMsaa, ad->cur3dBufferRes, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 
 
-		glDisable(GL_DEPTH_TEST);
-		bindShader(SHADER_QUAD);
 		bindFrameBuffer(FRAMEBUFFER_2d);
 		glViewport(0,0, ws->currentRes.x, ws->currentRes.y);
 		drawRect(rect(0, -ws->currentRes.h, ws->currentRes.w, 0), rect(0,1,1,0), vec4(1), 
 		         getFrameBuffer(FRAMEBUFFER_3dNoMsaa)->colorSlot[0]->id);
-
 		executeCommandList(&ad->commandList2d);
 
 
+		bindFrameBuffer(FRAMEBUFFER_Debug);
 		glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		glBlendEquationSeparate(GL_FUNC_ADD, GL_MAX);
-		bindFrameBuffer(FRAMEBUFFER_Debug);
-
 		executeCommandList(&ds->commandListDebug);
 
+
+
 		bindFrameBuffer(FRAMEBUFFER_2d);
-		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-		glBlendEquation(GL_FUNC_ADD);
+		// glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		// glBlendEquation(GL_FUNC_ADD);
 		drawRect(rect(0, -ws->currentRes.h, ws->currentRes.w, 0), rect(0,1,1,0), vec4(1,1,1,ds->guiAlpha), 
 		         getFrameBuffer(FRAMEBUFFER_Debug)->colorSlot[0]->id);
-
-
 
 
 		#if USE_SRGB 
 			glEnable(GL_FRAMEBUFFER_SRGB);
 		#endif 
 
-		glBindFramebuffer (GL_FRAMEBUFFER, 0);
-		bindShader(SHADER_QUAD);
-		glBindSamplers(0, 1, ad->samplers);
-
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 		drawRect(rect(0, -ws->currentRes.h, ws->currentRes.w, 0), rect(0,1,1,0), vec4(1), 
 		         getFrameBuffer(FRAMEBUFFER_2d)->colorSlot[0]->id);
-
 
 		#if USE_SRGB
 			glDisable(GL_FRAMEBUFFER_SRGB);
 		#endif
-
-		if(init) {
-			GLenum glError = glGetError(); printf("GLError: %i\n", glError);
-		}
-
 	}
 
+	// Swap window background buffer.
 	{
 		TIMER_BLOCK_NAMED("Swap");
 		swapBuffers(&ad->systemData);
 		glFinish();
+
+		if(init) {
+			GLenum glError = glGetError(); printf("GLError: %i\n", glError);
+		}
 	}
 
 	debugUpdatePlayback(ds, appMemory);
@@ -2609,11 +2487,12 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			static bool sectionSettings = initSections;
 			if(gui->beginSection("Settings", &sectionSettings)) {
 				gui->div(vec2(0,0)); if(gui->button("Compile")) shellExecute("C:\\Projects\\Hmm\\code\\buildWin32.bat");
-									if(gui->button("Up Buffers")) ad->updateFrameBuffers = true;
+									 // if(gui->button("Up Buffers")) ad->updateFrameBuffers = true;
+									 if(gui->button("Up Buffers")) updateFrameBuffers(ad, ws);
 				gui->div(vec2(0,0)); gui->label("FoV", 0); gui->slider(&ad->fieldOfView, 1, 180);
 				gui->div(vec2(0,0)); gui->label("MSAA", 0); gui->slider(&ad->msaaSamples, 1, 8);
 				gui->switcher("Native Res", &ad->useNativeRes);
-				gui->div(0,0,0); gui->label("FboRes", 0); gui->slider(&ad->fboRes.x, 150, ad->curRes.x); gui->slider(&ad->fboRes.y, 150, ad->curRes.y);
+				gui->div(0,0,0); gui->label("FboRes", 0); gui->slider(&ad->fboRes.x, 150, ad->cur3dBufferRes.x); gui->slider(&ad->fboRes.y, 150, ad->cur3dBufferRes.y);
 				gui->div(0,0,0); gui->label("NFPlane", 0); gui->slider(&ad->nearPlane, 0.01, 2); gui->slider(&ad->farPlane, 1000, 5000);
 			} gui->endSection();
 

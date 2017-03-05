@@ -947,6 +947,14 @@ void setupVoxelUniforms(Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit
 }
 
 void drawVoxelMesh(VoxelMesh* m, int drawMode = 0) {
+	globalGraphicsState->textureUnits[0] = globalGraphicsState->textures3d[0].id;
+	globalGraphicsState->textureUnits[1] = globalGraphicsState->textures3d[1].id;
+	globalGraphicsState->samplerUnits[0] = globalGraphicsState->samplers[SAMPLER_VOXEL_1];
+	globalGraphicsState->samplerUnits[1] = globalGraphicsState->samplers[SAMPLER_VOXEL_2];
+	globalGraphicsState->samplerUnits[2] = globalGraphicsState->samplers[SAMPLER_VOXEL_3];
+
+
+
 	glBindSamplers(0,16,globalGraphicsState->samplerUnits);
 
 	bindShader(SHADER_VOXEL);

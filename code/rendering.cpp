@@ -1775,9 +1775,6 @@ uint createSampler(float ani, int wrapS, int wrapT, int magF, int minF, int wrap
 
 
 
-
-
-
 int stateSwitch(int state) {
 	switch(state) {
 		case STATE_CULL: return GL_CULL_FACE;

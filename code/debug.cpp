@@ -1009,6 +1009,10 @@ struct Console {
 
 
 struct DebugState {
+	LONGLONG lastTimeStamp;
+	float dt;
+	float time;
+
 	bool showHud;
 	bool showConsole;
 
