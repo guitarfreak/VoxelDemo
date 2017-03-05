@@ -333,7 +333,7 @@ struct AppData {
 
 #pragma optimize( "", off )
 
-void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, bool* isRunning, bool init, bool second);
+void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, bool* isRunning, bool init);
 void debugUpdatePlayback(DebugState* ds, AppMemory* appMemory);
 extern "C" APPMAINFUNCTION(appMain) {
 
@@ -401,6 +401,21 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	if(init) {
 
+		// @Appstart.
+
+		//
+		// AppData.
+		//
+
+		getPMemory(sizeof(AppData));
+		*ad = {};
+		
+		initSystem(systemData, ws, windowsData, vec2i(1920, 1080), true, true, true);
+		windowHandle = systemData->windowHandle;
+
+		loadFunctions();
+		wglSwapIntervalEXT(1);
+
 		//
 		// DebugState.
 		//
@@ -413,7 +428,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		int timerSlots = 10000;
 		ds->bufferSize = timerSlots;
 		ds->timerBuffer = (TimerSlot*)getPMemoryDebug(sizeof(TimerSlot) * timerSlots);
-		ds->savedTimerBuffer	= (TimerSlot*)getPMemoryDebug(sizeof(TimerSlot) * timerSlots);
+		ds->savedTimerBuffer = (TimerSlot*)getPMemoryDebug(sizeof(TimerSlot) * timerSlots);
 		ds->cycleIndex = 0;
 
 		ds->gui = getPStructDebug(Gui);
@@ -428,29 +443,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ds->input = getPStructDebug(Input);
 		ds->showHud = false;
 		ds->guiAlpha = 0.95f;
-
-		//
-		// AppData.
-		//
-
-		getPMemory(sizeof(AppData));
-		*ad = {};
-		
-		ws->res.w = 1920;
-		ws->res.h = 1080;
-		ws->fullscreen = false;
-		ws->fullRes.x = GetSystemMetrics(SM_CXSCREEN);
-		ws->fullRes.y = GetSystemMetrics(SM_CYSCREEN);
-		ws->style = (WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU  | WS_MINIMIZEBOX  | WS_VISIBLE);
-		initSystem(systemData, windowsData, 0, 0,0,0,0);
-
-		SetFocus(systemData->windowHandle);
-
-		ws->currentRes = vec2i(2000,2000);
-		ws->aspectRatio = 1;
-
-		loadFunctions();
-		wglSwapIntervalEXT(1);
 
 		//
 		// Init Folder Handles.
@@ -680,20 +672,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 			asset->folderIndex = 2;
 			strCpy(asset->filePath, path);
 		}
-	}
-
-	if(second) {
-		// @BUG: Window operations only work after the first frame?
-		
-		// setWindowProperties(windowHandle, ws->res.w, ws->res.h, -1920, 0);
-		// setWindowProperties(windowHandle, ws->res.w, ws->res.h, 0, 0);
-		setWindowStyle(windowHandle, ws->style);
-		// setWindowMode(windowHandle, wSettings, WINDOW_MODE_FULLBORDERLESS);
-
-		setWindowProperties(windowHandle, ws->res.w, ws->res.h, 300, 300);
-		setWindowMode(windowHandle, ws, WINDOW_MODE_WINDOWED);
-
-		ad->updateFrameBuffers = true;
 	}
 
 	if(reload) {
@@ -2472,7 +2450,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// @Debug.
 
-	debugMain(ds, appMemory, ad, reload, isRunning, init, second);
+	debugMain(ds, appMemory, ad, reload, isRunning, init);
 
 	// Render.
 	{
@@ -2528,7 +2506,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			glDisable(GL_FRAMEBUFFER_SRGB);
 		#endif
 
-		if(second) {
+		if(init) {
 			GLenum glError = glGetError(); printf("GLError: %i\n", glError);
 		}
 
@@ -2541,12 +2519,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 	debugUpdatePlayback(ds, appMemory);
+
+	// @AppEnd.
 }
 
 
 
 
-void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, bool* isRunning, bool init, bool second) {
+void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, bool* isRunning, bool init) {
 	Input* input = ds->input;
 	WindowSettings* ws = &ad->wSettings;
 
@@ -2994,7 +2974,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 	{
 		Console* con = &ds->console;
 
-		if(second) {
+		if(init) {
 			con->init(ws->currentRes.y);
 		}
 
@@ -3055,7 +3035,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		// Rect textRect = rectULDim(100,-100, 400, 300);
 		Rect textRect = rectULDim(100,-100, 100, 100);
 
-		if(second) {
+		if(init) {
 			strClear(text);
 			// char* testText = "This is a test text!\nLook and see this wonderfull stuff that is happening!\n dgrgterg re gserg\n serg seserg  esrg sergesrg\n\n re \nertg";
 			// char* testText = "\n";

@@ -40,20 +40,15 @@ int CALLBACK WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR commandLi
     bool secondFrame = false;
     bool isRunning = true;
     while(isRunning) {
-    	// push delta time, input, 
 
     	bool reload = false;
     	// if(threadQueueFull()threadQueue.completionCount == threadQueue.completionGoal)
 		if(threadQueueFinished(&threadQueue)) reload = updateDll(&hotloadDll);
      	platform_appMain = (appMainType*)getDllFunction(&hotloadDll, "appMain");
-        platform_appMain(firstFrame, secondFrame, reload, &isRunning, wData, &threadQueue, &appMemory);
+        platform_appMain(firstFrame, reload, &isRunning, wData, &threadQueue, &appMemory);
 
-     	// platform_postMain = (postMainType*)getDllFunction(&hotloadDll, "postMain");
-        // platform_postMain(firstFrame, secondFrame, reload, &isRunning, &debugMemory, wData, &threadQueue);
+        if(firstFrame) firstFrame = false;
 
-        secondFrame = false;
-        if(firstFrame) secondFrame = true;
-        firstFrame = false;
     }
 
 	return 0;

@@ -252,8 +252,41 @@ LRESULT CALLBACK mainWindowCallBack(HWND window, UINT message, WPARAM wParam, LP
     return 1;
 }
 
-void initSystem(SystemData* systemData, WindowsData wData, uint style, int x, int y, int w, int h) {
+struct WindowSettings {
+	Vec2i res;
+	Vec2i fullRes;
+	bool fullscreen;
+	uint style;
+	WINDOWPLACEMENT g_wpPrev;
+
+	Vec2i currentRes;
+	float aspectRatio;
+};
+
+void initSystem(SystemData* systemData, WindowSettings* ws, WindowsData wData, Vec2i res, bool resizable, bool maximizable, bool visible) {
 	systemData->windowsData = wData;
+
+	ws->currentRes = res;
+	ws->fullscreen = false;
+	ws->fullRes.x = GetSystemMetrics(SM_CXSCREEN);
+	ws->fullRes.y = GetSystemMetrics(SM_CYSCREEN);
+	ws->style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+	ws->aspectRatio = (float)res.w / (float)res.h;
+
+	if(resizable) ws->style |= WS_THICKFRAME;
+	if(maximizable) ws->style |= WS_MAXIMIZEBOX;
+	if(visible) ws->style |= WS_VISIBLE;
+
+	RECT cr = {0, 0, res.w, res.h};
+	AdjustWindowRectEx(&cr, ws->style, 0, 0);
+
+	int ww = cr.right - cr.left;
+	int wh = cr.bottom - cr.top;
+	int wx = ws->fullRes.x/2 - ww/2;
+	int wy = ws->fullRes.y/2 - wh/2;
+	ws->res = vec2i(ww, wh);
+
+
 
     WNDCLASS windowClass = {};
     windowClass.style = CS_OWNDC|CS_HREDRAW|CS_VREDRAW;
@@ -261,23 +294,20 @@ void initSystem(SystemData* systemData, WindowsData wData, uint style, int x, in
     windowClass.hInstance = systemData->instance;
     windowClass.lpszClassName = "App";
     windowClass.hCursor = LoadCursor(0, IDC_ARROW);
+    windowClass.hbrBackground = CreateSolidBrush(RGB(30,30,30));
 
     if(!RegisterClass(&windowClass)) {
         DWORD errorCode = GetLastError();
         int dummy = 2;   
     }
 
-    if(!style) style = WS_OVERLAPPEDWINDOW;
-    // if(!style) style = WS_VISIBLE;
-    if(!x) x = CW_USEDEFAULT;
-    if(!y) y = CW_USEDEFAULT;
-    if(!w) w = CW_USEDEFAULT;
-    if(!h) h = CW_USEDEFAULT;
-    systemData->windowHandle = CreateWindowEx(0, windowClass.lpszClassName, "", style, x,y,w,h, 0, 0, systemData->instance, 0);
+    systemData->windowHandle = CreateWindowEx(0, windowClass.lpszClassName, "", ws->style, wx,wy,ww,wh, 0, 0, systemData->instance, 0);
 
     if(!systemData->windowHandle) {
         DWORD errorCode = GetLastError();
     }
+
+	SetFocus(systemData->windowHandle);
 
     PIXELFORMATDESCRIPTOR pixelFormatDescriptor =
     {
@@ -549,17 +579,6 @@ enum WindowMode {
 	WINDOW_MODE_FULLBORDERLESS,
 
 	WINDOW_MODE_COUNT,
-};
-
-struct WindowSettings {
-	Vec2i res;
-	Vec2i fullRes;
-	bool fullscreen;
-	uint style;
-	WINDOWPLACEMENT g_wpPrev;
-
-	Vec2i currentRes;
-	float aspectRatio;
 };
 
 void setWindowStyle(HWND hwnd, DWORD dwStyle) {
