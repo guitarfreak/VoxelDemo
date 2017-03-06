@@ -163,76 +163,14 @@ Changing course for now:
 
 #include "memory.h"
 #include "openglDefines.h"
-
-char* fillString(char* text, ...) {
-	va_list vl;
-	va_start(vl, text);
-
-	int length = strLen(text);
-	char* buffer = getTString(length+1);
-
-	char valueBuffer[20] = {};
-
-	int ti = 0;
-	int bi = 0;
-	while(true) {
-		char t = text[ti];
-
-		if(text[ti] == '%' && text[ti+1] == 'f') {
-			float v = va_arg(vl, double);
-			floatToStr(valueBuffer, v, 2);
-			int sLen = strLen(valueBuffer);
-			memCpy(buffer + bi, valueBuffer, sLen);
-
-			ti += 2;
-			bi += sLen;
-			getTString(sLen);
-		} else if(text[ti] == '%' && text[ti+1] == 'i') {
-			int v = va_arg(vl, int);
-			intToStr(valueBuffer, v);
-			int sLen = strLen(valueBuffer);
-			memCpy(buffer + bi, valueBuffer, sLen);
-
-			ti += 2;
-			bi += sLen;
-			getTString(sLen);
-		} if(text[ti] == '%' && text[ti+1] == 's') {
-			char* str = va_arg(vl, char*);
-			int sLen = strLen(str);
-			memCpy(buffer + bi, str, sLen);
-
-			ti += 2;
-			bi += sLen;
-			getTString(sLen);
-		} if(text[ti] == '%' && text[ti+1] == '%') {
-			buffer[bi++] = '%';
-			ti += 2;
-			getTString(1);
-		} else {
-			buffer[bi++] = text[ti++];
-			getTString(1);
-
-			if(buffer[bi-1] == '\0') break;
-		}
-	}
-
-	return buffer;
-}
-
-#define USE_SRGB 1
-const int INTERNAL_TEXTURE_FORMAT = USE_SRGB ? GL_SRGB8_ALPHA8 : GL_RGBA8;
-#include "rendering.cpp"
+#include "userSettings.h"
 
 
-
-#include "gui.cpp"
-#include "debug.cpp"
-
-#include "entity.cpp"
-#include "voxel.cpp"
-
-
-
+struct ThreadQueue;
+struct GraphicsState;
+struct DrawCommandList;
+struct MemoryBlock;
+struct DebugState;
 ThreadQueue* globalThreadQueue;
 GraphicsState* globalGraphicsState;
 DrawCommandList* globalCommandList;
@@ -240,7 +178,14 @@ MemoryBlock* globalMemory;
 DebugState* globalDebugState;
 
 
-const char* minecraftTextureFolderPath = "..\\data\\Textures\\Minecraft\\";
+#include "rendering.cpp"
+#include "gui.cpp"
+
+#include "entity.cpp"
+#include "voxel.cpp"
+
+#include "debug.cpp"
+
 
 
 
@@ -261,6 +206,8 @@ struct AppData {
 
 	DrawCommandList commandList2d;
 	DrawCommandList commandList3d;
+
+	bool updateFrameBuffers;
 
 	// 
 
@@ -327,122 +274,6 @@ struct AppData {
 
 
 
-void updateFrameBuffers(AppData* ad, WindowSettings* ws) {
-	ad->aspectRatio = ws->aspectRatio;
-	
-	ad->fboRes.x = ad->fboRes.y*ad->aspectRatio;
-
-	if(ad->useNativeRes) ad->cur3dBufferRes = ws->currentRes;
-	else ad->cur3dBufferRes = ad->fboRes;
-
-	Vec2i s = ad->cur3dBufferRes;
-	Vec2 reflectionRes = vec2(s);
-
-	setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_3dMsaa, s.w, s.h);
-	setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_3dNoMsaa, s.w, s.h);
-	setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_Reflection, reflectionRes.w, reflectionRes.h);
-	setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_2d, ws->currentRes.w, ws->currentRes.h);
-	setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_Debug, ws->currentRes.w, ws->currentRes.h);
-}
-
-
-
-enum WatchFolder {
-	WATCHFOLDER_MISC = 0,
-	WATCHFOLDER_CUBEMAP,
-	WATCHFOLDER_MINECRAFT,
-
-	WATCHFOLDER_SIZE,
-};
-
-const char* watchFolderPaths[] = {"..\\data\\Textures\\Misc\\", "..\\data\\Textures\\Skyboxes\\", "..\\data\\Textures\\Minecraft\\"};
-
-void initWatchFolders(HANDLE* folderHandles, Asset* assets, int* assetCount) {
-	for(int i = 0; i < 3; i++) {
-		HANDLE fileChangeHandle = FindFirstChangeNotification(watchFolderPaths[i], false, FILE_NOTIFY_CHANGE_LAST_WRITE);
-
-		if(fileChangeHandle == INVALID_HANDLE_VALUE) {
-			printf("Could not set folder change notification.\n");
-		}
-
-		folderHandles[i] = fileChangeHandle;
-	}
-
-	int fileCounts[] = {TEXTURE_SIZE, CUBEMAP_SIZE, BX_Size};
-	char** paths[] = {texturePaths, cubeMapPaths, (char**)textureFilePaths};
-	for(int folderIndex = 0; folderIndex < WATCHFOLDER_SIZE; folderIndex++) {
-
-		int fileCount = fileCounts[folderIndex];
-
-		for(int i = 0; i < fileCount; i++) {
-			char* path = paths[folderIndex][i];
-			Asset* asset = assets + *assetCount; 
-			*assetCount = (*assetCount) + 1;
-			asset->lastWriteTime = getLastWriteTime(path);
-			asset->index = i;
-			asset->filePath = getPArray(char, strLen(path) + 1);
-			strCpy(asset->filePath, path);
-			asset->folderIndex = folderIndex;
-		}
-	}
-
-}
-
-
-void reloadChangedFiles(HANDLE* folderHandles, Asset* assets, int assetCount) {
-	// Todo: Get ReadDirectoryChangesW to work instead of FindNextChangeNotification.
-
-	/*
-	// HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-	// HANDLE directory = CreateFile("C:\\Projects", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
-	// HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
-	HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
-	// HANDLE directory = CreateFile("C:\\Projects\\", FILE_LIST_DIRECTORY, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-	if(directory == INVALID_HANDLE_VALUE) {
-		printf("Could not open directory.\n");
-	}
-
-	FILE_NOTIFY_INFORMATION notifyInformation[1024];
-	DWORD bytesReturned = 0;
-	bool result = ReadDirectoryChangesW(directory, (LPVOID)&notifyInformation, sizeof(notifyInformation), false, FILE_NOTIFY_CHANGE_LAST_WRITE, &bytesReturned, 0, 0);
-	CloseHandle(directory);
-	*/
-
-	DWORD fileStatus = WaitForMultipleObjects(WATCHFOLDER_SIZE, folderHandles, false, 0);
-	if(valueBetweenInt(fileStatus, WAIT_OBJECT_0, WAIT_OBJECT_0 + 9)) {
-		// Note: WAIT_OBJECT_0 is defined as 0, so we can use it as an index.
-		int folderIndex = fileStatus;
-
-		FindNextChangeNotification(folderHandles[folderIndex]);
-
-
-		for(int i = 0; i < assetCount; i++) {
-			Asset* asset = assets + i;
-			if(asset->folderIndex != folderIndex) continue;
-
-			FILETIME newWriteTime = getLastWriteTime(asset->filePath);
-			if(CompareFileTime(&asset->lastWriteTime, &newWriteTime) != 0) {
-
-				if(folderIndex == WATCHFOLDER_MISC) {
-					loadTextureFromFile(globalGraphicsState->textures + asset->index, texturePaths[asset->index], -1, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE, true);
-
-				} else if(folderIndex == WATCHFOLDER_CUBEMAP) {
-						loadCubeMapFromFile(globalGraphicsState->cubeMaps + asset->index, (char*)cubeMapPaths[asset->index], 5, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE, true);
-
-				} else if(folderIndex == WATCHFOLDER_MINECRAFT) {
-					loadVoxelTextures((char*)minecraftTextureFolderPath, INTERNAL_TEXTURE_FORMAT, true, asset->index);
-
-				}
-
-				asset->lastWriteTime = newWriteTime;
-			}
-		}
-	}
-
-}
-
-
-
 void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, bool* isRunning, bool init);
 void debugUpdatePlayback(DebugState* ds, AppMemory* appMemory);
 
@@ -504,7 +335,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	globalGraphicsState = &ad->graphicsState;
 	globalDebugState = ds;
 
-	//
+	// AppGlobals.
 
 	voxelThreadData = ad->threadData;
 	treeNoise = ad->treeNoise;
@@ -514,11 +345,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 		voxelLightingCache[i] = ad->voxelLightingCache[i];
 	}
 
-	//
+	// Init.
 
 	if(init) {
 
-		// @Appstart.
+		// @AppInit.
 
 		//
 		// AppData.
@@ -532,6 +363,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		loadFunctions();
 		wglSwapIntervalEXT(1);
+
+		initInput(&ad->input);
 
 		//
 		// DebugState.
@@ -561,106 +394,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ds->showHud = false;
 		ds->guiAlpha = 0.95f;
 
-		ad->dt = 1/(float)60;
-
 		//
 		// Init Folder Handles.
 		//
 
 		initWatchFolders(systemData->folderHandles, ds->assets, &ds->assetCount);
-
-		//
-		// @Setup.
-		//
-		
-		initInput(&ad->input);
-
-		// ad->fieldOfView = 55;
-		ad->fieldOfView = 60;
-		ad->msaaSamples = 4;
-		ad->fboRes = vec2i(0, 120);
-		ad->useNativeRes = true;
-		ad->nearPlane = 0.1f;
-		// ad->farPlane = 2000;
-		ad->farPlane = 3000;
-		ad->skyBoxId = CUBEMAP_5;
-		ad->fogColor = colorSRGB(vec3(0.43f,0.38f,0.44f));
-
-		ad->voxelHashSize = sizeof(arrayCount(ad->voxelHash));
-		for(int i = 0; i < ad->voxelHashSize; i++) {
-			ad->voxelHash[i] = (VoxelNode*)getPMemory(sizeof(VoxelNode));
-			*ad->voxelHash[i] = {};
-		}
-
-		for(int i = 0; i < arrayCount(ad->threadData); i++) {
-			ad->threadData[i] = {};
-		} 
-
-		for(int i = 0; i < arrayCount(ad->voxelCache); i++) {
-			ad->voxelCache[i] = (uchar*)getPMemory(sizeof(uchar)*VOXEL_CACHE_SIZE);
-			ad->voxelLightingCache[i] = (uchar*)getPMemory(sizeof(uchar)*VOXEL_CACHE_SIZE);
-		}
-
-		ad->playerMode = true;
-		ad->pickMode = true;
-		ad->selectionRadius = 5;
-		// input->captureMouse = true;
-		ad->captureMouse = false;
-
-		*ad->blockMenu = {};
-		ad->blockMenuSelected = 0;
-
-
-		int treeRadius = 4;
-		ad->treeNoise = (bool*)getPMemory(VOXEL_X*VOXEL_Y);
-		zeroMemory(ad->treeNoise, VOXEL_X*VOXEL_Y);
-
-		Rect bounds = rect(0, 0, 64, 64);
-		Vec2* noiseSamples;
-		// int noiseSamplesSize = blueNoise(bounds, 5, &noiseSamples);
-		int noiseSamplesSize = blueNoise(bounds, treeRadius, &noiseSamples);
-		// int noiseSamplesSize = 10;
-		for(int i = 0; i < noiseSamplesSize; i++) {
-			Vec2 s = noiseSamples[i];
-			// Vec2i p = vec2i((int)(s.x/gridCell) * gridCell, (int)(s.y/gridCell) * gridCell);
-			// drawRect(rectCenDim(vec2(p), vec2(5,5)), rect(0,0,1,1), vec4(1,0,1,1), ad->textures[0]);
-			Vec2i index = vec2i(s);
-			ad->treeNoise[index.y*VOXEL_X + index.x] = 1;
-		}
-		free(noiseSamples);
-
-		treeNoise = ad->treeNoise;
-
-		for(int i = 0; i < 8; i++) {
-			voxelCache[i] = ad->voxelCache[i];
-			voxelLightingCache[i] = ad->voxelLightingCache[i];
-		}
-
-
-		ad->bombFireInterval = 0.1f;
-		ad->bombButtonDown = false;
-
-		ad->entityList.size = 1000;
-		ad->entityList.e = (Entity*)getPMemory(sizeof(Entity)*ad->entityList.size);
-		for(int i = 0; i < ad->entityList.size; i++) ad->entityList.e[i].init = false;
-
-		Vec3 startDir = normVec3(vec3(1,0,0));
-
-		Entity player;
-		Vec3 playerDim = vec3(0.8f, 0.8f, 1.8f);
-		float camOff = playerDim.z*0.5f - playerDim.x*0.25f;
-		initEntity(&player, ET_Player, vec3(0,0,40), startDir, playerDim, vec3(0,0,camOff));
-		player.rot = vec3(M_2PI,0,0);
-		player.playerOnGround = false;
-		ad->player = addEntity(&ad->entityList, &player);
-
-		Entity freeCam;
-		initEntity(&freeCam, ET_Camera, vec3(35,35,32), startDir, vec3(0,0,0), vec3(0,0,0));
-		ad->cameraEntity = addEntity(&ad->entityList, &freeCam);
-
-		uint vao = 0;
-		glCreateVertexArrays(1, &vao);
-		glBindVertexArray(vao);
 
 		//
 		// Setup Textures.
@@ -682,25 +420,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// Setup shaders and uniforms.
 		//
 
-		for(int i = 0; i < SHADER_SIZE; i++) {
-			MakeShaderInfo* info = makeShaderInfo + i; 
-			Shader* s = gs->shaders + i;
-
-			s->program = createShader(info->vertexString, info->fragmentString, &s->vertex, &s->fragment);
-			s->uniformCount = info->uniformCount;
-			s->uniforms = getPArray(ShaderUniform, s->uniformCount);
-
-			for(int i = 0; i < s->uniformCount; i++) {
-				ShaderUniform* uni = s->uniforms + i;
-				uni->type = info->uniformNameMap[i].type;	
-				uni->vertexLocation = glGetUniformLocation(s->vertex, info->uniformNameMap[i].name);
-				uni->fragmentLocation = glGetUniformLocation(s->fragment, info->uniformNameMap[i].name);
-			}
-		}
+		loadShaders();
 
 		//
 		// Setup Meshs.
 		//
+
+		uint vao = 0;
+		glCreateVertexArrays(1, &vao);
+		glBindVertexArray(vao);
 
 		for(int i = 0; i < MESH_SIZE; i++) {
 			Mesh* mesh = getMesh(i);
@@ -727,6 +455,18 @@ extern "C" APPMAINFUNCTION(appMain) {
 		gs->samplers[SAMPLER_VOXEL_3] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
 
 		//
+		//
+		//
+
+		ad->fieldOfView = 60;
+		ad->msaaSamples = 4;
+		ad->fboRes = vec2i(0, 120);
+		ad->useNativeRes = true;
+		ad->nearPlane = 0.1f;
+		ad->farPlane = 3000;
+		ad->dt = 1/(float)60;
+
+		//
 		// FrameBuffers.
 		//
 
@@ -748,14 +488,86 @@ extern "C" APPMAINFUNCTION(appMain) {
 			attachToFrameBuffer(FRAMEBUFFER_2d, FRAMEBUFFER_SLOT_COLOR, GL_RGBA8, 0, 0);
 			attachToFrameBuffer(FRAMEBUFFER_Debug, FRAMEBUFFER_SLOT_COLOR, GL_RGBA8, 0, 0);
 
-			updateFrameBuffers(ad, ws);
+			ad->updateFrameBuffers = true;
 		}
 
 		//
-		//
+		// AppSetup.
 		//
 
+		// Entity.
 
+		ad->captureMouse = false;
+		ad->playerMode = true;
+		ad->pickMode = true;
+		ad->selectionRadius = 5;
+
+		ad->entityList.size = 1000;
+		ad->entityList.e = (Entity*)getPMemory(sizeof(Entity)*ad->entityList.size);
+		for(int i = 0; i < ad->entityList.size; i++) ad->entityList.e[i].init = false;
+
+		Vec3 startDir = normVec3(vec3(1,0,0));
+
+		Entity player;
+		Vec3 playerDim = vec3(0.8f, 0.8f, 1.8f);
+		float camOff = playerDim.z*0.5f - playerDim.x*0.25f;
+		initEntity(&player, ET_Player, vec3(0,0,40), startDir, playerDim, vec3(0,0,camOff));
+		player.rot = vec3(M_2PI,0,0);
+		player.playerOnGround = false;
+		ad->player = addEntity(&ad->entityList, &player);
+
+		Entity freeCam;
+		initEntity(&freeCam, ET_Camera, vec3(35,35,32), startDir, vec3(0,0,0), vec3(0,0,0));
+		ad->cameraEntity = addEntity(&ad->entityList, &freeCam);
+
+		// Voxel.
+
+		ad->skyBoxId = CUBEMAP_5;
+		ad->fogColor = colorSRGB(vec3(0.43f,0.38f,0.44f));
+		ad->bombFireInterval = 0.1f;
+		ad->bombButtonDown = false;
+
+		*ad->blockMenu = {};
+		ad->blockMenuSelected = 0;
+
+		ad->voxelHashSize = sizeof(arrayCount(ad->voxelHash));
+		for(int i = 0; i < ad->voxelHashSize; i++) {
+			ad->voxelHash[i] = (VoxelNode*)getPMemory(sizeof(VoxelNode));
+			*ad->voxelHash[i] = {};
+		}
+
+		for(int i = 0; i < arrayCount(ad->threadData); i++) {
+			ad->threadData[i] = {};
+		} 
+
+		for(int i = 0; i < arrayCount(ad->voxelCache); i++) {
+			ad->voxelCache[i] = (uchar*)getPMemory(sizeof(uchar)*VOXEL_CACHE_SIZE);
+			ad->voxelLightingCache[i] = (uchar*)getPMemory(sizeof(uchar)*VOXEL_CACHE_SIZE);
+		}
+
+		int treeRadius = 4;
+		ad->treeNoise = (bool*)getPMemory(VOXEL_X*VOXEL_Y);
+		zeroMemory(ad->treeNoise, VOXEL_X*VOXEL_Y);
+
+		Rect bounds = rect(0, 0, 64, 64);
+		Vec2* noiseSamples;
+		// int noiseSamplesSize = blueNoise(bounds, 5, &noiseSamples);
+		int noiseSamplesSize = blueNoise(bounds, treeRadius, &noiseSamples);
+		// int noiseSamplesSize = 10;
+		for(int i = 0; i < noiseSamplesSize; i++) {
+			Vec2 s = noiseSamples[i];
+			// Vec2i p = vec2i((int)(s.x/gridCell) * gridCell, (int)(s.y/gridCell) * gridCell);
+			// drawRect(rectCenDim(vec2(p), vec2(5,5)), rect(0,0,1,1), vec4(1,0,1,1), ad->textures[0]);
+			Vec2i index = vec2i(s);
+			ad->treeNoise[index.y*VOXEL_X + index.x] = 1;
+		}
+		free(noiseSamples);
+		treeNoise = ad->treeNoise;
+
+		for(int i = 0; i < 8; i++) {
+			voxelCache[i] = ad->voxelCache[i];
+			voxelLightingCache[i] = ad->voxelLightingCache[i];
+		}
 
 		// Load voxel meshes around the player at startup.
 		{
@@ -781,28 +593,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}	
 	}
 
+	// @AppStart.
+
 	if(reload) {
 		loadFunctions();
 		SetWindowLongPtr(systemData->windowHandle, GWLP_WNDPROC, (LONG_PTR)mainWindowCallBack);
 
 		if(HOTRELOAD_SHADERS) {
-			for(int i = 0; i < SHADER_SIZE; i++) {
-				MakeShaderInfo* info = makeShaderInfo + i; 
-				Shader* s = gs->shaders + i;
-
-				s->program = createShader(info->vertexString, info->fragmentString, &s->vertex, &s->fragment);
-				s->uniformCount = info->uniformCount;
-				s->uniforms = getPArray(ShaderUniform, s->uniformCount);
-
-				for(int i = 0; i < s->uniformCount; i++) {
-					ShaderUniform* uni = s->uniforms + i;
-					uni->type = info->uniformNameMap[i].type;	
-					uni->vertexLocation = glGetUniformLocation(s->vertex, info->uniformNameMap[i].name);
-					uni->fragmentLocation = glGetUniformLocation(s->fragment, info->uniformNameMap[i].name);
-				}
-			}
+			loadShaders();
 		}
-
 	}
 
 	TIMER_BLOCK_BEGIN(Main)
@@ -842,77 +641,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 	globalCommandList = &ad->commandList3d;
 
 	// Hotload changed files.
-	// {
 
 	reloadChangedFiles(systemData->folderHandles, ds->assets, ds->assetCount);
-
-	// 	// Todo: Get ReadDirectoryChangesW to work instead of FindNextChangeNotification.
-
-	// 	/*
-	// 	// HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-	// 	// HANDLE directory = CreateFile("C:\\Projects", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
-	// 	// HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
-	// 	HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
-	// 	// HANDLE directory = CreateFile("C:\\Projects\\", FILE_LIST_DIRECTORY, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-	// 	if(directory == INVALID_HANDLE_VALUE) {
-	// 		printf("Could not open directory.\n");
-	// 	}
-
-	// 	FILE_NOTIFY_INFORMATION notifyInformation[1024];
-	// 	DWORD bytesReturned = 0;
-	// 	bool result = ReadDirectoryChangesW(directory, (LPVOID)&notifyInformation, sizeof(notifyInformation), false, FILE_NOTIFY_CHANGE_LAST_WRITE, &bytesReturned, 0, 0);
-	// 	CloseHandle(directory);
-	// 	*/
-
-	// 	DWORD fileStatus = WaitForMultipleObjects(arrayCount(systemData->folderHandles), systemData->folderHandles, false, 0);
-	// 	if(fileStatus == WAIT_OBJECT_0) {
-	// 		FindNextChangeNotification(systemData->folderHandles[0]);
-
-	// 		for(int i = 0; i < ad->assetCount; i++) {
-	// 			Asset* asset = ad->assets + i;
-	// 			if(asset->folderIndex != 0) continue;
-
-	// 			FILETIME newWriteTime = getLastWriteTime(asset->filePath);
-	// 			if(CompareFileTime(&asset->lastWriteTime, &newWriteTime) != 0) {
-	// 				loadTextureFromFile(globalGraphicsState->textures + asset->index, texturePaths[asset->index], -1, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE, true);
-
-	// 				asset->lastWriteTime = newWriteTime;
-	// 			}
-	// 		}
-
-	// 	} else if(fileStatus == WAIT_OBJECT_0 + 1) {
-	// 		FindNextChangeNotification(systemData->folderHandles[1]);
-			
-	// 		for(int i = 0; i < ad->assetCount; i++) {
-	// 			Asset* asset = ad->assets + i;
-	// 			if(asset->folderIndex != 1) continue;
-				
-	// 			int index = asset->index;
-	// 			FILETIME newWriteTime = getLastWriteTime(asset->filePath);
-	// 			if(CompareFileTime(&asset->lastWriteTime, &newWriteTime) != 0) {
-	// 				loadCubeMapFromFile(globalGraphicsState->cubeMaps + index, (char*)cubeMapPaths[index], 5, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE, true);
-
-	// 				asset->lastWriteTime = newWriteTime;
-	// 			}
-	// 		}
-
-	// 	} else if(fileStatus == WAIT_OBJECT_0 + 2) {
-	// 		FindNextChangeNotification(systemData->folderHandles[2]);
-
-	// 		for(int i = 0; i < ad->assetCount; i++) {
-	// 			Asset* asset = ad->assets + i;
-	// 			if(asset->folderIndex != 2) continue;
-				
-	// 			int index = asset->index;
-	// 			FILETIME newWriteTime = getLastWriteTime(asset->filePath);
-	// 			if(CompareFileTime(&asset->lastWriteTime, &newWriteTime) != 0) {
-	// 				loadVoxelTextures((char*)minecraftTextureFolderPath, INTERNAL_TEXTURE_FORMAT, true, index);
-
-	// 				asset->lastWriteTime = newWriteTime;
-	// 			}
-	// 		}
-	// 	}
-	// }
 
 	// Update input.
 	{
@@ -971,7 +701,25 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	if(windowSizeChanged(windowHandle, ws)) {
 		updateResolution(windowHandle, ws);
-		updateFrameBuffers(ad, ws);
+		ad->updateFrameBuffers = true;
+	}
+
+	if(ad->updateFrameBuffers) {
+		ad->aspectRatio = ws->aspectRatio;
+		
+		ad->fboRes.x = ad->fboRes.y*ad->aspectRatio;
+
+		if(ad->useNativeRes) ad->cur3dBufferRes = ws->currentRes;
+		else ad->cur3dBufferRes = ad->fboRes;
+
+		Vec2i s = ad->cur3dBufferRes;
+		Vec2 reflectionRes = vec2(s);
+
+		setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_3dMsaa, s.w, s.h);
+		setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_3dNoMsaa, s.w, s.h);
+		setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_Reflection, reflectionRes.w, reflectionRes.h);
+		setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_2d, ws->currentRes.w, ws->currentRes.h);
+		setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_Debug, ws->currentRes.w, ws->currentRes.h);
 	}
 
 	// Opengl Debug settings.
@@ -979,7 +727,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glEnable(GL_DEBUG_OUTPUT);
 		glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
 
-		const int count = 10;
+		const int count = 1;
 		GLenum sources;
 		GLenum types;
 		GLuint ids;
@@ -988,6 +736,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		int bufSize = 1000;
 		char* messageLog = getTString(bufSize);
+
+		memSet(messageLog, 0, bufSize);
 
 		uint fetchedLogs = 1;
 		while(fetchedLogs = glGetDebugMessageLog(count, bufSize, &sources, &types, &ids, &severities, &lengths, messageLog)) {
@@ -1041,6 +791,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
+
+	// @AppLoop.
 
 	if(input->keysPressed[KEYCODE_F3]) {
 		ad->captureMouse = !ad->captureMouse;
@@ -1115,9 +867,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		addEntity(&ad->entityList, &b);
 	}
-
-
-
 
 
 
@@ -1900,7 +1649,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	{
 		setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, ad->fogColor);
 
-
 		// TIMER_BLOCK_NAMED("D World");
 		// draw world without water
 		{
@@ -2382,9 +2130,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 		#endif 
 	}
 
+
+
+
 	TIMER_BLOCK_END(Main)
-
-
 
 	debugMain(ds, appMemory, ad, reload, isRunning, init);
 
@@ -2442,6 +2191,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glFinish();
 
 		if(init) {
+			showWindow(windowHandle);
 			GLenum glError = glGetError(); printf("GLError: %i\n", glError);
 		}
 	}
@@ -2537,8 +2287,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			static bool sectionSettings = initSections;
 			if(gui->beginSection("Settings", &sectionSettings)) {
 				gui->div(vec2(0,0)); if(gui->button("Compile")) shellExecute("C:\\Projects\\Hmm\\code\\buildWin32.bat");
-									 // if(gui->button("Up Buffers")) ad->updateFrameBuffers = true;
-									 if(gui->button("Up Buffers")) updateFrameBuffers(ad, ws);
+									 if(gui->button("Up Buffers")) ad->updateFrameBuffers = true;
 				gui->div(vec2(0,0)); gui->label("FoV", 0); gui->slider(&ad->fieldOfView, 1, 180);
 				gui->div(vec2(0,0)); gui->label("MSAA", 0); gui->slider(&ad->msaaSamples, 1, 8);
 				gui->switcher("Native Res", &ad->useNativeRes);

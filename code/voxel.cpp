@@ -1,5 +1,6 @@
 extern ThreadQueue* globalThreadQueue;
 
+const char* minecraftTextureFolderPath = "..\\data\\Textures\\Minecraft\\";
 
 
 

@@ -262,8 +262,6 @@ struct WindowSettings {
 
 	Vec2i currentRes;
 	float aspectRatio;
-
-	bool rePaint;	
 };
 
 void initSystem(SystemData* systemData, WindowSettings* ws, WindowsData wData, Vec2i res, bool resizable, bool maximizable, bool visible) {
@@ -273,12 +271,14 @@ void initSystem(SystemData* systemData, WindowSettings* ws, WindowsData wData, V
 	ws->fullscreen = false;
 	ws->fullRes.x = GetSystemMetrics(SM_CXSCREEN);
 	ws->fullRes.y = GetSystemMetrics(SM_CYSCREEN);
-	ws->style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
 	ws->aspectRatio = (float)res.w / (float)res.h;
 
+	ws->style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
 	if(resizable) ws->style |= WS_THICKFRAME;
 	if(maximizable) ws->style |= WS_MAXIMIZEBOX;
-	if(visible) ws->style |= WS_VISIBLE;
+	// if(visible) ws->style |= WS_VISIBLE;
+
+
 
 	RECT cr = {0, 0, res.w, res.h};
 	AdjustWindowRectEx(&cr, ws->style, 0, 0);
@@ -293,11 +293,12 @@ void initSystem(SystemData* systemData, WindowSettings* ws, WindowsData wData, V
 
     WNDCLASS windowClass = {};
     windowClass.style = CS_OWNDC|CS_HREDRAW|CS_VREDRAW;
+    // windowClass.style = CS_OWNDC;
     windowClass.lpfnWndProc = mainWindowCallBack;
     windowClass.hInstance = systemData->instance;
     windowClass.lpszClassName = "App";
     windowClass.hCursor = LoadCursor(0, IDC_ARROW);
-    windowClass.hbrBackground = CreateSolidBrush(RGB(30,30,30));
+    // windowClass.hbrBackground = CreateSolidBrush(RGB(30,30,30));
 
     if(!RegisterClass(&windowClass)) {
         DWORD errorCode = GetLastError();
@@ -362,8 +363,8 @@ void initSystem(SystemData* systemData, WindowSettings* ws, WindowsData wData, V
     printf("%Opengl Version: %s\n", (char*)glGetString(GL_VERSION));
 }
 
-void makeWindowVisible(SystemData* systemData) {
-    ShowWindow(systemData->windowHandle, SW_SHOW);
+void showWindow(HWND windowHandle) {
+    ShowWindow(windowHandle, SW_SHOW);
 }
 
 void updateInput(Input* input, bool* isRunning, HWND windowHandle) {
