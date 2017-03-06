@@ -135,23 +135,23 @@ Changing course for now:
 #define NOMINMAX
 #include <windows.h>
 #include <gl\gl.h>
-// #include "glext.h"
+// #include "external\glext.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
 #define STBI_ONLY_BMP
 #define STBI_ONLY_JPEG
-#include "stb_image.h"
+#include "external\stb_image.h"
 
 #define STB_TRUETYPE_IMPLEMENTATION
-#include "stb_truetype.h"
+#include "external\stb_truetype.h"
 
 #define STB_VOXEL_RENDER_IMPLEMENTATION
 // #define STBVOX_CONFIG_LIGHTING_SIMPLE
 #define STBVOX_CONFIG_FOG_SMOOTHSTEP
 // #define STBVOX_CONFIG_MODE 0
 #define STBVOX_CONFIG_MODE 1
-#include "stb_voxel_render.h"
+#include "external\stb_voxel_render.h"
 
 // Internal.
 
@@ -2203,8 +2203,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-
 void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, bool* isRunning, bool init) {
+	// @DebugStart.
+
 	Input* input = ds->input;
 	WindowSettings* ws = &ad->wSettings;
 
@@ -2702,42 +2703,6 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 		con->updateBody();
 
-	}
-
-
-	if(false)
-	{
-		int textMax = 1024;
-		static char* text = getPArrayDebug(char, 1024); 
-		Font* font = getFont(FONT_CONSOLAS, 22);
-		// Rect textRect = rectULDim(100,-100, 400, 300);
-		Rect textRect = rectULDim(100,-100, 100, 100);
-
-		if(init) {
-			strClear(text);
-			// char* testText = "This is a test text!\nLook and see this wonderfull stuff that is happening!\n dgrgterg re gserg\n serg seserg  esrg sergesrg\n\n re \nertg";
-			// char* testText = "\n";
-			// strCpy(text, testText);
-		}
-
-		static float cursorTime = 0;
-		cursorTime += ad->dt * 3;
-		Vec4 cursorColor = vec4(0,0.8f,0,1);
-		float cursorColorMod = 0.2f;
-		cursorColor.g += cos(cursorTime)*cursorColorMod - cursorColorMod;
-
-
-		static TextEditVars tev = {0, 0, vec2(0,0), false};
-		TextEditSettings tes = {true, false, ws->currentRes.h, 2, 
-								vec4(0.2f,0.2f,0.2f,1), vec4(0.2f,0.7f,0.1f,1), vec4(1,1,1,1), cursorColor};
-
-		textEditBox(text, textMax, font, textRect, ds->input, vec2i(-1,1), tes, &tev);
-
-		if(tev.cursorChanged) cursorTime = 0;
-
-
-
-		dcText(fillString("%i %i.", tev.cursorIndex, tev.markerIndex), font, vec2(50,-50), vec4(0,0,0,1), vec2i(-1,1), 0);
 	}
 
 	//
