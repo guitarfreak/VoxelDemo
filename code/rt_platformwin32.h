@@ -222,8 +222,9 @@ struct SystemData {
 	HINSTANCE instance;
 	HDC deviceContext;
 	HWND windowHandle;
-
-	HANDLE folderHandles[3]; // 1. Misc, 2. CubeMaps, 3. Minecraft
+	
+	// 1. Misc, 2. CubeMaps, 3. Minecraft
+	HANDLE folderHandles[3]; 
 };
 
 void systemDataInit(SystemData* sd, HINSTANCE instance) {

@@ -239,27 +239,17 @@ DrawCommandList* globalCommandList;
 MemoryBlock* globalMemory;
 DebugState* globalDebugState;
 
-const char* miscTextureFolderPath = "..\\data\\Textures\\Misc\\";
-const char* cubeMapFolderPath = "..\\data\\Textures\\Skyboxes\\";
+
 const char* minecraftTextureFolderPath = "..\\data\\Textures\\Minecraft\\";
 
 
 
-struct Asset {
-	int index;
-	int folderIndex;
-	char* filePath;
-	FILETIME lastWriteTime;
-};
 
 
 
 struct AppData {
 	
 	// General.
-
-	Asset assets[100];
-	int assetCount;
 
 	SystemData systemData;
 	Input input;
@@ -353,6 +343,102 @@ void updateFrameBuffers(AppData* ad, WindowSettings* ws) {
 	setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_Reflection, reflectionRes.w, reflectionRes.h);
 	setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_2d, ws->currentRes.w, ws->currentRes.h);
 	setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_Debug, ws->currentRes.w, ws->currentRes.h);
+}
+
+
+
+enum WatchFolder {
+	WATCHFOLDER_MISC = 0,
+	WATCHFOLDER_CUBEMAP,
+	WATCHFOLDER_MINECRAFT,
+
+	WATCHFOLDER_SIZE,
+};
+
+const char* watchFolderPaths[] = {"..\\data\\Textures\\Misc\\", "..\\data\\Textures\\Skyboxes\\", "..\\data\\Textures\\Minecraft\\"};
+
+void initWatchFolders(HANDLE* folderHandles, Asset* assets, int* assetCount) {
+	for(int i = 0; i < 3; i++) {
+		HANDLE fileChangeHandle = FindFirstChangeNotification(watchFolderPaths[i], false, FILE_NOTIFY_CHANGE_LAST_WRITE);
+
+		if(fileChangeHandle == INVALID_HANDLE_VALUE) {
+			printf("Could not set folder change notification.\n");
+		}
+
+		folderHandles[i] = fileChangeHandle;
+	}
+
+	int fileCounts[] = {TEXTURE_SIZE, CUBEMAP_SIZE, BX_Size};
+	char** paths[] = {texturePaths, cubeMapPaths, (char**)textureFilePaths};
+	for(int folderIndex = 0; folderIndex < WATCHFOLDER_SIZE; folderIndex++) {
+
+		int fileCount = fileCounts[folderIndex];
+
+		for(int i = 0; i < fileCount; i++) {
+			char* path = paths[folderIndex][i];
+			Asset* asset = assets + *assetCount; 
+			*assetCount = (*assetCount) + 1;
+			asset->lastWriteTime = getLastWriteTime(path);
+			asset->index = i;
+			asset->filePath = getPArray(char, strLen(path) + 1);
+			strCpy(asset->filePath, path);
+			asset->folderIndex = folderIndex;
+		}
+	}
+
+}
+
+
+void reloadChangedFiles(HANDLE* folderHandles, Asset* assets, int assetCount) {
+	// Todo: Get ReadDirectoryChangesW to work instead of FindNextChangeNotification.
+
+	/*
+	// HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	// HANDLE directory = CreateFile("C:\\Projects", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
+	// HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
+	HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
+	// HANDLE directory = CreateFile("C:\\Projects\\", FILE_LIST_DIRECTORY, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if(directory == INVALID_HANDLE_VALUE) {
+		printf("Could not open directory.\n");
+	}
+
+	FILE_NOTIFY_INFORMATION notifyInformation[1024];
+	DWORD bytesReturned = 0;
+	bool result = ReadDirectoryChangesW(directory, (LPVOID)&notifyInformation, sizeof(notifyInformation), false, FILE_NOTIFY_CHANGE_LAST_WRITE, &bytesReturned, 0, 0);
+	CloseHandle(directory);
+	*/
+
+	DWORD fileStatus = WaitForMultipleObjects(WATCHFOLDER_SIZE, folderHandles, false, 0);
+	if(valueBetweenInt(fileStatus, WAIT_OBJECT_0, WAIT_OBJECT_0 + 9)) {
+		// Note: WAIT_OBJECT_0 is defined as 0, so we can use it as an index.
+		int folderIndex = fileStatus;
+
+		FindNextChangeNotification(folderHandles[folderIndex]);
+
+
+		for(int i = 0; i < assetCount; i++) {
+			Asset* asset = assets + i;
+			if(asset->folderIndex != folderIndex) continue;
+
+			FILETIME newWriteTime = getLastWriteTime(asset->filePath);
+			if(CompareFileTime(&asset->lastWriteTime, &newWriteTime) != 0) {
+
+				if(folderIndex == WATCHFOLDER_MISC) {
+					loadTextureFromFile(globalGraphicsState->textures + asset->index, texturePaths[asset->index], -1, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE, true);
+
+				} else if(folderIndex == WATCHFOLDER_CUBEMAP) {
+						loadCubeMapFromFile(globalGraphicsState->cubeMaps + asset->index, (char*)cubeMapPaths[asset->index], 5, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE, true);
+
+				} else if(folderIndex == WATCHFOLDER_MINECRAFT) {
+					loadVoxelTextures((char*)minecraftTextureFolderPath, INTERNAL_TEXTURE_FORMAT, true, asset->index);
+
+				}
+
+				asset->lastWriteTime = newWriteTime;
+			}
+		}
+	}
+
 }
 
 
@@ -481,16 +567,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// Init Folder Handles.
 		//
 
-		const char* watchFolderPaths[] = {miscTextureFolderPath, cubeMapFolderPath, minecraftTextureFolderPath};
-		for(int i = 0; i < 3; i++) {
-			HANDLE fileChangeHandle = FindFirstChangeNotification(watchFolderPaths[i], false, FILE_NOTIFY_CHANGE_LAST_WRITE);
-
-			if(fileChangeHandle == INVALID_HANDLE_VALUE) {
-				printf("Could not set folder change notification.\n");
-			}
-
-			systemData->folderHandles[i] = fileChangeHandle;
-		}
+		initWatchFolders(systemData->folderHandles, ds->assets, &ds->assetCount);
 
 		//
 		// @Setup.
@@ -678,36 +755,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		//
 		//
 
-		for(int i = 0; i < TEXTURE_SIZE; i++) {
-			char* path = texturePaths[i];
-			Asset* asset = ad->assets + ad->assetCount++; 
-			asset->lastWriteTime = getLastWriteTime(path);
-			asset->index = i;
-			asset->filePath = getPArray(char, strLen(path) + 1);
-			asset->folderIndex = 0;
-			strCpy(asset->filePath, path);
-		}
-
-		for(int i = 0; i < CUBEMAP_SIZE; i++) {
-			char* path = cubeMapPaths[i];
-			Asset* asset = ad->assets + ad->assetCount++; 
-			asset->lastWriteTime = getLastWriteTime(path);
-			asset->index = i;
-			asset->filePath = getPArray(char, strLen(path) + 1);
-			asset->folderIndex = 1;
-			strCpy(asset->filePath, path);
-		}
-
-		for(int i = 0; i < BX_Size; i++) {
-			char* path = (char*)textureFilePaths[i];
-			Asset* asset = ad->assets + ad->assetCount++; 
-			asset->lastWriteTime = getLastWriteTime(path);
-			asset->index = i;
-			asset->filePath = getPArray(char, strLen(path) + 1);
-			asset->folderIndex = 2;
-			strCpy(asset->filePath, path);
-		}
-
 
 
 		// Load voxel meshes around the player at startup.
@@ -795,74 +842,77 @@ extern "C" APPMAINFUNCTION(appMain) {
 	globalCommandList = &ad->commandList3d;
 
 	// Hotload changed files.
-	{
-		// Todo: Get ReadDirectoryChangesW to work instead of FindNextChangeNotification.
+	// {
 
-		/*
-		// HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-		// HANDLE directory = CreateFile("C:\\Projects", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
-		// HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
-		HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
-		// HANDLE directory = CreateFile("C:\\Projects\\", FILE_LIST_DIRECTORY, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-		if(directory == INVALID_HANDLE_VALUE) {
-			printf("Could not open directory.\n");
-		}
+	reloadChangedFiles(systemData->folderHandles, ds->assets, ds->assetCount);
 
-		FILE_NOTIFY_INFORMATION notifyInformation[1024];
-		DWORD bytesReturned = 0;
-		bool result = ReadDirectoryChangesW(directory, (LPVOID)&notifyInformation, sizeof(notifyInformation), false, FILE_NOTIFY_CHANGE_LAST_WRITE, &bytesReturned, 0, 0);
-		CloseHandle(directory);
-		*/
+	// 	// Todo: Get ReadDirectoryChangesW to work instead of FindNextChangeNotification.
 
-		DWORD fileStatus = WaitForMultipleObjects(arrayCount(systemData->folderHandles), systemData->folderHandles, false, 0);
-		if(fileStatus == WAIT_OBJECT_0) {
-			FindNextChangeNotification(systemData->folderHandles[0]);
+	// 	/*
+	// 	// HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	// 	// HANDLE directory = CreateFile("C:\\Projects", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
+	// 	// HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
+	// 	HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
+	// 	// HANDLE directory = CreateFile("C:\\Projects\\", FILE_LIST_DIRECTORY, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	// 	if(directory == INVALID_HANDLE_VALUE) {
+	// 		printf("Could not open directory.\n");
+	// 	}
 
-			for(int i = 0; i < ad->assetCount; i++) {
-				Asset* asset = ad->assets + i;
-				if(asset->folderIndex != 0) continue;
+	// 	FILE_NOTIFY_INFORMATION notifyInformation[1024];
+	// 	DWORD bytesReturned = 0;
+	// 	bool result = ReadDirectoryChangesW(directory, (LPVOID)&notifyInformation, sizeof(notifyInformation), false, FILE_NOTIFY_CHANGE_LAST_WRITE, &bytesReturned, 0, 0);
+	// 	CloseHandle(directory);
+	// 	*/
 
-				FILETIME newWriteTime = getLastWriteTime(asset->filePath);
-				if(CompareFileTime(&asset->lastWriteTime, &newWriteTime) != 0) {
-					loadTextureFromFile(globalGraphicsState->textures + asset->index, texturePaths[asset->index], -1, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE, true);
+	// 	DWORD fileStatus = WaitForMultipleObjects(arrayCount(systemData->folderHandles), systemData->folderHandles, false, 0);
+	// 	if(fileStatus == WAIT_OBJECT_0) {
+	// 		FindNextChangeNotification(systemData->folderHandles[0]);
 
-					asset->lastWriteTime = newWriteTime;
-				}
-			}
+	// 		for(int i = 0; i < ad->assetCount; i++) {
+	// 			Asset* asset = ad->assets + i;
+	// 			if(asset->folderIndex != 0) continue;
 
-		} else if(fileStatus == WAIT_OBJECT_0 + 1) {
-			FindNextChangeNotification(systemData->folderHandles[1]);
+	// 			FILETIME newWriteTime = getLastWriteTime(asset->filePath);
+	// 			if(CompareFileTime(&asset->lastWriteTime, &newWriteTime) != 0) {
+	// 				loadTextureFromFile(globalGraphicsState->textures + asset->index, texturePaths[asset->index], -1, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE, true);
+
+	// 				asset->lastWriteTime = newWriteTime;
+	// 			}
+	// 		}
+
+	// 	} else if(fileStatus == WAIT_OBJECT_0 + 1) {
+	// 		FindNextChangeNotification(systemData->folderHandles[1]);
 			
-			for(int i = 0; i < ad->assetCount; i++) {
-				Asset* asset = ad->assets + i;
-				if(asset->folderIndex != 1) continue;
+	// 		for(int i = 0; i < ad->assetCount; i++) {
+	// 			Asset* asset = ad->assets + i;
+	// 			if(asset->folderIndex != 1) continue;
 				
-				int index = asset->index;
-				FILETIME newWriteTime = getLastWriteTime(asset->filePath);
-				if(CompareFileTime(&asset->lastWriteTime, &newWriteTime) != 0) {
-					loadCubeMapFromFile(globalGraphicsState->cubeMaps + index, (char*)cubeMapPaths[index], 5, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE, true);
+	// 			int index = asset->index;
+	// 			FILETIME newWriteTime = getLastWriteTime(asset->filePath);
+	// 			if(CompareFileTime(&asset->lastWriteTime, &newWriteTime) != 0) {
+	// 				loadCubeMapFromFile(globalGraphicsState->cubeMaps + index, (char*)cubeMapPaths[index], 5, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE, true);
 
-					asset->lastWriteTime = newWriteTime;
-				}
-			}
+	// 				asset->lastWriteTime = newWriteTime;
+	// 			}
+	// 		}
 
-		} else if(fileStatus == WAIT_OBJECT_0 + 2) {
-			FindNextChangeNotification(systemData->folderHandles[2]);
+	// 	} else if(fileStatus == WAIT_OBJECT_0 + 2) {
+	// 		FindNextChangeNotification(systemData->folderHandles[2]);
 
-			for(int i = 0; i < ad->assetCount; i++) {
-				Asset* asset = ad->assets + i;
-				if(asset->folderIndex != 2) continue;
+	// 		for(int i = 0; i < ad->assetCount; i++) {
+	// 			Asset* asset = ad->assets + i;
+	// 			if(asset->folderIndex != 2) continue;
 				
-				int index = asset->index;
-				FILETIME newWriteTime = getLastWriteTime(asset->filePath);
-				if(CompareFileTime(&asset->lastWriteTime, &newWriteTime) != 0) {
-					loadVoxelTextures((char*)minecraftTextureFolderPath, INTERNAL_TEXTURE_FORMAT, true, index);
+	// 			int index = asset->index;
+	// 			FILETIME newWriteTime = getLastWriteTime(asset->filePath);
+	// 			if(CompareFileTime(&asset->lastWriteTime, &newWriteTime) != 0) {
+	// 				loadVoxelTextures((char*)minecraftTextureFolderPath, INTERNAL_TEXTURE_FORMAT, true, index);
 
-					asset->lastWriteTime = newWriteTime;
-				}
-			}
-		}
-	}
+	// 				asset->lastWriteTime = newWriteTime;
+	// 			}
+	// 		}
+	// 	}
+	// }
 
 	// Update input.
 	{

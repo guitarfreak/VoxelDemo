@@ -1006,9 +1006,17 @@ struct Console {
 };
 
 
-
+struct Asset {
+	int index;
+	int folderIndex;
+	char* filePath;
+	FILETIME lastWriteTime;
+};
 
 struct DebugState {
+	Asset assets[100];
+	int assetCount;
+	
 	LONGLONG lastTimeStamp;
 	float dt;
 	float time;
