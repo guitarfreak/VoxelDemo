@@ -158,6 +158,13 @@ inline float mapRange(float value, float min, float max, float rangeMin, float r
 	return result;
 };
 
+inline float mapRange01(float value, float min, float max) {
+	float off = min < 0 ? abs(min) : -abs(min);
+	float result = ((value+off)/((max+off)-(min+off)));
+
+	return result;
+};
+
 // inline float mapRangeU64(u64 value, u64 min, u64 max, u64 rangeMin, u64 rangeMax) {
 // 	u64 off = min;
 // 	u64 result = ((value+off)/((max+off)-(min+off))) * (rangeMax-rangeMin) + rangeMin;
@@ -967,11 +974,16 @@ union Vec4 {
 
 	struct {
 		Vec3 xyz;
-		// float w;
+		float w;
 	};
 
 	struct {
 		float r, g, b, a;
+	};
+
+	struct {
+		Vec3 rgb;
+		float a;
 	};
 
 	float e[4];

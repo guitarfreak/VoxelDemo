@@ -391,7 +391,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ds->gui2->init(rectCenDim(vec2(1300,1), vec2(300, ws->currentRes.h)), 3);
 
 		ds->input = getPStructDebug(Input);
-		ds->showHud = false;
+		// ds->showHud = false;
+		ds->showHud = true;
 		ds->guiAlpha = 0.95f;
 
 		//
@@ -646,7 +647,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// Update input.
 	{
-		// TIMER_BLOCK_NAMED("Input");
+		TIMER_BLOCK_NAMED("Input");
 		updateInput(ds->input, isRunning, windowHandle);
 
 		ad->input = *ds->input;
@@ -870,7 +871,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-	// TIMER_BLOCK_BEGIN_NAMED(entities, "Upd Entities");
+	TIMER_BLOCK_BEGIN_NAMED(entities, "Upd Entities");
 	// @update entities
 	for(int i = 0; i < ad->entityList.size; i++) {
 		Entity* e = &ad->entityList.e[i];
@@ -1264,7 +1265,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			};
 		}
 	}
-	// TIMER_BLOCK_END(entities);
+	TIMER_BLOCK_END(entities);
 
 	if(ad->playerMode) {
 		ad->activeCam = getCamData(ad->player->pos, ad->player->rot, ad->player->camOff);
@@ -1500,7 +1501,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		} 
 	}
 
-	// TIMER_BLOCK_BEGIN_NAMED(world, "Upd World");
+	TIMER_BLOCK_BEGIN_NAMED(world, "Upd World");
 
 	Vec2i* coordList = (Vec2i*)getTMemory(sizeof(Vec2i)*2000);
 	int coordListSize = 0;
@@ -1643,7 +1644,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 	}
 
-	// TIMER_BLOCK_END(world);
+	TIMER_BLOCK_END(world);
+
+
+	TIMER_BLOCK_BEGIN_NAMED(worldDraw, "Draw World");
 
 	// Draw voxel world and reflection.
 	{
@@ -1810,6 +1814,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 			}
 		}
 	}
+
+	TIMER_BLOCK_END(worldDraw);
+
 
 	// Draw player and selected block.
 	{
@@ -2131,6 +2138,66 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 
+	if(false)
+	{
+		globalCommandList = &ad->commandList2d;
+
+		Rect window = rectCenDim(400,-400,600,400);
+		Vec2 winMid = rectGetCen(window);
+		dcRect(window, vec4(0,0,0,1));
+		Vec2 windowDim = rectGetDim(window);
+
+		// static Vec2 camPos = vec2(windowDim.x/2, -windowDim.y/2);
+		static Vec2 camPos = winMid;
+		// static Vec2 camSize = windowDim;
+		static float zoom = 1;
+
+		if(input->mouseButtonDown[0]) {
+			camPos.x += -input->mouseDeltaX;
+			camPos.y += input->mouseDeltaY;
+		}
+
+		if(input->mouseWheel) {
+			// float aspect = camSize.h / camSize.w;
+			// camSize.w += input->mouseWheel;
+			// camSize.h += input->mouseWheel * aspect;
+			// camSize *= input->mouseWheel*0.1f;
+			zoom += input->mouseWheel*0.1f;
+		}
+
+		Vec2 offset = winMid - camPos;
+
+
+
+
+		Vec2 pos1 = window.min + vec2(50,50);
+		Vec2 size1 = vec2(50,70);
+
+		pos1 += offset;
+
+		Rect obj1 = rectCenDim(pos1, size1);
+
+
+		Vec2 pos2 = window.min + vec2(160,90);
+		Vec2 size2 = vec2(120,90);
+
+		pos2 += offset;
+
+		Rect obj2 = rectCenDim(pos2, size2);
+
+		// Vec2 zoomOffset = vec2(windowDim.x - camSize.x, windowDim.y - camSize.y);
+
+
+		// obj1 = rectExpand(obj1, zoomOffset);
+		// obj1 = rectAddOffset(obj1, camPos);
+		dcRect(obj1, vec4(0.6f,0,0,1));
+
+		// obj2 = rectExpand(obj2, zoomOffset);
+		// obj2 = rectAddOffset(obj2, camPos);
+		dcRect(obj2, vec4(0,0.6f,0,1));
+
+	}
+
 
 
 	TIMER_BLOCK_END(Main)
@@ -2139,7 +2206,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// Render.
 	{
-		TIMER_BLOCK_NAMED("Render");
+		// TIMER_BLOCK_NAMED("Render");
 
 		bindShader(SHADER_CUBE);
 		executeCommandList(&ad->commandList3d);
@@ -2186,7 +2253,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// Swap window background buffer.
 	{
-		TIMER_BLOCK_NAMED("Swap");
+		// TIMER_BLOCK_NAMED("Swap");
 		swapBuffers(&ad->systemData);
 		glFinish();
 
@@ -2417,8 +2484,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 	// Draw timing info.
 	//
 
-
-	if(ds->showHud) 
+	if(ds->showHud && !init) 
 	{
 
 		float cyclesPerFrame = (float)((3*((float)1/60))*1024*1024*1024);
@@ -2430,7 +2496,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		gui->start(ds->gInput, getFont(FONT_CALIBRI, fontHeight), ws->currentRes);
 
 		static bool statsSection = false;
-		static bool graphSection = false;
+		static bool graphSection = true;
 		gui->div(0.2f,0.2f,0); gui->switcher("Stats", &statsSection); gui->switcher("Graph", &graphSection); gui->empty();
 
 
@@ -2539,31 +2605,46 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 
 		if(graphSection) {
-			static Vec2 trans = vec2(10,0);
-			static float zoom = 1;
-
-			gui->div(vec2(0.1f,0)); 
-			if(gui->button("Reset")) {
-				trans = vec2(10,0);
-				zoom = 1;
-			}
-			gui->empty();
+			// gui->empty();
 			gui->heightPush(3);
 			gui->empty();
-			
+
 			Rect bgRect = gui->getCurrentRegion();
+			Vec2 startPos = rectGetUL(bgRect);
+
 			Vec2 dragDelta = vec2(0,0);
 			gui->drag(bgRect, &dragDelta, vec4(0,0,0,0));
 
-			trans.x += dragDelta.x;
-			// trans.x = clampMax(trans.x, 10);
+			float graphWidth = rectGetDim(bgRect).w;
+
+			static Vec2 cp = vec2(graphWidth/2,0);
+			static float zoom = 1;
+			float zoomMod = 0.2f;
+			if(input->keysDown[KEYCODE_CTRL]) {
+				zoomMod *= 2;
+				if(input->keysDown[KEYCODE_SHIFT]) {
+					zoomMod *= 2;
+				}
+			}
+
+			cp.x -= dragDelta.x * ((graphWidth*zoom)/graphWidth);
+
 			gui->heightPop();
 
 			if(gui->input.mouseWheel) {
-				zoom *= 1 + gui->input.mouseWheel*0.1f;
-				// zoom += gui->input.mouseWheel*10;
+				float oldWidth = graphWidth*zoom;
+
+				float wheel = gui->input.mouseWheel*zoomMod;
+				float zoomOffset = zoom*(zoom*wheel);
+				zoom -= zoomOffset;
+				zoom = clampMax(zoom, 1.0f);
+
+				float addedWidth = graphWidth*zoom - oldWidth;
+				float mouseZoomOffset = mapRange(input->mousePos.x, bgRect.min.x, bgRect.max.x, -1, 1);
+				cp.x -= (addedWidth/2)*mouseZoomOffset;
 			}
 
+			cp.x = clamp(cp.x, (graphWidth*zoom)/2 - 5*zoom, graphWidth - (graphWidth*zoom)/2 + 5*zoom);
 
 			Timings* graphTimings = timings;
 			TimerSlot* graphTimerBuffer = ds->timerBuffer;
@@ -2575,35 +2656,35 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				graphBufferIndex = ds->savedBufferIndex;
 			}
 
-			float graphWidth = rectGetDim(bgRect).w;
-			Vec2 startPos = rectGetUL(bgRect);
-
 			if(true) {
 				u64 baseCycleCount = graphTimerBuffer[0].cycles;
 				u64 startCycleCount = 0;
 				u64 endCycleCount = cyclesPerFrame;
 
-				float orthoLeft = 0 + trans.x;
-				float orthoRight = graphWidth*zoom + trans.x;
+				float orthoLeft = cp.x - (graphWidth*zoom)/2;
+				float orthoRight = cp.x + (graphWidth*zoom)/2;
 
-				Rect bgRect = rectULDim(startPos, vec2(graphWidth, fontHeight*3));
 				dcRect(bgRect, vec4(1,1,1,0.2f));
 
-				float lineWidth = 1;
-				int lineCount = 10;
-				for(int i = 0; i < lineCount+1; i++) {
-					float linePos = ((graphWidth-20)/(float)lineCount) * i;
-					linePos *= zoom;
-					linePos += trans.x;
-					linePos += bgRect.min.x;
-					Vec4 color = vec4(0.7f,0.7f,0.7f,1);
-					float lw = lineWidth;
-					if(i == 0 || i == lineCount) {
-						color = vec4(1,1,1,1);
-						lw = lineWidth * 3;
-					}
-					dcRect(rect(linePos, bgRect.min.y, linePos+lw, bgRect.max.y), color);
-				} 
+				float startLine = mapRange(0, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
+				float endLine = mapRange(graphWidth, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
+
+				Vec2 bgCen = rectGetCen(bgRect);
+				Vec2 bgDim = rectGetDim(bgRect);
+				float g = 0.9f;
+				dcRect(rectCenDim(vec2(startLine + 1, bgCen.y), vec2(3,bgDim.h)), vec4(g,g,g,1));
+				dcRect(rectCenDim(vec2(endLine - 1, bgCen.y), vec2(3,bgDim.h)), vec4(g,g,g,1));
+
+				g = 0.7f;
+				float lineRegion = endLine - startLine;
+				for(int i = 0; i < 10; i++) {
+					dcRect(rectCenDim(vec2(startLine + (i*0.1f)*lineRegion, bgCen.y), vec2(1,bgDim.h)), vec4(g,g,g,1));
+				}
+
+				bool mouseHighlight = false;
+				Rect hRect;
+				Vec4 hc;
+				char* hText;
 
 				startPos -= vec2(0, fontHeight);
 				index = 0;
@@ -2615,21 +2696,28 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 						Timings* t = graphTimings + slot->timerIndex;
 						TimerInfo* tInfo = ds->timerInfos + slot->timerIndex;
 
-						float xoff = mapRange(slot->cycles - baseCycleCount, startCycleCount, endCycleCount, orthoLeft, orthoRight);
-						float barWidth = mapRange(t->cycles, startCycleCount, endCycleCount, 0, graphWidth*zoom);
-						Vec2 pos = startPos + vec2(xoff,index*-fontHeight);
-						// Vec2 pos = startPos + vec2(xoff,0);
-						
-						Rect r = rect(pos, pos + vec2(barWidth,fontHeight));
+						float barLeft = mapRange(slot->cycles - baseCycleCount, startCycleCount, endCycleCount, 0, graphWidth);
+						float barRight = mapRange(slot->cycles - baseCycleCount + t->cycles, startCycleCount, endCycleCount, 0, graphWidth);
+
+						barLeft = mapRange(barLeft, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
+						barRight = mapRange(barRight, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
+
+						float y = startPos.y+index*-fontHeight;
+						Rect r = rect(vec2(barLeft,y), vec2(barRight, y + fontHeight));
+
 						float cOff = slot->timerIndex/(float)ds->timerInfoCount;
 						Vec4 c = vec4(1-cOff, 0, cOff, 1);
+						char* text = fillString("%s %s", tInfo->function, tInfo->name);
 
-						int debugStringSize = 50;
-						char* buffer = getTStringDebug(debugStringSize);
-						_snprintf_s(buffer, debugStringSize, debugStringSize, "%s %s", tInfo->function, tInfo->name);
-
-						gui->drawRect(r, vec4(0,0,0,1));
-						gui->drawTextBox(rect(r.min+vec2(1,1), r.max-vec2(1,1)), buffer, c);
+						if(gui->getMouseOver(gui->input.mousePos, r)) {
+							mouseHighlight = true;
+							hRect = r;
+							hc = c;
+							hText = text;
+						} else {
+							gui->drawRect(r, vec4(0,0,0,1));
+							gui->drawTextBox(rect(r.min+vec2(1,1), r.max-vec2(1,1)), text, c);
+						}
 
 						index++;
 					}
@@ -2639,7 +2727,26 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 					}
 				}
 
+
+				if(mouseHighlight) {
+					float tw = getTextDim(hText, gui->font).w + 2;
+					if(tw > rectGetDim(hRect).w) hRect.max.x = hRect.min.x + tw;
+
+					float g = 0.8f;
+					gui->drawRect(hRect, vec4(g,g,g,1));
+					gui->drawTextBox(rect(hRect.min+vec2(1,1), hRect.max-vec2(1,1)), hText, hc);
+				}
+
 			}
+
+			gui->div(vec2(0.1f,0)); 
+
+			if(gui->button("Reset")) {
+				cp = vec2(graphWidth/2,0);
+				zoom = 1;
+			}
+
+			gui->label(fillString("%f Width: %f, Zoom: %f",cp.x, graphWidth, zoom));
 		}
 
 		gui->end();
