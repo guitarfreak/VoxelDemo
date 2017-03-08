@@ -93,6 +93,11 @@ Changing course for now:
 
 
 
+ - Using makros and defines to make templated vectors and hashtables and such.
+ - Look at font drawing.
+ - Clean up gui.
+
+
 //-------------------------------------
 //               BUGS
 //-------------------------------------
@@ -180,13 +185,12 @@ DebugState* globalDebugState;
 
 #include "rendering.cpp"
 #include "gui.cpp"
+#include "debug.cpp"
 
 #include "entity.cpp"
 #include "voxel.cpp"
 
-#include "debug.cpp"
-
-
+#include "misc.cpp"
 
 
 
@@ -385,6 +389,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// gui->init(rectCenDim(vec2(0,1), vec2(300,800)));
 		// gui->init(rectCenDim(vec2(1300,1), vec2(300,500)));
 		ds->gui->init(rectCenDim(vec2(1300,1), vec2(300, ws->currentRes.h)), 0);
+
+		// ds->gui->cornerPos = 
 
 		ds->gui2 = getPStructDebug(Gui);
 		// ds->gui->init(rectCenDim(vec2(1300,1), vec2(400, ws->currentRes.h)), -1);
@@ -723,6 +729,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_Debug, ws->currentRes.w, ws->currentRes.h);
 	}
 
+	TIMER_BLOCK_BEGIN_NAMED(openglInit, "Opengl Init");
+
 	// Opengl Debug settings.
 	{
 		glEnable(GL_DEBUG_OUTPUT);
@@ -790,6 +798,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glViewport(0,0, ad->cur3dBufferRes.x, ad->cur3dBufferRes.y);
 	}
 
+	TIMER_BLOCK_END(openglInit);
 
 
 
@@ -2138,66 +2147,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 
-	if(false)
-	{
-		globalCommandList = &ad->commandList2d;
-
-		Rect window = rectCenDim(400,-400,600,400);
-		Vec2 winMid = rectGetCen(window);
-		dcRect(window, vec4(0,0,0,1));
-		Vec2 windowDim = rectGetDim(window);
-
-		// static Vec2 camPos = vec2(windowDim.x/2, -windowDim.y/2);
-		static Vec2 camPos = winMid;
-		// static Vec2 camSize = windowDim;
-		static float zoom = 1;
-
-		if(input->mouseButtonDown[0]) {
-			camPos.x += -input->mouseDeltaX;
-			camPos.y += input->mouseDeltaY;
-		}
-
-		if(input->mouseWheel) {
-			// float aspect = camSize.h / camSize.w;
-			// camSize.w += input->mouseWheel;
-			// camSize.h += input->mouseWheel * aspect;
-			// camSize *= input->mouseWheel*0.1f;
-			zoom += input->mouseWheel*0.1f;
-		}
-
-		Vec2 offset = winMid - camPos;
-
-
-
-
-		Vec2 pos1 = window.min + vec2(50,50);
-		Vec2 size1 = vec2(50,70);
-
-		pos1 += offset;
-
-		Rect obj1 = rectCenDim(pos1, size1);
-
-
-		Vec2 pos2 = window.min + vec2(160,90);
-		Vec2 size2 = vec2(120,90);
-
-		pos2 += offset;
-
-		Rect obj2 = rectCenDim(pos2, size2);
-
-		// Vec2 zoomOffset = vec2(windowDim.x - camSize.x, windowDim.y - camSize.y);
-
-
-		// obj1 = rectExpand(obj1, zoomOffset);
-		// obj1 = rectAddOffset(obj1, camPos);
-		dcRect(obj1, vec4(0.6f,0,0,1));
-
-		// obj2 = rectExpand(obj2, zoomOffset);
-		// obj2 = rectAddOffset(obj2, camPos);
-		dcRect(obj2, vec4(0,0.6f,0,1));
-
-	}
-
 
 
 	TIMER_BLOCK_END(Main)
@@ -2206,7 +2155,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// Render.
 	{
-		// TIMER_BLOCK_NAMED("Render");
+		TIMER_BLOCK_NAMED("Render");
 
 		bindShader(SHADER_CUBE);
 		executeCommandList(&ad->commandList3d);
@@ -2253,7 +2202,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// Swap window background buffer.
 	{
-		// TIMER_BLOCK_NAMED("Swap");
+		TIMER_BLOCK_NAMED("Swap");
 		swapBuffers(&ad->systemData);
 		glFinish();
 
@@ -2486,6 +2435,8 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 	if(ds->showHud && !init) 
 	{
+		static int highlightedIndex = -1;
+		Vec4 highlightColor = vec4(1,1,1,0.1f);
 
 		float cyclesPerFrame = (float)((3*((float)1/60))*1024*1024*1024);
 		fontHeight = 18;
@@ -2495,7 +2446,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		Gui* gui = ds->gui2;
 		gui->start(ds->gInput, getFont(FONT_CALIBRI, fontHeight), ws->currentRes);
 
-		static bool statsSection = false;
+		static bool statsSection = true;
 		static bool graphSection = true;
 		gui->div(0.2f,0.2f,0); gui->switcher("Stats", &statsSection); gui->switcher("Graph", &graphSection); gui->empty();
 
@@ -2505,9 +2456,17 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			int barCount = arrayCount(ds->timings);
 			float sectionWidths[] = {0,0,0,0,0,0,0,0, barWidth*barCount};
 
-			char* headers[] = {"File", "Function", "Description", "Cycles", "Hits", "C/H", "Avg. Cycl.", "Total Time", ""};
+			char* headers[] = {"File", "Function", "Description", "Cycles", "Hits", "C/H", "Avg. Cycl.", "Total Time", "Graphs"};
 			gui->div(sectionWidths, arrayCount(sectionWidths));
-			for(int i = 0; i < arrayCount(sectionWidths); i++) gui->label(headers[i],1);
+
+			float textSectionEnd;
+
+			for(int i = 0; i < arrayCount(sectionWidths); i++) {
+				// @Hack: Get the end of the text region by looking at last region.
+				if(i == arrayCount(sectionWidths)-1) textSectionEnd = gui->getCurrentRegion().max.x;
+
+				gui->label(headers[i],1, vec4(0,0,0,0.3f));
+			}
 
 			for(int i = 0; i < infoCount; i++) {
 				TimerInfo* tInfo = ds->timerInfos + i;
@@ -2525,6 +2484,12 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				buffer = getTStringDebug(debugStringSize);
 				_snprintf_s(buffer, debugStringSize, debugStringSize, "%s", tInfo->file + 21);
 				gui->label(buffer,0);
+
+				if(highlightedIndex == i) {
+					Rect r = gui->getCurrentRegion();
+					Rect line = rect(r.min, vec2(textSectionEnd,r.min.y + fontHeight));
+					dcRect(line, highlightColor);
+				}
 
 				debugStringSize = 30;
 				buffer = getTStringDebug(debugStringSize);
@@ -2561,9 +2526,13 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				_snprintf_s(buffer, debugStringSize, debugStringSize, "%s%%", percentString);
 				gui->label(buffer,2);
 
+				// Bar graphs.
+
 				gui->empty();
 				Rect r = gui->getCurrentRegion();
 				float rheight = gui->getDefaultHeight();
+
+				float fontBaseOffset = 4;
 
 				float xOffset = 0;
 				for(int statIndex = 0; statIndex < barCount; statIndex++) {
@@ -2571,9 +2540,8 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 					u64 coh = ds->timings[statIndex][i].cyclesOverHits;
 
 					float height = mapRangeClamp(coh, stat->min, stat->max, 1, rheight);
-					Vec2 rmin = r.min + vec2(xOffset,-2);
+					Vec2 rmin = r.min + vec2(xOffset, fontBaseOffset);
 					float colorOffset = mapRange(coh, stat->min, stat->max, 0, 1);
-					// dcRect(rectMinDim(rmin, vec2(barWidth, height)), vec4(colorOffset,0,1-colorOffset,1));
 					dcRect(rectMinDim(rmin, vec2(barWidth, height)), vec4(colorOffset,1-colorOffset,0,1));
 
 					xOffset += barWidth;
@@ -2605,8 +2573,11 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 
 		if(graphSection) {
+			float lineHeightOffset = 1.2;
+			float lineHeight = fontHeight * lineHeightOffset;
+
 			// gui->empty();
-			gui->heightPush(3);
+			gui->heightPush(3*lineHeightOffset);
 			gui->empty();
 
 			Rect bgRect = gui->getCurrentRegion();
@@ -2619,13 +2590,6 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 			static Vec2 cp = vec2(graphWidth/2,0);
 			static float zoom = 1;
-			float zoomMod = 0.2f;
-			if(input->keysDown[KEYCODE_CTRL]) {
-				zoomMod *= 2;
-				if(input->keysDown[KEYCODE_SHIFT]) {
-					zoomMod *= 2;
-				}
-			}
 
 			cp.x -= dragDelta.x * ((graphWidth*zoom)/graphWidth);
 
@@ -2634,9 +2598,13 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			if(gui->input.mouseWheel) {
 				float oldWidth = graphWidth*zoom;
 
-				float wheel = gui->input.mouseWheel*zoomMod;
-				float zoomOffset = zoom*(zoom*wheel);
-				zoom -= zoomOffset;
+				float wheel = gui->input.mouseWheel;
+
+				float offset = wheel < 0 ? 1.1f : 0.9f;
+				if(input->keysDown[KEYCODE_CTRL])
+					offset = wheel < 0 ? 1.2f : 0.8f;
+
+				zoom *= offset;
 				zoom = clampMax(zoom, 1.0f);
 
 				float addedWidth = graphWidth*zoom - oldWidth;
@@ -2644,7 +2612,8 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				cp.x -= (addedWidth/2)*mouseZoomOffset;
 			}
 
-			cp.x = clamp(cp.x, (graphWidth*zoom)/2 - 5*zoom, graphWidth - (graphWidth*zoom)/2 + 5*zoom);
+			// cp.x = clamp(cp.x, (graphWidth*zoom)/2 - 5*zoom, graphWidth - (graphWidth*zoom)/2 + 5*zoom);
+			cp.x = clamp(cp.x, (graphWidth*zoom)/2, graphWidth - (graphWidth*zoom)/2);
 
 			Timings* graphTimings = timings;
 			TimerSlot* graphTimerBuffer = ds->timerBuffer;
@@ -2681,12 +2650,20 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 					dcRect(rectCenDim(vec2(startLine + (i*0.1f)*lineRegion, bgCen.y), vec2(1,bgDim.h)), vec4(g,g,g,1));
 				}
 
+				if(zoom < 0.25f) {
+					g = 0.7f;
+					float lineRegion = endLine - startLine;
+					for(int i = 0; i < 100; i++) {
+						dcRect(rectCenDim(vec2(startLine + (i*0.01f)*lineRegion, bgCen.y), vec2(1,bgDim.h*0.5f)), vec4(g,g,g,1));
+					}					
+				}
+
 				bool mouseHighlight = false;
 				Rect hRect;
 				Vec4 hc;
 				char* hText;
 
-				startPos -= vec2(0, fontHeight);
+				startPos -= vec2(0, lineHeight);
 				index = 0;
 				for(int i = 0; i < graphBufferIndex; ++i) {
 					TimerSlot* slot = graphTimerBuffer + i;
@@ -2702,8 +2679,8 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 						barLeft = mapRange(barLeft, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
 						barRight = mapRange(barRight, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
 
-						float y = startPos.y+index*-fontHeight;
-						Rect r = rect(vec2(barLeft,y), vec2(barRight, y + fontHeight));
+						float y = startPos.y+index*-lineHeight;
+						Rect r = rect(vec2(barLeft,y), vec2(barRight, y + lineHeight));
 
 						float cOff = slot->timerIndex/(float)ds->timerInfoCount;
 						Vec4 c = vec4(1-cOff, 0, cOff, 1);
@@ -2714,6 +2691,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 							hRect = r;
 							hc = c;
 							hText = text;
+							highlightedIndex = slot->timerIndex;
 						} else {
 							gui->drawRect(r, vec4(0,0,0,1));
 							gui->drawTextBox(rect(r.min+vec2(1,1), r.max-vec2(1,1)), text, c);
@@ -2727,7 +2705,6 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 					}
 				}
 
-
 				if(mouseHighlight) {
 					float tw = getTextDim(hText, gui->font).w + 2;
 					if(tw > rectGetDim(hRect).w) hRect.max.x = hRect.min.x + tw;
@@ -2735,6 +2712,8 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 					float g = 0.8f;
 					gui->drawRect(hRect, vec4(g,g,g,1));
 					gui->drawTextBox(rect(hRect.min+vec2(1,1), hRect.max-vec2(1,1)), hText, hc);
+				} else {
+					highlightedIndex = -1;
 				}
 
 			}
@@ -2746,7 +2725,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				zoom = 1;
 			}
 
-			gui->label(fillString("%f Width: %f, Zoom: %f",cp.x, graphWidth, zoom));
+			gui->label(fillString("Cam: %f, Zoom: %f",cp.x, zoom));
 		}
 
 		gui->end();
@@ -2796,7 +2775,6 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				pushResult = false;
 
 			} else if(strCompare(comName, "doNothing")) {
-				// Hmm....
 
 			} else if(strCompare(comName, "setGuiAlpha")) {
 				ds->guiAlpha = strToFloat(args[0]);
