@@ -2148,11 +2148,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-
-	TIMER_BLOCK_END(Main)
-
-	debugMain(ds, appMemory, ad, reload, isRunning, init);
-
 	// Render.
 	{
 		TIMER_BLOCK_NAMED("Render");
@@ -2200,6 +2195,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		#endif
 	}
 
+	TIMER_BLOCK_END(Main)
+
 	// Swap window background buffer.
 	{
 		TIMER_BLOCK_NAMED("Swap");
@@ -2211,6 +2208,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 			GLenum glError = glGetError(); printf("GLError: %i\n", glError);
 		}
 	}
+
+
+
+	debugMain(ds, appMemory, ad, reload, isRunning, init);
 
 	debugUpdatePlayback(ds, appMemory);
 
