@@ -2506,7 +2506,8 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		static int highlightedIndex = -1;
 		Vec4 highlightColor = vec4(1,1,1,0.05f);
 
-		float cyclesPerFrame = (float)((3.5f*((float)1/60))*1024*1024*1024);
+		// float cyclesPerFrame = (float)((3.5f*((float)1/60))*1024*1024*1024);
+		float cyclesPerFrame = (float)((3.5f*((float)1/60))*1000*1000*1000);
 		fontHeight = 18;
 		Vec2 textPos = vec2(550, -fontHeight);
 		int infoCount = timer->timerInfoCount;
@@ -2637,6 +2638,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			Rect cyclesRect = gui->getCurrentRegion();
 			gui->empty();
 			Rect headerRect = gui->getCurrentRegion();
+			headerRect.max.y = cyclesRect.max.y;
 			gui->heightPop();
 
 
@@ -2694,12 +2696,14 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 				// Cycles.
 				{
-					dcRect(cyclesRect, vec4(0,1,1,0.1f));
+					// dcRect(cyclesRect, vec4(0,1,1,0.1f));
 
 				}
 
 				// Header.
 				{
+					Vec2 cyclesDim = rectGetDim(cyclesRect);
+
 					dcRect(headerRect, vec4(1,1,1,0.1f));
 
 					float startLine = mapRange(0, orthoLeft, orthoRight, headerRect.min.x, headerRect.max.x);
@@ -2707,25 +2711,55 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 					Vec2 bgCen = rectGetCen(headerRect);
 					Vec2 bgDim = rectGetDim(headerRect);
-					float g = 0.9f;
+					float g = 0.7f;
 					dcRect(rectCenDim(vec2(startLine + 1, bgCen.y), vec2(4,bgDim.h)), vec4(g,g,g,1));
 					dcRect(rectCenDim(vec2(endLine - 1, bgCen.y), vec2(3,bgDim.h)), vec4(g,g,g,1));
 
 					g = 0.7f;
-					float lineRegion = endLine - startLine;
-					for(int i = 0; i < 10; i++) {
-						dcRect(rectCenDim(vec2(startLine + (i*0.1f)*lineRegion, bgCen.y), vec2(1,bgDim.h)), vec4(g,g,g,1));
+					float div = 4;
+					float cyclesInWidth = mapRange(cyclesPerFrame*div, startCycleCount, endCycleCount, 0, graphWidth);
+					uint cyc = cyclesPerFrame*div;
+					float heightMod = 1.3f;
+					float heightSub = 0.15f;
+
+					float zoomBarInterval = cyclesInWidth;
+					float orthoWidth = graphWidth*zoom;
+					while(zoomBarInterval/orthoWidth > 0.3f) {
+						zoomBarInterval /= div;
+						heightMod -= heightSub;
+						cyc /= div;
 					}
 
-					if(zoom < 0.25f) {
-						g = 0.7f;
-						float lineRegion = endLine - startLine;
-						for(int i = 0; i < 100; i++) {
-							float x = startLine + (i*0.01f)*lineRegion;
-							if(x+1 < headerRect.min.x || x > headerRect.max.x) continue;
+					heightMod = clampMax(heightMod, 1);
 
-							dcRect(rectCenDim(vec2(x, bgCen.y), vec2(1,bgDim.h*0.5f)), vec4(g,g,g,1));
+					float pos = roundMod(orthoLeft, zoomBarInterval);
+					while(pos < orthoRight) {
+						float p = mapRange(pos, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
+
+						float h = bgDim.h*heightMod;
+						dcRect(rectCenDim(vec2(p, headerRect.min.y + h/2), vec2(3,h)), vec4(g,g,g,1));
+
+						Vec2 textPos = vec2(p,cyclesRect.min.y + cyclesDim.h/2);
+						// dcText("abc", gui->font, textPos, gui->colors.textColor, vec2i(0,0), 0, gui->settings.textShadow, gui->colors.shadowColor);
+						// dcText(fillString("%i", cyc), gui->font, textPos, gui->colors.textColor, vec2i(0,0), 0, gui->settings.textShadow, gui->colors.shadowColor);
+
+						pos += zoomBarInterval;
+					}
+
+					pos = roundMod(orthoLeft, zoomBarInterval);
+					zoomBarInterval /= div;
+					heightMod -= heightSub;
+					int index = 0;
+					while(pos < orthoRight) {
+						if((index%(int)div) != 0) {
+							float p = mapRange(pos, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
+
+							float h = bgDim.h*heightMod;
+							dcRect(rectCenDim(vec2(p, headerRect.min.y + h/2), vec2(1,h)), vec4(g,g,g,1));
 						}
+
+						pos += zoomBarInterval;
+						index++;
 					}
 				}
 

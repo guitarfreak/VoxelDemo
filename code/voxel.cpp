@@ -296,6 +296,8 @@ struct VoxelNode {
 };
 
 VoxelMesh* getVoxelMesh(VoxelNode** voxelHash, int voxelHashSize, Vec2i coord) {
+	TIMER_BLOCK();
+
 	int hashIndex = mod(coord.x*9 + coord.y*23, voxelHashSize);
 
 	VoxelMesh* m = 0;
@@ -600,7 +602,7 @@ void makeMeshThreaded(void* data) {
 
 void makeMesh(VoxelMesh* m, VoxelNode** voxelHash, int voxelHashSize) {
 	TIMER_BLOCK();
-	
+
 	// int threadJobsMax = 20;
 
 	bool notAllMeshsAreReady = false;

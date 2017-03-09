@@ -241,6 +241,10 @@ inline int round(int i) {
 	return (int)floor(i + 0.5f);
 }
 
+inline int roundMod(float i, float val) {
+	return ((int)(i/val))*val;
+}
+
 inline int roundInt(float i) {
 	return (int)floor(i + 0.5f);
 }
