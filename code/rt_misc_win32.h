@@ -21,9 +21,9 @@ struct ThreadQueue {
     HANDLE semaphore;
 
     int threadIds[16];
+    int threadCount;
 
     ThreadJob jobs[256];
-    // ThreadJob jobs[1024];
 };
 
 int getThreadQueueId(ThreadQueue* queue) {
@@ -80,6 +80,8 @@ void threadInit(ThreadQueue* queue, int numOfThreads) {
     queue->readIndex = 0;
     // queue->semaphore = CreateSemaphore(0, 0, 255, "Semaphore");
     queue->semaphore = CreateSemaphoreEx(0, 0, 255, "Semaphore", 0, SEMAPHORE_ALL_ACCESS);
+
+    queue->threadCount = numOfThreads + 1;
 
     int id = GetCurrentThreadId();
     queue->threadIds[0] = id;

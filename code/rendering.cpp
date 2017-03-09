@@ -108,7 +108,7 @@ void drawCommandListInit(DrawCommandList* cl, char* data, int maxBytes) {
 	cl->maxBytes = maxBytes;
 }
 
-#pragma pack(push)
+#pragma pack(push,1)
 struct Draw_Command_Cube {
 	Vec3 trans;
 	Vec3 scale;

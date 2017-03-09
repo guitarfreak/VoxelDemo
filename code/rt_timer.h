@@ -19,12 +19,18 @@ struct TimerInfo {
 };
 
 #define CYCLEBUFFERSIZE 120
+#pragma pack(push,1)
+
 struct TimerSlot {
-	uint type;
+	char type;
 	uint threadId;
-	int timerIndex;
+	char timerIndex;
 	u64 cycles;
+
+	// @Hack.
+	uint size;
 };
+#pragma pack(pop)
 
 struct Timings {
 	u64 cycles;
@@ -39,7 +45,7 @@ struct Timer {
 	TimerInfo timerInfos[32]; // timerInfoCount
 	TimerSlot* timerBuffer;
 	int bufferSize;
-	u64 bufferIndex;
+	int bufferIndex;
 };
 
 extern Timer* globalTimer;
@@ -52,8 +58,8 @@ inline uint getThreadID() {
 }
 
 void addTimerSlot(int timerIndex, int type) {
-	// uint id = atomicAdd64(&globalDebugState->bufferIndex, 1);
-	uint id = globalTimer->bufferIndex++;
+	int id = InterlockedIncrement((LONG*)(&globalTimer->bufferIndex));
+	id--;
 	TimerSlot* slot = globalTimer->timerBuffer + id;
 	slot->cycles = __rdtsc();
 	slot->type = type;
@@ -65,6 +71,7 @@ void addTimerSlotAndInfo(int timerIndex, int type, const char* file, const char*
 
 	TimerInfo* timerInfo = globalTimer->timerInfos + timerIndex;
 
+	// if(getThreadID() == 0 && !timerInfo->initialised) {
 	if(!timerInfo->initialised) {
 		timerInfo->initialised = true;
 		timerInfo->file = file;

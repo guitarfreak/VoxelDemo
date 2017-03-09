@@ -905,7 +905,8 @@ void endStatistic(Statistic* stat) {
 	stat->avg /= stat->count;
 }
 
-struct TimerStatistic {
-	u64 cycles;
-	int timerIndex;
-};
+//
+
+// void sprintfu64NumberDots(char* buffer, int size, int size2, char* s, ) {
+
+// }

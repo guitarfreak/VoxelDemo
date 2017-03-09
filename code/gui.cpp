@@ -191,7 +191,9 @@ struct Gui {
 		}
 	}
 
-	void heightPush(float heightOffset) { heightStack[++heightStackIndex] = heightOffset; }
+	void heightPush(float heightOffset) { 
+		heightStack[++heightStackIndex] = heightOffset; 
+	}
 	void heightPop() { heightStackIndex--; }
 
 	void doScissor(Rect r) {
@@ -1356,7 +1358,7 @@ struct Console {
 		cs.commandPreText = "> ";
 	}
 
-	void update(Input* input, Vec2 currentRes, float dt) {
+	void update(Input* input, Vec2 currentRes, float dt, bool smallExtensionButtonPressed, bool bigExtensionButtonPressed) {
 
 		initSettings();
 
@@ -1369,16 +1371,16 @@ struct Console {
 		float smallPos = -currentRes.y * CONSOLE_SMALL_PERCENT;
 		float bigPos = -currentRes.y * CONSOLE_BIG_PERCENT;
 
-		if(input->keysPressed[KEYCODE_F5]) {
-			if(input->keysDown[KEYCODE_CTRL]) {
-				if(mode == 0) mode = 2;
-				else if(mode == 1) mode = 2;
-				else mode = 0;
-			} else {
-				if(mode == 0) mode = 1;
-				else if(mode == 2) mode = 1;
-				else mode = 0;
-			}
+		if(bigExtensionButtonPressed) {
+			if(mode == 0) mode = 2;
+			else if(mode == 1) mode = 2;
+			else mode = 0;
+		}
+		
+		if(smallExtensionButtonPressed) {
+			if(mode == 0) mode = 1;
+			else if(mode == 2) mode = 1;
+			else mode = 0;
 		}
 
 		if(mode == 0) targetPos = 0;

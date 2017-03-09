@@ -106,6 +106,7 @@ Changing course for now:
  - Threading in timerblocks not working.
    - Use thread id information that's already in the timerinfo.
  - Drawing the timerinfo gets really slow.
+ - Zoom bars need to be on top.
 
 //-------------------------------------
 //               BUGS
@@ -288,7 +289,8 @@ struct AppData {
 
 
 
-void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, bool* isRunning, bool init);
+// void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, bool* isRunning, bool init);
+void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, bool* isRunning, bool init, ThreadQueue* threadQueue);
 void debugUpdatePlayback(DebugState* ds, AppMemory* appMemory);
 
 #pragma optimize( "", off )
@@ -394,11 +396,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		ds->timer = getPStructDebug(Timer);
 		globalTimer = ds->timer;
-		int timerSlots = 10000;
+		int timerSlots = 5000;
 		ds->timer->bufferSize = timerSlots;
 		ds->timer->timerBuffer = (TimerSlot*)getPMemoryDebug(sizeof(TimerSlot) * timerSlots);
-		ds->savedTimerBuffer = (TimerSlot*)getPMemoryDebug(sizeof(TimerSlot) * timerSlots);
-		ds->cycleIndex = 0;
+
+		int cycleCount = arrayCount(ds->timings);
+		ds->savedBufferMax = timerSlots * cycleCount;
+		for(int i = 0; i < cycleCount; i++) {
+			ds->savedBuffer[i] = (TimerSlot*)getPMemoryDebug(sizeof(TimerSlot) * timerSlots);
+		}
 
 		ds->gui = getPStructDebug(Gui);
 		// gui->init(rectCenDim(vec2(0,1), vec2(300,800)));
@@ -2239,7 +2245,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 	}
 
-	debugMain(ds, appMemory, ad, reload, isRunning, init);
+	debugMain(ds, appMemory, ad, reload, isRunning, init, threadQueue);
 
 	debugUpdatePlayback(ds, appMemory);
 
@@ -2248,7 +2254,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, bool* isRunning, bool init) {
+void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, bool* isRunning, bool init, ThreadQueue* threadQueue) {
 	// @DebugStart.
 
 	Input* input = ds->input;
@@ -2269,13 +2275,12 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 					input->keysPressed[KEYCODE_LEFT], input->keysPressed[KEYCODE_RIGHT], input->keysPressed[KEYCODE_UP], input->keysPressed[KEYCODE_DOWN], 
 					input->keysDown[KEYCODE_SHIFT], input->keysDown[KEYCODE_CTRL], input->inputCharacters, input->inputCharacterCount};
 
-	// if(input->keysPressed[KEYCODE_F5]) ds->showConsole = !ds->showConsole;
 	if(input->keysPressed[KEYCODE_F6]) ds->showMenu = !ds->showMenu;
 	if(input->keysPressed[KEYCODE_F7]) ds->showStats = !ds->showStats;
 	if(input->keysPressed[KEYCODE_F8]) ds->showHud = !ds->showHud;
 
-	if(ds->showHud)
-	{
+
+	if(ds->showHud) {
 		int fontSize = 18;
 		int pi = 0;
 		// Vec4 c = vec4(1.0f,0.2f,0.0f,1);
@@ -2302,182 +2307,204 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		dcText(fillString("Quads: (%i)", 	   ad->voxelTriangleCount), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
 	}
 
-	{
-		if(ds->showMenu) {
-			int fontSize = 18;
+	if(ds->showMenu) {
+		int fontSize = 18;
 
-			bool initSections = false;
+		bool initSections = false;
 
-			Gui* gui = ds->gui;
-			// gui->start(gInput, getFont(FONT_CONSOLAS, fontSize), ws->currentRes);
-			gui->start(ds->gInput, getFont(FONT_CALIBRI, fontSize), ws->currentRes);
+		Gui* gui = ds->gui;
+		// gui->start(gInput, getFont(FONT_CONSOLAS, fontSize), ws->currentRes);
+		gui->start(ds->gInput, getFont(FONT_CALIBRI, fontSize), ws->currentRes);
 
-			if(gui->switcher("Record", &ds->recordingInput)) {
-				if(ds->recordingInput) {
-					for(int i = 0; i < pMemory->index; i++) {
-						if(debugMemory->index < i) getExtendibleMemoryArray(pMemory->slotSize, debugMemory);
+		if(gui->switcher("Record", &ds->recordingInput)) {
+			if(ds->recordingInput) {
+				for(int i = 0; i < pMemory->index; i++) {
+					if(debugMemory->index < i) getExtendibleMemoryArray(pMemory->slotSize, debugMemory);
 
-						memCpy(debugMemory->arrays[i].data, pMemory->arrays[i].data, pMemory->slotSize);
-					}
-
-					ds->recordingInput = true;
-					ds->inputIndex = 0;
-				} else {
-					ds->recordingInput = false;
+					memCpy(debugMemory->arrays[i].data, pMemory->arrays[i].data, pMemory->slotSize);
 				}
+
+				ds->recordingInput = true;
+				ds->inputIndex = 0;
+			} else {
+				ds->recordingInput = false;
 			}
-			if(gui->button("Playback")) ds->playbackStart = true;
-
-			static bool sectionGuiSettings = false;
-			if(gui->beginSection("GuiSettings", &sectionGuiSettings)) {
-				guiSettings(gui);
-			} gui->endSection();
-
-			static bool sectionSettings = initSections;
-			if(gui->beginSection("Settings", &sectionSettings)) {
-				gui->div(vec2(0,0)); if(gui->button("Compile")) shellExecute("C:\\Projects\\Hmm\\code\\buildWin32.bat");
-									 if(gui->button("Up Buffers")) ad->updateFrameBuffers = true;
-				gui->div(vec2(0,0)); gui->label("FoV", 0); gui->slider(&ad->fieldOfView, 1, 180);
-				gui->div(vec2(0,0)); gui->label("MSAA", 0); gui->slider(&ad->msaaSamples, 1, 8);
-				gui->switcher("Native Res", &ad->useNativeRes);
-				gui->div(0,0,0); gui->label("FboRes", 0); gui->slider(&ad->fboRes.x, 150, ad->cur3dBufferRes.x); gui->slider(&ad->fboRes.y, 150, ad->cur3dBufferRes.y);
-				gui->div(0,0,0); gui->label("NFPlane", 0); gui->slider(&ad->nearPlane, 0.01, 2); gui->slider(&ad->farPlane, 1000, 5000);
-			} gui->endSection();
-
-			static bool sectionWorld = initSections;
-			if(gui->beginSection("World", &sectionWorld)) { 
-				if(gui->button("Reload World") || input->keysPressed[KEYCODE_TAB]) ad->reloadWorld = true;
-				
-				gui->div(vec2(0,0)); gui->label("RefAlpha", 0); gui->slider(&reflectionAlpha, 0, 1);
-				gui->div(vec2(0,0)); gui->label("Light", 0); gui->slider(&globalLumen, 0, 255);
-				gui->div(0,0,0); gui->label("MinMax", 0); gui->slider(&WORLD_MIN, 0, 255); gui->slider(&WORLD_MAX, 0, 255);
-				gui->div(vec2(0,0)); gui->label("WaterLevel", 0); 
-					if(gui->slider(&waterLevelValue, 0, 0.2f)) WATER_LEVEL_HEIGHT = lerp(waterLevelValue, WORLD_MIN, WORLD_MAX);
-
-				gui->div(vec2(0,0)); gui->label("WFreq", 0); gui->slider(&worldFreq, 0.0001f, 0.02f);
-				gui->div(vec2(0,0)); gui->label("WDepth", 0); gui->slider(&worldDepth, 1, 10);
-				gui->div(vec2(0,0)); gui->label("MFreq", 0); gui->slider(&modFreq, 0.001f, 0.1f);
-				gui->div(vec2(0,0)); gui->label("MDepth", 0); gui->slider(&modDepth, 1, 10);
-				gui->div(vec2(0,0)); gui->label("MOffset", 0); gui->slider(&modOffset, 0, 1);
-				gui->div(vec2(0,0)); gui->label("PowCurve", 0); gui->slider(&worldPowCurve, 1, 6);
-				gui->div(0,0,0,0); gui->slider(heightLevels+0,0,1); gui->slider(heightLevels+1,0,1);
-									  gui->slider(heightLevels+2,0,1); gui->slider(heightLevels+3,0,1);
-			} gui->endSection();
-
-			static bool sectionTest = false;
-			if(gui->beginSection("Test", &sectionTest)) {
-				static int scrollHeight = 200;
-				static int scrollElements = 13;
-				static float scrollVal = 0;
-				gui->div(vec2(0,0)); gui->slider(&scrollHeight, 0, 2000); gui->slider(&scrollElements, 0, 100);
-
-				gui->beginScroll(scrollHeight, &scrollVal); {
-					for(int i = 0; i < scrollElements; i++) {
-						gui->button(fillString("Element: %i.", i));
-					}
-				} gui->endScroll();
-
-				static int textCapacity = 50;
-				static char* text = getPArray(char, textCapacity);
-				static bool DOIT = true;
-				if(DOIT) {
-					DOIT = false;
-					strClear(text);
-					strCpy(text, "This is a really long sentence!");
-				}
-				gui->div(vec2(0,0)); gui->label("Text Box:", 0); gui->textBoxChar(text, 0, textCapacity);
-
-				static int textNumber = 1234;
-				gui->div(vec2(0,0)); gui->label("Int Box:", 0); gui->textBoxInt(&textNumber);
-
-				static float textFloat = 123.456f;
-				gui->div(vec2(0,0)); gui->label("Float Box:", 0); gui->textBoxFloat(&textFloat);
-
-			} gui->endSection();
-
-			gui->end();
 		}
+		if(gui->button("Playback")) ds->playbackStart = true;
+
+		static bool sectionGuiSettings = false;
+		if(gui->beginSection("GuiSettings", &sectionGuiSettings)) {
+			guiSettings(gui);
+		} gui->endSection();
+
+		static bool sectionSettings = initSections;
+		if(gui->beginSection("Settings", &sectionSettings)) {
+			gui->div(vec2(0,0)); if(gui->button("Compile")) shellExecute("C:\\Projects\\Hmm\\code\\buildWin32.bat");
+								 if(gui->button("Up Buffers")) ad->updateFrameBuffers = true;
+			gui->div(vec2(0,0)); gui->label("FoV", 0); gui->slider(&ad->fieldOfView, 1, 180);
+			gui->div(vec2(0,0)); gui->label("MSAA", 0); gui->slider(&ad->msaaSamples, 1, 8);
+			gui->switcher("Native Res", &ad->useNativeRes);
+			gui->div(0,0,0); gui->label("FboRes", 0); gui->slider(&ad->fboRes.x, 150, ad->cur3dBufferRes.x); gui->slider(&ad->fboRes.y, 150, ad->cur3dBufferRes.y);
+			gui->div(0,0,0); gui->label("NFPlane", 0); gui->slider(&ad->nearPlane, 0.01, 2); gui->slider(&ad->farPlane, 1000, 5000);
+		} gui->endSection();
+
+		static bool sectionWorld = initSections;
+		if(gui->beginSection("World", &sectionWorld)) { 
+			if(gui->button("Reload World") || input->keysPressed[KEYCODE_TAB]) ad->reloadWorld = true;
+			
+			gui->div(vec2(0,0)); gui->label("RefAlpha", 0); gui->slider(&reflectionAlpha, 0, 1);
+			gui->div(vec2(0,0)); gui->label("Light", 0); gui->slider(&globalLumen, 0, 255);
+			gui->div(0,0,0); gui->label("MinMax", 0); gui->slider(&WORLD_MIN, 0, 255); gui->slider(&WORLD_MAX, 0, 255);
+			gui->div(vec2(0,0)); gui->label("WaterLevel", 0); 
+				if(gui->slider(&waterLevelValue, 0, 0.2f)) WATER_LEVEL_HEIGHT = lerp(waterLevelValue, WORLD_MIN, WORLD_MAX);
+
+			gui->div(vec2(0,0)); gui->label("WFreq", 0); gui->slider(&worldFreq, 0.0001f, 0.02f);
+			gui->div(vec2(0,0)); gui->label("WDepth", 0); gui->slider(&worldDepth, 1, 10);
+			gui->div(vec2(0,0)); gui->label("MFreq", 0); gui->slider(&modFreq, 0.001f, 0.1f);
+			gui->div(vec2(0,0)); gui->label("MDepth", 0); gui->slider(&modDepth, 1, 10);
+			gui->div(vec2(0,0)); gui->label("MOffset", 0); gui->slider(&modOffset, 0, 1);
+			gui->div(vec2(0,0)); gui->label("PowCurve", 0); gui->slider(&worldPowCurve, 1, 6);
+			gui->div(0,0,0,0); gui->slider(heightLevels+0,0,1); gui->slider(heightLevels+1,0,1);
+								  gui->slider(heightLevels+2,0,1); gui->slider(heightLevels+3,0,1);
+		} gui->endSection();
+
+		static bool sectionTest = false;
+		if(gui->beginSection("Test", &sectionTest)) {
+			static int scrollHeight = 200;
+			static int scrollElements = 13;
+			static float scrollVal = 0;
+			gui->div(vec2(0,0)); gui->slider(&scrollHeight, 0, 2000); gui->slider(&scrollElements, 0, 100);
+
+			gui->beginScroll(scrollHeight, &scrollVal); {
+				for(int i = 0; i < scrollElements; i++) {
+					gui->button(fillString("Element: %i.", i));
+				}
+			} gui->endScroll();
+
+			static int textCapacity = 50;
+			static char* text = getPArray(char, textCapacity);
+			static bool DOIT = true;
+			if(DOIT) {
+				DOIT = false;
+				strClear(text);
+				strCpy(text, "This is a really long sentence!");
+			}
+			gui->div(vec2(0,0)); gui->label("Text Box:", 0); gui->textBoxChar(text, 0, textCapacity);
+
+			static int textNumber = 1234;
+			gui->div(vec2(0,0)); gui->label("Int Box:", 0); gui->textBoxInt(&textNumber);
+
+			static float textFloat = 123.456f;
+			gui->div(vec2(0,0)); gui->label("Float Box:", 0); gui->textBoxFloat(&textFloat);
+
+		} gui->endSection();
+
+		gui->end();
 	}
 
-
-
-	int globalTimingsCount = __COUNTER__;
-
-	Timer* timer = ds->timer;
-	timer->timerInfoCount = globalTimingsCount;
-
 	if(reload) {
-		for(int i = 0; i < arrayCount(timer->timerInfos); i++) timer->timerInfos[i].initialised = false;
+		for(int i = 0; i < arrayCount(ds->timer->timerInfos); i++) ds->timer->timerInfos[i].initialised = false;
 		return;
 	}
 
-	int cycleCount = arrayCount(ds->timings);
+	ds->timer->timerInfoCount = __COUNTER__;
+
 	int fontHeight = 18;
+	Timer* timer = ds->timer;
+	int cycleCount = arrayCount(ds->timings);
 	int bufferIndex = timer->bufferIndex;
 	timer->bufferIndex = 0;
+
+	if(ds->setPause) {
+		ds->lastCycleIndex = ds->cycleIndex;
+		ds->cycleIndex = mod(ds->cycleIndex-1, arrayCount(ds->timings));
+
+		ds->setPause = false;
+	}
+	if(ds->setPlay) {
+		ds->cycleIndex = ds->lastCycleIndex;
+		ds->setPlay = false;
+	}
 
 	Timings* timings = ds->timings[ds->cycleIndex];
 	Statistic* statistics = ds->statistics[ds->cycleIndex];
 
-	ds->stopCollating = ds->frozenGraph;
+	int cycleIndex = ds->cycleIndex;
+	int newCycleIndex = (ds->cycleIndex + 1)%cycleCount;
 
-	if(!ds->stopCollating) {
-		zeroMemory(timings, timer->timerInfoCount*sizeof(Timings));
-		zeroMemory(statistics, timer->timerInfoCount*sizeof(Statistic));
-		ds->cycleIndex = (ds->cycleIndex + 1)%cycleCount;
+	// Timer update.
+	{
+
+		if(!ds->noCollating) {
+			zeroMemory(timings, timer->timerInfoCount*sizeof(Timings));
+			zeroMemory(statistics, timer->timerInfoCount*sizeof(Statistic));
+
+			// Save current timerBuffer.
+			{
+				memCpy(ds->savedBuffer[cycleIndex], timer->timerBuffer, bufferIndex * sizeof(TimerSlot));
+				ds->savedBufferCounts[cycleIndex] = bufferIndex;
+			}
+
+			ds->cycleIndex = newCycleIndex;
+
+			// Collate timing buffer.
+
+			for(int threadIndex = 0; threadIndex < threadQueue->threadCount; threadIndex++) {
+				TimerSlot* slots[16];
+				int index = 0;
+
+				for(int i = 0; i < bufferIndex; ++i) {
+					TimerSlot* slot = ds->savedBuffer[cycleIndex] + i;
+
+					if(slot->threadId != threadQueue->threadIds[threadIndex]) continue;
+
+					if(slot->type == TIMER_TYPE_BEGIN) {
+						slots[index] = slot;
+						index++;
+					} else {
+						index--;
+						if(index < 0) index = 0; // @Hack, to keep things running.
+
+						Timings* timing = timings + slots[index]->timerIndex;
+						uint slotSize = slot->cycles - slots[index]->cycles;
+						timing->cycles += slotSize;
+						timing->hits++;
+
+						slots[index]->size = slotSize;
+					}
+				}
+			}
+
+			for(int i = 0; i < timer->timerInfoCount; i++) {
+				Timings* t = timings + i;
+				t->cyclesOverHits = t->hits > 0 ? (u64)(t->cycles/t->hits) : 0; 
+			}
+
+			for(int timerIndex = 0; timerIndex < timer->timerInfoCount; timerIndex++) {
+				Statistic* stat = statistics + timerIndex;
+				beginStatistic(stat);
+
+				for(int i = 0; i < arrayCount(ds->timings); i++) {
+					Timings* t = &ds->timings[i][timerIndex];
+					updateStatistic(stat, t->cyclesOverHits);
+				}
+
+				endStatistic(stat);
+			}
+		}
 	}
 
-	// Collate timing buffer.
-	// Statistic statistics[32] = {};
-	TimerStatistic stats[16] = {};
-	int index = 0;
-
-	if(!ds->stopCollating) {
-
-		for(int i = 0; i < bufferIndex; ++i) {
-			TimerSlot* slot = timer->timerBuffer + i;
-
-			if(slot->type == TIMER_TYPE_BEGIN) {
-				stats[index].cycles = slot->cycles;
-				stats[index].timerIndex = slot->timerIndex;
-				index++;
-			}
-
-			if(slot->type == TIMER_TYPE_END) {
-				index--;
-				Timings* timing = timings + stats[index].timerIndex;
-				timing->cycles += slot->cycles - stats[index].cycles;
-				timing->hits++;
-			}
-		}
-
-		for(int i = 0; i < timer->timerInfoCount; i++) {
-			Timings* t = timings + i;
-			t->cyclesOverHits = t->hits > 0 ? (u64)(t->cycles/t->hits) : 0; 
-		}
-
-		for(int timerIndex = 0; timerIndex < timer->timerInfoCount; timerIndex++) {
-			Statistic* stat = statistics + timerIndex;
-			beginStatistic(stat);
-
-			for(int i = 0; i < arrayCount(ds->timings); i++) {
-				Timings* t = &ds->timings[i][timerIndex];
-				updateStatistic(stat, t->cyclesOverHits);
-			}
-
-			endStatistic(stat);
-		}
-
-	}
+	TimerSlot* graphTimerBuffer = ds->savedBuffer[cycleIndex];
+	int graphBufferIndex = ds->savedBufferCounts[cycleIndex];
 
 	//
 	// Draw timing info.
 	//
 
-	if(ds->showStats && !init) 
+	if(ds->showStats) 
 	{
 		static int highlightedIndex = -1;
-		Vec4 highlightColor = vec4(1,1,1,0.1f);
+		Vec4 highlightColor = vec4(1,1,1,0.05f);
 
 		float cyclesPerFrame = (float)((3.5f*((float)1/60))*1024*1024*1024);
 		fontHeight = 18;
@@ -2490,15 +2517,9 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		gui->label("App Statistics", 1, gui->colors.sectionColor, vec4(0,0,0,1));
 
 		gui->div(vec2(0.2f,0));
-		if(gui->switcher("Freeze", &ds->frozenGraph)) {
-			if(ds->frozenGraph) {
-				memCpy(ds->savedTimerBuffer, timer->timerBuffer, bufferIndex*sizeof(TimerSlot));
-				ds->savedBufferIndex = bufferIndex;
-				memCpy(ds->savedTimings, timings, timer->timerInfoCount*sizeof(Timings));
-				ds->lastCycleIndex = ds->cycleIndex;
-			} else {
-				ds->cycleIndex = ds->lastCycleIndex;
-			}
+		if(gui->switcher("Freeze", &ds->noCollating)) {
+			if(ds->noCollating) ds->setPause = true;
+			else ds->setPlay = true;
 		}
 		gui->slider(&ds->cycleIndex, 0, cycleCount-1);
 
@@ -2557,6 +2578,13 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				debugStringSize = 30;
 				buffer = getTStringDebug(debugStringSize);
 				_snprintf_s(buffer, debugStringSize, debugStringSize, "%I64uc", timing->cycles);
+				// if(timing->cycles < 1000) 
+				// 	_snprintf_s(buffer, debugStringSize, debugStringSize, "%I64uc", timing->cycles);
+				// else if(timing->cycles < 1000000) 
+				// 	_snprintf_s(buffer, debugStringSize, debugStringSize, "%I64u,%0.3I64uc", (u64)(timing->cycles/1000), (u64)(timing->cycles%1000));
+				// else 
+				// 	_snprintf_s(buffer, debugStringSize, debugStringSize, "%I64u,%0.3I64u,%0.3I64uc", (u64)(timing->cycles/1000000), (u64)(timing->cycles/1000), (u64)(timing->cycles%1000));
+
 				gui->label(buffer,2);
 
 				debugStringSize = 30;
@@ -2603,11 +2631,20 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		}
 
 		{
+
+			gui->heightPush(1.0f);
+			gui->empty();
+			Rect cyclesRect = gui->getCurrentRegion();
+			gui->empty();
+			Rect headerRect = gui->getCurrentRegion();
+			gui->heightPop();
+
+
 			float lineHeightOffset = 1.2;
 			float lineHeight = fontHeight * lineHeightOffset;
+			float heightP = 3*lineHeight +  2*lineHeight*(threadQueue->threadCount-1);
 
-			// gui->empty();
-			gui->heightPush(3*lineHeightOffset);
+			gui->heightPush(heightP);
 			gui->empty();
 
 			Rect bgRect = gui->getCurrentRegion();
@@ -2631,28 +2668,21 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				float wheel = gui->input.mouseWheel;
 
 				float offset = wheel < 0 ? 1.1f : 0.9f;
-				if(input->keysDown[KEYCODE_CTRL])
+				if(!input->keysDown[KEYCODE_SHIFT] && input->keysDown[KEYCODE_CTRL]) 
 					offset = wheel < 0 ? 1.2f : 0.8f;
+				if(input->keysDown[KEYCODE_SHIFT] && input->keysDown[KEYCODE_CTRL]) 
+					offset = wheel < 0 ? 1.4f : 0.6f;
 
 				zoom *= offset;
-				zoom = clampMax(zoom, 1.0f);
+				zoom = clampMax(zoom, 4.0f);
 
 				float addedWidth = graphWidth*zoom - oldWidth;
 				float mouseZoomOffset = mapRange(input->mousePos.x, bgRect.min.x, bgRect.max.x, -1, 1);
 				cp.x -= (addedWidth/2)*mouseZoomOffset;
 			}
 
-			cp.x = clamp(cp.x, (graphWidth*zoom)/2, graphWidth - (graphWidth*zoom)/2);
-
-			Timings* graphTimings = timings;
-			TimerSlot* graphTimerBuffer = timer->timerBuffer;
-			u64 graphBufferIndex = bufferIndex;
-
-			if(ds->frozenGraph) {
-				graphTimings = ds->savedTimings;
-				graphTimerBuffer = ds->savedTimerBuffer;
-				graphBufferIndex = ds->savedBufferIndex;
-			}
+			// cp.x = clamp(cp.x, (graphWidth*zoom)/2, graphWidth - (graphWidth*zoom)/2);
+			cp.x = clampMin(cp.x, (graphWidth*zoom)/2);
 
 			if(true) {
 				u64 baseCycleCount = graphTimerBuffer[0].cycles;
@@ -2662,30 +2692,44 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				float orthoLeft = cp.x - (graphWidth*zoom)/2;
 				float orthoRight = cp.x + (graphWidth*zoom)/2;
 
-				dcRect(bgRect, vec4(1,1,1,0.2f));
+				// Cycles.
+				{
+					dcRect(cyclesRect, vec4(0,1,1,0.1f));
 
-				float startLine = mapRange(0, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
-				float endLine = mapRange(graphWidth, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
-
-				Vec2 bgCen = rectGetCen(bgRect);
-				Vec2 bgDim = rectGetDim(bgRect);
-				float g = 0.9f;
-				dcRect(rectCenDim(vec2(startLine + 1, bgCen.y), vec2(3,bgDim.h)), vec4(g,g,g,1));
-				dcRect(rectCenDim(vec2(endLine - 1, bgCen.y), vec2(3,bgDim.h)), vec4(g,g,g,1));
-
-				g = 0.7f;
-				float lineRegion = endLine - startLine;
-				for(int i = 0; i < 10; i++) {
-					dcRect(rectCenDim(vec2(startLine + (i*0.1f)*lineRegion, bgCen.y), vec2(1,bgDim.h)), vec4(g,g,g,1));
 				}
 
-				if(zoom < 0.25f) {
+				// Header.
+				{
+					dcRect(headerRect, vec4(1,1,1,0.1f));
+
+					float startLine = mapRange(0, orthoLeft, orthoRight, headerRect.min.x, headerRect.max.x);
+					float endLine = mapRange(graphWidth, orthoLeft, orthoRight, headerRect.min.x, headerRect.max.x);
+
+					Vec2 bgCen = rectGetCen(headerRect);
+					Vec2 bgDim = rectGetDim(headerRect);
+					float g = 0.9f;
+					dcRect(rectCenDim(vec2(startLine + 1, bgCen.y), vec2(4,bgDim.h)), vec4(g,g,g,1));
+					dcRect(rectCenDim(vec2(endLine - 1, bgCen.y), vec2(3,bgDim.h)), vec4(g,g,g,1));
+
 					g = 0.7f;
 					float lineRegion = endLine - startLine;
-					for(int i = 0; i < 100; i++) {
-						dcRect(rectCenDim(vec2(startLine + (i*0.01f)*lineRegion, bgCen.y), vec2(1,bgDim.h*0.5f)), vec4(g,g,g,1));
-					}					
+					for(int i = 0; i < 10; i++) {
+						dcRect(rectCenDim(vec2(startLine + (i*0.1f)*lineRegion, bgCen.y), vec2(1,bgDim.h)), vec4(g,g,g,1));
+					}
+
+					if(zoom < 0.25f) {
+						g = 0.7f;
+						float lineRegion = endLine - startLine;
+						for(int i = 0; i < 100; i++) {
+							float x = startLine + (i*0.01f)*lineRegion;
+							if(x+1 < headerRect.min.x || x > headerRect.max.x) continue;
+
+							dcRect(rectCenDim(vec2(x, bgCen.y), vec2(1,bgDim.h*0.5f)), vec4(g,g,g,1));
+						}
+					}
 				}
+
+				dcRect(bgRect, vec4(1,1,1,0.2f));
 
 				bool mouseHighlight = false;
 				Rect hRect;
@@ -2693,46 +2737,69 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				char* hText;
 
 				startPos -= vec2(0, lineHeight);
-				index = 0;
-				for(int i = 0; i < graphBufferIndex; ++i) {
-					TimerSlot* slot = graphTimerBuffer + i;
+				for(int threadIndex = 0; threadIndex < threadQueue->threadCount; threadIndex++) {
+					int index = 0;
 
-					if(slot->type == TIMER_TYPE_BEGIN) {
+					// Horizontal lines to distinguish thread bars.
+					if(threadIndex > 0) {
+						Vec2 p = startPos;
+						float g = 0.8f;
+						dcRect(rect(p, vec2(bgRect.max.x, p.y+1)), vec4(g,g,g,1));
+					}
 
-						Timings* t = graphTimings + slot->timerIndex;
-						TimerInfo* tInfo = timer->timerInfos + slot->timerIndex;
+					for(int i = 0; i < graphBufferIndex; ++i) {
+						TimerSlot* slot = graphTimerBuffer + i;
+						if(slot->threadId != threadQueue->threadIds[threadIndex]) continue;
 
-						float barLeft = mapRange(slot->cycles - baseCycleCount, startCycleCount, endCycleCount, 0, graphWidth);
-						float barRight = mapRange(slot->cycles - baseCycleCount + t->cycles, startCycleCount, endCycleCount, 0, graphWidth);
+						if(slot->type == TIMER_TYPE_BEGIN) {
 
-						barLeft = mapRange(barLeft, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
-						barRight = mapRange(barRight, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
+							Timings* t = timings + slot->timerIndex;
+							TimerInfo* tInfo = timer->timerInfos + slot->timerIndex;
 
-						float y = startPos.y+index*-lineHeight;
-						Rect r = rect(vec2(barLeft,y), vec2(barRight, y + lineHeight));
+							float barLeft = mapRange(slot->cycles - baseCycleCount, startCycleCount, endCycleCount, 0, graphWidth);
+							float barRight = mapRange(slot->cycles - baseCycleCount + (u64)slot->size, startCycleCount, endCycleCount, 0, graphWidth);
 
-						float cOff = slot->timerIndex/(float)timer->timerInfoCount;
-						Vec4 c = vec4(1-cOff, 0, cOff, 1);
-						char* text = fillString("%s %s", tInfo->function, tInfo->name);
+							barLeft = mapRange(barLeft, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
+							barRight = mapRange(barRight, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
 
-						if(gui->getMouseOver(gui->input.mousePos, r)) {
-							mouseHighlight = true;
-							hRect = r;
-							hc = c;
-							hText = text;
-							highlightedIndex = slot->timerIndex;
-						} else {
-							float g = 0.2f;
-							gui->drawRect(r, vec4(g,g,g,1));
-							gui->drawTextBox(rect(r.min+vec2(1,1), r.max-vec2(1,1)), text, c);
+							// Skip nonvisible bars.
+							if(!(barRight < bgRect.min.x || barLeft > bgRect.max.x)) {
+								if(barRight - barLeft < 1) barRight = barLeft + 1;
+
+								float y = startPos.y+index*-lineHeight;
+								Rect r = rect(vec2(barLeft,y), vec2(barRight, y + lineHeight));
+
+								float cOff = slot->timerIndex/(float)timer->timerInfoCount;
+								Vec4 c = vec4(1-cOff, 0, cOff, 1);
+								char* text = fillString("%s %s", tInfo->function, tInfo->name);
+
+								if(gui->getMouseOver(gui->input.mousePos, r)) {
+									mouseHighlight = true;
+									hRect = r;
+									hc = c;
+									hText = text;
+									highlightedIndex = slot->timerIndex;
+								} else {
+									float g = 0.1f;
+									gui->drawRect(r, vec4(g,g,g,1));
+
+									if(rectGetDim(r).w > 3) {
+										if(barLeft < bgRect.min.x) r.min.x = bgRect.min.x;
+										gui->drawTextBox(rect(r.min+vec2(1,1), r.max-vec2(1,1)), text, c);
+									}
+								}
+							}
+
+							index++;
 						}
 
-						index++;
+						if(slot->type == TIMER_TYPE_END) {
+							index--;
+						}
 					}
 
-					if(slot->type == TIMER_TYPE_END) {
-						index--;
-					}
+					startPos.y -= lineHeight*2;
+
 				}
 
 				if(mouseHighlight) {
@@ -2741,6 +2808,8 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 					float g = 0.8f;
 					gui->drawRect(hRect, vec4(g,g,g,1));
+
+					if(hRect.min.x < bgRect.min.x) hRect.min.x = bgRect.min.x;
 					gui->drawTextBox(rect(hRect.min+vec2(1,1), hRect.max-vec2(1,1)), hText, hc);
 				} else {
 					highlightedIndex = -1;
@@ -2763,7 +2832,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 	}
 
 	//
-	// Draw Super Dropdown Console.
+	// Dropdown Console.
 	//
 
 	{
@@ -2773,7 +2842,10 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			con->init(ws->currentRes.y);
 		}
 
-		con->update(ds->input, vec2(ws->currentRes), ad->dt);
+		bool smallExtension = input->keysPressed[KEYCODE_F5] && !input->keysDown[KEYCODE_CTRL];
+		bool bigExtension = input->keysPressed[KEYCODE_F5] && input->keysDown[KEYCODE_CTRL];
+
+		con->update(ds->input, vec2(ws->currentRes), ad->dt, smallExtension, bigExtension);
 
 		// Execute commands.
 
@@ -2819,10 +2891,6 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		con->updateBody();
 
 	}
-
-	//
-	// save timer buffer
-	//
 
 	if(*isRunning == false) {
 		guiSave(ds->gui, 2, 0);

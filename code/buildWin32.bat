@@ -44,7 +44,7 @@ rem set PATH=C:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\bin;%PATH%
 rem set CLANG_OPTIONS= -fms-compatibility -fms-extensions -std=c++11 
 
 rem -EHsc -GR -MD -MTd -Zi -MP 
-set COMPILER_OPTIONS= -MD -O2 -nologo -Oi -FC -wd4838 -wd4005 -fp:fast -fp:except- -Gm- -GR- -EHa- -Z7
+set COMPILER_OPTIONS= -MD -Od -nologo -Oi -FC -wd4838 -wd4005 -fp:fast -fp:except- -Gm- -GR- -EHa- -Z7
 set LINKER_OPTIONS= -link -SUBSYSTEM:WINDOWS -OUT:main.exe -incremental:no -opt:ref
 
 rem cl /?

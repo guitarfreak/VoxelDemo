@@ -22,11 +22,13 @@ struct DebugState {
 	int cycleIndex;
 	bool stopCollating;
 
-	bool frozenGraph;
+	bool setPause;
+	bool setPlay;
+	bool noCollating;
 	int lastCycleIndex;
-	TimerSlot* savedTimerBuffer;
-	u64 savedBufferIndex;
-	Timings savedTimings[32];
+	TimerSlot* savedBuffer[120];
+	int savedBufferCounts[120];
+	int savedBufferMax;
 
 	GuiInput gInput;
 	Gui* gui;

@@ -181,10 +181,6 @@ enum ShellCommand {
 
 // void atomicAdd(unsigned int* n) {
 void atomicAdd(volatile unsigned int* n) {
-	// LONG __cdecl InterlockedIncrement(
-	//   _Inout_ LONG volatile *Addend
-	// );
-
 	InterlockedIncrement(n);
 }
 
