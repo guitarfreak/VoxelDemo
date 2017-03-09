@@ -260,7 +260,7 @@ struct Gui {
 		return scissorRect;
 	}
 
-	void drawText(char* text, int align = 1) {
+	void drawText(char* text, int align = 1, Vec4 shadowColor = vec4(0,0,0,0)) {
 		Rect region = getCurrentRegion();
 		scissorPush(region);
 
@@ -268,7 +268,15 @@ struct Gui {
 		if(align == 0) textPos.x -= rectGetDim(region).w*0.5f;
 		else if(align == 2) textPos.x += rectGetDim(region).w*0.5f;
 
-		dcText(text, font, textPos, colors.textColor, vec2i(align-1, 0), 0, settings.textShadow, colors.shadowColor);		
+		int textShadow = settings.textShadow;
+		Vec4 sColor = colors.shadowColor;
+		if(shadowColor != vec4(0,0,0,0)) {
+			textShadow = 1;
+			sColor = shadowColor;
+		}
+
+		// dcText(text, font, textPos, colors.textColor, vec2i(align-1, 0), 0, settings.textShadow, colors.shadowColor);
+		dcText(text, font, textPos, colors.textColor, vec2i(align-1, 0), 0, textShadow, sColor);
 
 		scissorPop();
 	}
@@ -542,11 +550,11 @@ struct Gui {
 		post();
 	}
 
-	void label(char* text, int align = 1, Vec4 bgColor = vec4(0,0,0,0)) {
+	void label(char* text, int align = 1, Vec4 bgColor = vec4(0,0,0,0), Vec4 shadowColor = vec4(0,0,0,0)) {
 		if(!pre()) return;
 
 		if(bgColor != vec4(0,0,0,0)) drawRect(getCurrentRegion(), bgColor, false);
-		drawText(text, align);
+		drawText(text, align, shadowColor);
 		post();
 	}
 
@@ -1361,7 +1369,7 @@ struct Console {
 		float smallPos = -currentRes.y * CONSOLE_SMALL_PERCENT;
 		float bigPos = -currentRes.y * CONSOLE_BIG_PERCENT;
 
-		if(input->keysPressed[KEYCODE_F6]) {
+		if(input->keysPressed[KEYCODE_F5]) {
 			if(input->keysDown[KEYCODE_CTRL]) {
 				if(mode == 0) mode = 2;
 				else if(mode == 1) mode = 2;

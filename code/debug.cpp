@@ -1,36 +1,29 @@
 
-struct Asset {
-	int index;
-	int folderIndex;
-	char* filePath;
-	FILETIME lastWriteTime;
-};
-
+struct Asset;
 struct DebugState {
-	Asset assets[100];
+	Asset* assets;
 	int assetCount;
 
 	LONGLONG lastTimeStamp;
 	float dt;
 	float time;
 
-	bool showHud;
+	bool showMenu;
+	bool showStats;
 	bool showConsole;
+	bool showHud;
 
 	DrawCommandList commandListDebug;
 	Input* input;
 
-	bool isInitialised;
-	int timerInfoCount;
-	TimerInfo timerInfos[32]; // timerInfoCount
-	TimerSlot* timerBuffer;
-	int bufferSize;
-	u64 bufferIndex;
-
+	Timer* timer;
 	Timings timings[120][32];
+	Statistic statistics[120][32];
 	int cycleIndex;
+	bool stopCollating;
 
 	bool frozenGraph;
+	int lastCycleIndex;
 	TimerSlot* savedTimerBuffer;
 	u64 savedBufferIndex;
 	Timings savedTimings[32];
@@ -55,105 +48,94 @@ struct DebugState {
 	Console console;
 };
 
-extern DebugState* globalDebugState;
 
 
-
-inline uint getThreadID() {
-	char *threadLocalStorage = (char *)__readgsqword(0x30);
-	uint threadID = *(uint *)(threadLocalStorage + 0x48);
-
-	return threadID;
-}
-
-void addTimerSlot(int timerIndex, int type) {
-	// uint id = atomicAdd64(&globalDebugState->bufferIndex, 1);
-	uint id = globalDebugState->bufferIndex++;
-	TimerSlot* slot = globalDebugState->timerBuffer + id;
-	slot->cycles = __rdtsc();
-	slot->type = type;
-	slot->threadId = getThreadID();
-	slot->timerIndex = timerIndex;
-}
-
-void addTimerSlotAndInfo(int timerIndex, int type, const char* file, const char* function, int line, char* name = "") {
-
-	TimerInfo* timerInfo = globalDebugState->timerInfos + timerIndex;
-
-	if(!timerInfo->initialised) {
-		timerInfo->initialised = true;
-		timerInfo->file = file;
-		timerInfo->function = function;
-		timerInfo->line = line;
-		timerInfo->type = type;
-		timerInfo->name = name;
-	}
-
-	addTimerSlot(timerIndex, type);
-}
-
-struct TimerBlock {
-	int counter;
-
-	TimerBlock(int counter, const char* file, const char* function, int line, char* name = "") {
-
-		this->counter = counter;
-		addTimerSlotAndInfo(counter, TIMER_TYPE_BEGIN, file, function, line, name);
-	}
-
-	~TimerBlock() {
-		addTimerSlot(counter, TIMER_TYPE_END);
-	}
+struct Asset {
+	int index;
+	int folderIndex;
+	char* filePath;
+	FILETIME lastWriteTime;
 };
 
-#define TIMER_BLOCK() \
-	TimerBlock timerBlock##__LINE__(__COUNTER__, __FILE__, __FUNCTION__, __LINE__);
+void initWatchFolders(HANDLE* folderHandles, Asset* assets, int* assetCount) {
+	for(int i = 0; i < 3; i++) {
+		HANDLE fileChangeHandle = FindFirstChangeNotification(watchFolders[i], false, FILE_NOTIFY_CHANGE_LAST_WRITE);
 
-#define TIMER_BLOCK_NAMED(name) \
-	TimerBlock timerBlock##__LINE__(__COUNTER__, __FILE__, __FUNCTION__, __LINE__, name);
+		if(fileChangeHandle == INVALID_HANDLE_VALUE) {
+			printf("Could not set folder change notification.\n");
+		}
 
-#define TIMER_BLOCK_BEGIN(ID) \
-	const int timerCounter##ID = __COUNTER__; \
-	addTimerSlotAndInfo(timerCounter##ID, TIMER_TYPE_BEGIN, __FILE__, __FUNCTION__, __LINE__); 
+		folderHandles[i] = fileChangeHandle;
+	}
 
-#define TIMER_BLOCK_BEGIN_NAMED(ID, name) \
-	const int timerCounter##ID = __COUNTER__; \
-	addTimerSlotAndInfo(timerCounter##ID, TIMER_TYPE_BEGIN, __FILE__, __FUNCTION__, __LINE__, name); 
+	int fileCounts[] = {TEXTURE_SIZE, CUBEMAP_SIZE, BX_Size};
+	char** paths[] = {texturePaths, cubeMapPaths, (char**)textureFilePaths};
+	for(int folderIndex = 0; folderIndex < arrayCount(watchFolders); folderIndex++) {
 
-#define TIMER_BLOCK_END(ID) \
-	addTimerSlot(timerCounter##ID, TIMER_TYPE_END);
+		int fileCount = fileCounts[folderIndex];
 
-struct Statistic {
-	f64 min;
-	f64 max;
-	f64 avg;
-	int count;
-};
+		for(int i = 0; i < fileCount; i++) {
+			char* path = paths[folderIndex][i];
+			Asset* asset = assets + *assetCount; 
+			*assetCount = (*assetCount) + 1;
+			asset->lastWriteTime = getLastWriteTime(path);
+			asset->index = i;
+			asset->filePath = getPArray(char, strLen(path) + 1);
+			strCpy(asset->filePath, path);
+			asset->folderIndex = folderIndex;
+		}
+	}
 
-void beginStatistic(Statistic* stat) {
-	stat->min = DBL_MAX; 
-	stat->max = -DBL_MAX; 
-	stat->avg = 0; 
-	stat->count = 0; 
 }
 
-void updateStatistic(Statistic* stat, f64 value) {
-	if(value < stat->min) stat->min = value;
-	if(value > stat->max) stat->max = value;
-	stat->avg += value;
-	++stat->count;
+void reloadChangedFiles(HANDLE* folderHandles, Asset* assets, int assetCount) {
+	// Todo: Get ReadDirectoryChangesW to work instead of FindNextChangeNotification.
+
+	/*
+	// HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	// HANDLE directory = CreateFile("C:\\Projects", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
+	// HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
+	HANDLE directory = CreateFile("..\\data\\Textures", FILE_LIST_DIRECTORY, FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,  OPEN_EXISTING,  FILE_FLAG_BACKUP_SEMANTICS, NULL);
+	// HANDLE directory = CreateFile("C:\\Projects\\", FILE_LIST_DIRECTORY, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if(directory == INVALID_HANDLE_VALUE) {
+		printf("Could not open directory.\n");
+	}
+
+	FILE_NOTIFY_INFORMATION notifyInformation[1024];
+	DWORD bytesReturned = 0;
+	bool result = ReadDirectoryChangesW(directory, (LPVOID)&notifyInformation, sizeof(notifyInformation), false, FILE_NOTIFY_CHANGE_LAST_WRITE, &bytesReturned, 0, 0);
+	CloseHandle(directory);
+	*/
+
+	DWORD fileStatus = WaitForMultipleObjects(arrayCount(watchFolders), folderHandles, false, 0);
+	if(valueBetweenInt(fileStatus, WAIT_OBJECT_0, WAIT_OBJECT_0 + 9)) {
+		// Note: WAIT_OBJECT_0 is defined as 0, so we can use it as an index.
+		int folderIndex = fileStatus;
+
+		FindNextChangeNotification(folderHandles[folderIndex]);
+
+
+		for(int i = 0; i < assetCount; i++) {
+			Asset* asset = assets + i;
+			if(asset->folderIndex != folderIndex) continue;
+
+			FILETIME newWriteTime = getLastWriteTime(asset->filePath);
+			if(CompareFileTime(&asset->lastWriteTime, &newWriteTime) != 0) {
+
+				if(folderIndex == 0) {
+					loadTextureFromFile(globalGraphicsState->textures + asset->index, texturePaths[asset->index], -1, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE, true);
+
+				} else if(folderIndex == 1) {
+						loadCubeMapFromFile(globalGraphicsState->cubeMaps + asset->index, (char*)cubeMapPaths[asset->index], 5, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE, true);
+
+				} else if(folderIndex == 2) {
+					loadVoxelTextures((char*)minecraftTextureFolderPath, INTERNAL_TEXTURE_FORMAT, true, asset->index);
+
+				}
+
+				asset->lastWriteTime = newWriteTime;
+			}
+		}
+	}
+
 }
-
-void endStatistic(Statistic* stat) {
-	stat->avg /= stat->count;
-}
-
-struct TimerStatistic {
-	u64 cycles;
-	int timerIndex;
-};
-
-
-
-
-

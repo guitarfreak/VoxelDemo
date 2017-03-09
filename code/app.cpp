@@ -97,6 +97,15 @@ Changing course for now:
  - Look at font drawing.
  - Clean up gui.
 
+ * Fix putting Timer_blocks somewhere.
+ * Move statistics out of debug.cpp.
+ * Stop text in graph when pressing key.
+ * Remove f key for stopping.
+ - Goto editor when clicking in graph.
+ - Sort graph texts.
+ - Threading in timerblocks not working.
+   - Use thread id information that's already in the timerinfo.
+ - Drawing the timerinfo gets really slow.
 
 //-------------------------------------
 //               BUGS
@@ -158,8 +167,25 @@ Changing course for now:
 #define STBVOX_CONFIG_MODE 1
 #include "external\stb_voxel_render.h"
 
+//
+
+struct ThreadQueue;
+struct GraphicsState;
+struct DrawCommandList;
+struct MemoryBlock;
+struct DebugState;
+struct Timer;
+ThreadQueue* globalThreadQueue;
+GraphicsState* globalGraphicsState;
+DrawCommandList* globalCommandList;
+MemoryBlock* globalMemory;
+DebugState* globalDebugState;
+Timer* globalTimer;
+
 // Internal.
 
+#include "rt_types.h"
+#include "rt_timer.h"
 #include "rt_misc.h"
 #include "rt_math.h"
 #include "rt_hotload.h"
@@ -170,29 +196,13 @@ Changing course for now:
 #include "openglDefines.h"
 #include "userSettings.h"
 
-
-struct ThreadQueue;
-struct GraphicsState;
-struct DrawCommandList;
-struct MemoryBlock;
-struct DebugState;
-ThreadQueue* globalThreadQueue;
-GraphicsState* globalGraphicsState;
-DrawCommandList* globalCommandList;
-MemoryBlock* globalMemory;
-DebugState* globalDebugState;
-
-
 #include "rendering.cpp"
 #include "gui.cpp"
-#include "debug.cpp"
 
 #include "entity.cpp"
 #include "voxel.cpp"
 
-#include "misc.cpp"
-
-
+#include "debug.cpp"
 
 
 
@@ -338,6 +348,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	globalThreadQueue = threadQueue;
 	globalGraphicsState = &ad->graphicsState;
 	globalDebugState = ds;
+	globalTimer = ds->timer;
 
 	// AppGlobals.
 
@@ -374,14 +385,18 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// DebugState.
 		//
 
-		getPMemory(sizeof(DebugState));
+		getPMemoryDebug(sizeof(DebugState));
 		*ds = {};
+		ds->assets = getPArrayDebug(Asset, 100);
+
 		ds->inputCapacity = 600;
 		ds->recordedInput = (Input*)getPMemoryDebug(sizeof(Input) * ds->inputCapacity);
 
+		ds->timer = getPStructDebug(Timer);
+		globalTimer = ds->timer;
 		int timerSlots = 10000;
-		ds->bufferSize = timerSlots;
-		ds->timerBuffer = (TimerSlot*)getPMemoryDebug(sizeof(TimerSlot) * timerSlots);
+		ds->timer->bufferSize = timerSlots;
+		ds->timer->timerBuffer = (TimerSlot*)getPMemoryDebug(sizeof(TimerSlot) * timerSlots);
 		ds->savedTimerBuffer = (TimerSlot*)getPMemoryDebug(sizeof(TimerSlot) * timerSlots);
 		ds->cycleIndex = 0;
 
@@ -397,7 +412,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ds->gui2->init(rectCenDim(vec2(1300,1), vec2(300, ws->currentRes.h)), 3);
 
 		ds->input = getPStructDebug(Input);
-		// ds->showHud = false;
+		// ds->showMenu = false;
+		ds->showMenu = true;
+		ds->showStats = true;
+		ds->showConsole = true;
 		ds->showHud = true;
 		ds->guiAlpha = 0.95f;
 
@@ -602,6 +620,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// @AppStart.
 
+	TIMER_BLOCK_BEGIN_NAMED(reload, "Reload");
+
 	if(reload) {
 		loadFunctions();
 		SetWindowLongPtr(systemData->windowHandle, GWLP_WNDPROC, (LONG_PTR)mainWindowCallBack);
@@ -611,7 +631,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 	}
 
-	TIMER_BLOCK_BEGIN(Main)
+	TIMER_BLOCK_END(reload);
+
+
+
 
 	// Update timer.
 	{
@@ -706,12 +729,16 @@ extern "C" APPMAINFUNCTION(appMain) {
 		setWindowMode(windowHandle, ws, WINDOW_MODE_FULLBORDERLESS);
 	}
 
+
 	if(windowSizeChanged(windowHandle, ws)) {
 		updateResolution(windowHandle, ws);
 		ad->updateFrameBuffers = true;
 	}
 
 	if(ad->updateFrameBuffers) {
+		TIMER_BLOCK_NAMED("Upd FBOs");
+
+		ad->updateFrameBuffers = false;
 		ad->aspectRatio = ws->aspectRatio;
 		
 		ad->fboRes.x = ad->fboRes.y*ad->aspectRatio;
@@ -728,6 +755,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_2d, ws->currentRes.w, ws->currentRes.h);
 		setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_Debug, ws->currentRes.w, ws->currentRes.h);
 	}
+	
+
 
 	TIMER_BLOCK_BEGIN_NAMED(openglInit, "Opengl Init");
 
@@ -2171,8 +2200,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 		bindFrameBuffer(FRAMEBUFFER_Debug);
 		glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		glBlendEquationSeparate(GL_FUNC_ADD, GL_MAX);
-		executeCommandList(&ds->commandListDebug);
 
+		// Skipping strings for now when reloading because hardcoded ones get a new memory address after changing the dll.
+		executeCommandList(&ds->commandListDebug, false, reload);
 
 
 		bindFrameBuffer(FRAMEBUFFER_2d);
@@ -2195,7 +2225,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		#endif
 	}
 
-	TIMER_BLOCK_END(Main)
+
 
 	// Swap window background buffer.
 	{
@@ -2208,8 +2238,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 			GLenum glError = glGetError(); printf("GLError: %i\n", glError);
 		}
 	}
-
-
 
 	debugMain(ds, appMemory, ad, reload, isRunning, init);
 
@@ -2241,7 +2269,12 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 					input->keysPressed[KEYCODE_LEFT], input->keysPressed[KEYCODE_RIGHT], input->keysPressed[KEYCODE_UP], input->keysPressed[KEYCODE_DOWN], 
 					input->keysDown[KEYCODE_SHIFT], input->keysDown[KEYCODE_CTRL], input->inputCharacters, input->inputCharacterCount};
 
-	// if(false)
+	// if(input->keysPressed[KEYCODE_F5]) ds->showConsole = !ds->showConsole;
+	if(input->keysPressed[KEYCODE_F6]) ds->showMenu = !ds->showMenu;
+	if(input->keysPressed[KEYCODE_F7]) ds->showStats = !ds->showStats;
+	if(input->keysPressed[KEYCODE_F8]) ds->showHud = !ds->showHud;
+
+	if(ds->showHud)
 	{
 		int fontSize = 18;
 		int pi = 0;
@@ -2270,9 +2303,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 	}
 
 	{
-		if(input->keysPressed[KEYCODE_F5]) ds->showHud = !ds->showHud;
-
-		if(ds->showHud) {
+		if(ds->showMenu) {
 			int fontSize = 18;
 
 			bool initSections = false;
@@ -2372,87 +2403,106 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 	int globalTimingsCount = __COUNTER__;
 
-	ds->timerInfoCount = globalTimingsCount;
-
-	int bufferIndex = ds->bufferIndex;
-	Timings* timings = ds->timings[ds->cycleIndex];
-	zeroMemory(timings, ds->timerInfoCount*sizeof(Timings));
-
-	ds->cycleIndex = (ds->cycleIndex + 1)%arrayCount(ds->timings);
-
-	ds->bufferIndex = 0;
-
-	int fontHeight = 18;
+	Timer* timer = ds->timer;
+	timer->timerInfoCount = globalTimingsCount;
 
 	if(reload) {
-		for(int i = 0; i < arrayCount(ds->timerInfos); i++) ds->timerInfos[i].initialised = false;
+		for(int i = 0; i < arrayCount(timer->timerInfos); i++) timer->timerInfos[i].initialised = false;
 		return;
 	}
 
+	int cycleCount = arrayCount(ds->timings);
+	int fontHeight = 18;
+	int bufferIndex = timer->bufferIndex;
+	timer->bufferIndex = 0;
 
+	Timings* timings = ds->timings[ds->cycleIndex];
+	Statistic* statistics = ds->statistics[ds->cycleIndex];
 
-	// collate timing buffer
+	ds->stopCollating = ds->frozenGraph;
+
+	if(!ds->stopCollating) {
+		zeroMemory(timings, timer->timerInfoCount*sizeof(Timings));
+		zeroMemory(statistics, timer->timerInfoCount*sizeof(Statistic));
+		ds->cycleIndex = (ds->cycleIndex + 1)%cycleCount;
+	}
+
+	// Collate timing buffer.
+	// Statistic statistics[32] = {};
 	TimerStatistic stats[16] = {};
 	int index = 0;
 
-	for(int i = 0; i < bufferIndex; ++i) {
-		TimerSlot* slot = ds->timerBuffer + i;
+	if(!ds->stopCollating) {
 
-		if(slot->type == TIMER_TYPE_BEGIN) {
-			stats[index].cycles = slot->cycles;
-			stats[index].timerIndex = slot->timerIndex;
-			index++;
+		for(int i = 0; i < bufferIndex; ++i) {
+			TimerSlot* slot = timer->timerBuffer + i;
+
+			if(slot->type == TIMER_TYPE_BEGIN) {
+				stats[index].cycles = slot->cycles;
+				stats[index].timerIndex = slot->timerIndex;
+				index++;
+			}
+
+			if(slot->type == TIMER_TYPE_END) {
+				index--;
+				Timings* timing = timings + stats[index].timerIndex;
+				timing->cycles += slot->cycles - stats[index].cycles;
+				timing->hits++;
+			}
 		}
 
-		if(slot->type == TIMER_TYPE_END) {
-			index--;
-			Timings* timing = timings + stats[index].timerIndex;
-			timing->cycles += slot->cycles - stats[index].cycles;
-			timing->hits++;
-		}
-	}
-
-	for(int i = 0; i < ds->timerInfoCount; i++) {
-		Timings* t = timings + i;
-		t->cyclesOverHits = t->hits > 0 ? (u64)(t->cycles/t->hits) : 0; 
-	}
-
-	Statistic statistics[32] = {};
-	for(int timerIndex = 0; timerIndex < ds->timerInfoCount; timerIndex++) {
-		Statistic* stat = statistics + timerIndex;
-		beginStatistic(stat);
-
-		for(int i = 0; i < arrayCount(ds->timings); i++) {
-			Timings* t = &ds->timings[i][timerIndex];
-			updateStatistic(stat, t->cyclesOverHits);
+		for(int i = 0; i < timer->timerInfoCount; i++) {
+			Timings* t = timings + i;
+			t->cyclesOverHits = t->hits > 0 ? (u64)(t->cycles/t->hits) : 0; 
 		}
 
-		endStatistic(stat);
+		for(int timerIndex = 0; timerIndex < timer->timerInfoCount; timerIndex++) {
+			Statistic* stat = statistics + timerIndex;
+			beginStatistic(stat);
+
+			for(int i = 0; i < arrayCount(ds->timings); i++) {
+				Timings* t = &ds->timings[i][timerIndex];
+				updateStatistic(stat, t->cyclesOverHits);
+			}
+
+			endStatistic(stat);
+		}
+
 	}
 
 	//
 	// Draw timing info.
 	//
 
-	if(ds->showHud && !init) 
+	if(ds->showStats && !init) 
 	{
 		static int highlightedIndex = -1;
 		Vec4 highlightColor = vec4(1,1,1,0.1f);
 
-		float cyclesPerFrame = (float)((3*((float)1/60))*1024*1024*1024);
+		float cyclesPerFrame = (float)((3.5f*((float)1/60))*1024*1024*1024);
 		fontHeight = 18;
 		Vec2 textPos = vec2(550, -fontHeight);
-		int infoCount = ds->timerInfoCount;
+		int infoCount = timer->timerInfoCount;
 
 		Gui* gui = ds->gui2;
 		gui->start(ds->gInput, getFont(FONT_CALIBRI, fontHeight), ws->currentRes);
 
-		static bool statsSection = true;
-		static bool graphSection = true;
-		gui->div(0.2f,0.2f,0); gui->switcher("Stats", &statsSection); gui->switcher("Graph", &graphSection); gui->empty();
+		gui->label("App Statistics", 1, gui->colors.sectionColor, vec4(0,0,0,1));
 
+		gui->div(vec2(0.2f,0));
+		if(gui->switcher("Freeze", &ds->frozenGraph)) {
+			if(ds->frozenGraph) {
+				memCpy(ds->savedTimerBuffer, timer->timerBuffer, bufferIndex*sizeof(TimerSlot));
+				ds->savedBufferIndex = bufferIndex;
+				memCpy(ds->savedTimings, timings, timer->timerInfoCount*sizeof(Timings));
+				ds->lastCycleIndex = ds->cycleIndex;
+			} else {
+				ds->cycleIndex = ds->lastCycleIndex;
+			}
+		}
+		gui->slider(&ds->cycleIndex, 0, cycleCount-1);
 
-		if(statsSection) {
+		{
 			int barWidth = 1;
 			int barCount = arrayCount(ds->timings);
 			float sectionWidths[] = {0,0,0,0,0,0,0,0, barWidth*barCount};
@@ -2466,12 +2516,14 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				// @Hack: Get the end of the text region by looking at last region.
 				if(i == arrayCount(sectionWidths)-1) textSectionEnd = gui->getCurrentRegion().max.x;
 
-				gui->label(headers[i],1, vec4(0,0,0,0.3f));
+				gui->label(headers[i],1, vec4(0,0,0,0.3f), vec4(0,0,0,1));
 			}
 
 			for(int i = 0; i < infoCount; i++) {
-				TimerInfo* tInfo = ds->timerInfos + i;
+				TimerInfo* tInfo = timer->timerInfos + i;
 				Timings* timing = timings + i;
+
+				if(!tInfo->initialised) continue;
 
 				float cycleCountPercent = (float)timing->cycles/cyclesPerFrame;
 				char * percentString = getTStringDebug(50);
@@ -2550,30 +2602,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			}
 		}
 
-		// gui->button("asddsf");
-
-		// float xOffset = 0;
-		// for(int statIndex = 0; statIndex < bufferIndex; statIndex++) {
-		// 	Statistic* stat = statistics + ds->cycleIndex;
-		// 	u64 coh = ds->timings[statIndex][ds->cycleIndex].cyclesOverHits;
-
-		// 	int debugStringSize = 30;
-		// 	char* buffer = &ds->stringMemory[ds->stringMemoryIndex]; ds->stringMemoryIndex += debugStringSize+1;
-		// 	_snprintf_s(buffer, debugStringSize, debugStringSize, "%I64uc ", coh);
-		// 	gui->label(buffer,0);
-
-		// 	// float height = mapRangeClamp(coh, stat->min, stat->max, 1, rheight);
-		// 	// Vec2 rmin = r.min + vec2(xOffset,-2);
-		// 	// float colorOffset = mapRange(coh, stat->min, stat->max, 0, 1);
-		// 	// dcRect(rectMinDim(rmin, vec2(barWidth, height)), vec4(colorOffset,0,1-colorOffset,1));
-		// 	// dcRect(rectMinDim(rmin, vec2(barWidth, height)), vec4(colorOffset,1-colorOffset,0,1));
-
-		// 	// xOffset += barWidth;
-		// }
-
-
-
-		if(graphSection) {
+		{
 			float lineHeightOffset = 1.2;
 			float lineHeight = fontHeight * lineHeightOffset;
 
@@ -2613,11 +2642,10 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				cp.x -= (addedWidth/2)*mouseZoomOffset;
 			}
 
-			// cp.x = clamp(cp.x, (graphWidth*zoom)/2 - 5*zoom, graphWidth - (graphWidth*zoom)/2 + 5*zoom);
 			cp.x = clamp(cp.x, (graphWidth*zoom)/2, graphWidth - (graphWidth*zoom)/2);
 
 			Timings* graphTimings = timings;
-			TimerSlot* graphTimerBuffer = ds->timerBuffer;
+			TimerSlot* graphTimerBuffer = timer->timerBuffer;
 			u64 graphBufferIndex = bufferIndex;
 
 			if(ds->frozenGraph) {
@@ -2672,7 +2700,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 					if(slot->type == TIMER_TYPE_BEGIN) {
 
 						Timings* t = graphTimings + slot->timerIndex;
-						TimerInfo* tInfo = ds->timerInfos + slot->timerIndex;
+						TimerInfo* tInfo = timer->timerInfos + slot->timerIndex;
 
 						float barLeft = mapRange(slot->cycles - baseCycleCount, startCycleCount, endCycleCount, 0, graphWidth);
 						float barRight = mapRange(slot->cycles - baseCycleCount + t->cycles, startCycleCount, endCycleCount, 0, graphWidth);
@@ -2683,7 +2711,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 						float y = startPos.y+index*-lineHeight;
 						Rect r = rect(vec2(barLeft,y), vec2(barRight, y + lineHeight));
 
-						float cOff = slot->timerIndex/(float)ds->timerInfoCount;
+						float cOff = slot->timerIndex/(float)timer->timerInfoCount;
 						Vec4 c = vec4(1-cOff, 0, cOff, 1);
 						char* text = fillString("%s %s", tInfo->function, tInfo->name);
 
@@ -2694,7 +2722,8 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 							hText = text;
 							highlightedIndex = slot->timerIndex;
 						} else {
-							gui->drawRect(r, vec4(0,0,0,1));
+							float g = 0.2f;
+							gui->drawRect(r, vec4(g,g,g,1));
 							gui->drawTextBox(rect(r.min+vec2(1,1), r.max-vec2(1,1)), text, c);
 						}
 
@@ -2719,7 +2748,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 			}
 
-			gui->div(vec2(0.1f,0)); 
+			gui->div(0.1f,0); 
 
 			if(gui->button("Reset")) {
 				cp = vec2(graphWidth/2,0);
@@ -2794,16 +2823,6 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 	//
 	// save timer buffer
 	//
-
-	if(input->keysPressed[KEYCODE_F8]) {
-		if(!ds->frozenGraph) {
-			memCpy(ds->savedTimerBuffer, ds->timerBuffer, bufferIndex*sizeof(TimerSlot));
-			ds->savedBufferIndex = bufferIndex;
-			memCpy(ds->savedTimings, timings, ds->timerInfoCount*sizeof(Timings));
-		}
-
-		ds->frozenGraph = !ds->frozenGraph;
-	}
 
 	if(*isRunning == false) {
 		guiSave(ds->gui, 2, 0);

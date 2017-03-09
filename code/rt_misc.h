@@ -1,15 +1,7 @@
 #pragma once 
 
-#include <stdint.h>
-#include <stdlib.h>
+#include "rt_types.h"
 #include <stdio.h>
-#include <limits>
-
-typedef unsigned int uint;
-typedef unsigned char uchar;
-typedef uint64_t u64;
-typedef int64_t i64;
-typedef double f64;
 
 #define arrayCount(array) (sizeof(array) / sizeof((array)[0]))
 #define addPointer(ptr, int) ptr = (char*)ptr + int
@@ -888,34 +880,32 @@ bool flagCheck(uint flags, int flagType)
 //
 //
 
-enum TimerType {
-	TIMER_TYPE_BEGIN,
-	TIMER_TYPE_END,
+struct Statistic {
+	f64 min;
+	f64 max;
+	f64 avg;
+	int count;
 };
 
-struct TimerInfo {
-	int initialised;
+void beginStatistic(Statistic* stat) {
+	stat->min = DBL_MAX; 
+	stat->max = -DBL_MAX; 
+	stat->avg = 0; 
+	stat->count = 0; 
+}
 
-	const char* file;
-	const char* function;
-	const char* name;
-	int line, line2;
-	uint type;
-};
+void updateStatistic(Statistic* stat, f64 value) {
+	if(value < stat->min) stat->min = value;
+	if(value > stat->max) stat->max = value;
+	stat->avg += value;
+	++stat->count;
+}
 
-#define CYCLEBUFFERSIZE 120
-struct TimerSlot {
-	uint type;
-	uint threadId;
+void endStatistic(Statistic* stat) {
+	stat->avg /= stat->count;
+}
+
+struct TimerStatistic {
+	u64 cycles;
 	int timerIndex;
-	u64 cycles;
 };
-
-struct Timings {
-	u64 cycles;
-	int hits;
-	u64 cyclesOverHits;
-};
-
-
-

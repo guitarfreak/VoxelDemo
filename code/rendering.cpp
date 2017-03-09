@@ -4,6 +4,7 @@ extern DrawCommandList* globalCommandList;
 struct GraphicsState;
 extern GraphicsState* globalGraphicsState;
 
+
 // 
 // Misc.
 // 
@@ -62,6 +63,7 @@ char* fillString(char* text, ...) {
 
 	return buffer;
 }
+
 
 //
 // CommandList.
@@ -1178,7 +1180,7 @@ int stateSwitch(int state) {
 	Draw_Command_##structType dc = *((Draw_Command_##structType*)drawListIndex); \
 	drawListIndex += sizeof(Draw_Command_##structType); \
 
-void executeCommandList(DrawCommandList* list, bool print = false) {
+void executeCommandList(DrawCommandList* list, bool print = false, bool skipStrings = false) {
 	// TIMER_BLOCK();
 
 	if(print) {
@@ -1253,6 +1255,8 @@ void executeCommandList(DrawCommandList* list, bool print = false) {
 
 			case Draw_Command_Text_Type: {
 				dcGetStructAndIncrement(Text);
+
+				if(skipStrings) break;
 
 				if(dc.shadow != 0) 
 					drawText(dc.text, dc.font, dc.pos + vec2(dc.shadow,-dc.shadow), dc.shadowColor, vec2i(dc.vAlign, dc.hAlign), dc.wrapWidth);
