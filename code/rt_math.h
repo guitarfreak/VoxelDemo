@@ -159,6 +159,13 @@ inline float mapRange(float value, float min, float max, float rangeMin, float r
 	return result;
 };
 
+inline double mapRangePrecise(double value, double min, double max, double rangeMin, double rangeMax) {
+	double off = min < 0 ? abs(min) : -abs(min);
+	double result = ((value+off)/((max+off)-(min+off))) * (rangeMax-rangeMin) + rangeMin;
+
+	return result;
+};
+
 inline float mapRange01(float value, float min, float max) {
 	float off = min < 0 ? abs(min) : -abs(min);
 	float result = ((value+off)/((max+off)-(min+off)));
@@ -241,8 +248,12 @@ inline int round(int i) {
 	return (int)floor(i + 0.5f);
 }
 
-inline int roundMod(float i, float val) {
-	return ((int)(i/val))*val;
+inline float roundFloat(float i) {
+	return floor(i + 0.5f);
+}
+
+inline float roundMod(float i, float val) {
+	return (roundFloat(i/val))*val;
 }
 
 inline int roundInt(float i) {
@@ -561,17 +572,17 @@ float randomFloat(float from, float to, float offset) {
 	return result;
 };
 
-inline double mapRangePrecise(double value, double min, double max, double rangeMin, double rangeMax) {
-	double offset = 0;
-	const double width = max - min;
-	const double rangeWidth = rangeMax - rangeMin;
-	if (min < 0) offset = abs(min);
-	if (min > 0) offset = -abs(min);
-	value += offset;
-	min += offset;
-	max += offset;
-	return ((double)value / width)*rangeWidth + rangeMin;
-};
+// inline double mapRangePrecise(double value, double min, double max, double rangeMin, double rangeMax) {
+// 	double offset = 0;
+// 	const double width = max - min;
+// 	const double rangeWidth = rangeMax - rangeMin;
+// 	if (min < 0) offset = abs(min);
+// 	if (min > 0) offset = -abs(min);
+// 	value += offset;
+// 	min += offset;
+// 	max += offset;
+// 	return ((double)value / width)*rangeWidth + rangeMin;
+// };
 
 // angle is radian
 float vectorToAngle(float vector[2]) {

@@ -107,6 +107,9 @@ Changing course for now:
    - Use thread id information that's already in the timerinfo.
  - Drawing the timerinfo gets really slow.
  - Zoom bars need to be on top.
+ - Improve fillString.
+   - Add scaling: 3m -> 4000k -> 4000000
+   - Add commas: 3,000,000, or spaces: 3 000 000
 
 //-------------------------------------
 //               BUGS
@@ -2633,13 +2636,14 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 		{
 
-			gui->heightPush(1.0f);
 			gui->empty();
 			Rect cyclesRect = gui->getCurrentRegion();
+			gui->heightPush(1.5f);
+			// gui->heightPush(4);
 			gui->empty();
 			Rect headerRect = gui->getCurrentRegion();
-			headerRect.max.y = cyclesRect.max.y;
 			gui->heightPop();
+			// headerRect.max.y = cyclesRect.max.y;
 
 
 			float lineHeightOffset = 1.2;
@@ -2658,7 +2662,8 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			float graphWidth = rectGetDim(bgRect).w;
 
 			static Vec2 cp = vec2(graphWidth/2,0);
-			static float zoom = 1;
+			float zoomInit = 1.0001f;
+			static float zoom = zoomInit; // To see the most right bar.
 
 			cp.x -= dragDelta.x * ((graphWidth*zoom)/graphWidth);
 
@@ -2694,69 +2699,86 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				float orthoLeft = cp.x - (graphWidth*zoom)/2;
 				float orthoRight = cp.x + (graphWidth*zoom)/2;
 
-				// Cycles.
-				{
-					// dcRect(cyclesRect, vec4(0,1,1,0.1f));
-
-				}
-
 				// Header.
 				{
+					dcRect(cyclesRect, gui->colors.sectionColor);
 					Vec2 cyclesDim = rectGetDim(cyclesRect);
 
 					dcRect(headerRect, vec4(1,1,1,0.1f));
+					Vec2 headerDim = rectGetDim(headerRect);
 
-					float startLine = mapRange(0, orthoLeft, orthoRight, headerRect.min.x, headerRect.max.x);
-					float endLine = mapRange(graphWidth, orthoLeft, orthoRight, headerRect.min.x, headerRect.max.x);
-
-					Vec2 bgCen = rectGetCen(headerRect);
-					Vec2 bgDim = rectGetDim(headerRect);
 					float g = 0.7f;
-					dcRect(rectCenDim(vec2(startLine + 1, bgCen.y), vec2(4,bgDim.h)), vec4(g,g,g,1));
-					dcRect(rectCenDim(vec2(endLine - 1, bgCen.y), vec2(3,bgDim.h)), vec4(g,g,g,1));
-
-					g = 0.7f;
 					float div = 4;
 					float cyclesInWidth = mapRange(cyclesPerFrame*div, startCycleCount, endCycleCount, 0, graphWidth);
 					uint cyc = cyclesPerFrame*div;
 					float heightMod = 1.3f;
-					float heightSub = 0.15f;
+					float heightSub = 0.10f;
+					float spreadWidthMod = 0.6f;
 
 					float zoomBarInterval = cyclesInWidth;
 					float orthoWidth = graphWidth*zoom;
-					while(zoomBarInterval/orthoWidth > 0.3f) {
+					while(zoomBarInterval/orthoWidth > spreadWidthMod) {
 						zoomBarInterval /= div;
 						heightMod -= heightSub;
 						cyc /= div;
 					}
 
 					heightMod = clampMax(heightMod, 1);
+					heightMod = clampMin(heightMod, 0.2f);
 
 					float pos = roundMod(orthoLeft, zoomBarInterval);
-					while(pos < orthoRight) {
+					while(pos < orthoRight + zoomBarInterval) {
 						float p = mapRange(pos, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
 
-						float h = bgDim.h*heightMod;
-						dcRect(rectCenDim(vec2(p, headerRect.min.y + h/2), vec2(3,h)), vec4(g,g,g,1));
+						float h = headerDim.h*heightMod;
+						dcRect(rectCenDim(vec2(p, headerRect.min.y + h/2), vec2(2,h)), vec4(g,g,g,1));
 
 						Vec2 textPos = vec2(p,cyclesRect.min.y + cyclesDim.h/2);
-						// dcText("abc", gui->font, textPos, gui->colors.textColor, vec2i(0,0), 0, gui->settings.textShadow, gui->colors.shadowColor);
-						// dcText(fillString("%i", cyc), gui->font, textPos, gui->colors.textColor, vec2i(0,0), 0, gui->settings.textShadow, gui->colors.shadowColor);
+						float percent = mapRange(pos, 0, graphWidth, 0, 100);
+
+						int percentInterval = mapRange(zoomBarInterval, 0, graphWidth, 0, 100);
+
+						char* s;
+						int percentInt = (int)percent;
+						if(percentInterval > 10) s = fillString("%i%%", percentInt);
+						else if(percentInterval > 1) s = fillString("%.1f%%", percent);
+						else if(percentInterval > 0.1) s = fillString("%.2f%%", percent);
+						else s = fillString("%.3f%%", percent);
+
+						float tw = getTextDim(s, gui->font).w;
+						if(valueBetween(bgRect.min.x, textPos.x - tw/2, textPos.x + tw/2)) textPos.x = bgRect.min.x + tw/2;
+						if(valueBetween(bgRect.max.x, textPos.x - tw/2, textPos.x + tw/2)) textPos.x = bgRect.max.x - tw/2;
+
+						dcText(s, gui->font, textPos, gui->colors.textColor, vec2i(0,0), 0, 1, gui->colors.shadowColor);
 
 						pos += zoomBarInterval;
 					}
 
 					pos = roundMod(orthoLeft, zoomBarInterval);
+					pos -= zoomBarInterval;
 					zoomBarInterval /= div;
-					heightMod -= heightSub;
+					heightMod *= 0.6f;
 					int index = 0;
-					while(pos < orthoRight) {
+					while(pos < orthoRight + zoomBarInterval) {
 						if((index%(int)div) != 0) {
 							float p = mapRange(pos, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
 
-							float h = bgDim.h*heightMod;
+							float h = headerDim.h*heightMod;
 							dcRect(rectCenDim(vec2(p, headerRect.min.y + h/2), vec2(1,h)), vec4(g,g,g,1));
 						}
+
+						float pMid = mapRange(pos - zoomBarInterval/2, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
+						Vec2 textPos = vec2(pMid,headerRect.min.y + headerDim.h/3);
+
+						int cycles = mapRange(zoomBarInterval, 0, graphWidth, 0, endCycleCount);
+
+						char* s;
+						if(cycles < 1000) s = fillString("%ic", cycles);
+						else if(cycles < 1000000) s = fillString("%.1fkc", (float)cycles/1000);
+						else if(cycles < 1000000000) s = fillString("%.1fmc", (float)cycles/1000000);
+
+						// Font* smallerFont = getFont(gui->font->id, (int)gui->font->height*0.85f);
+						dcText(s, gui->font, textPos, gui->colors.textColor, vec2i(0,0), 0, gui->settings.textShadow, gui->colors.shadowColor);
 
 						pos += zoomBarInterval;
 						index++;
@@ -2790,6 +2812,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 							Timings* t = timings + slot->timerIndex;
 							TimerInfo* tInfo = timer->timerInfos + slot->timerIndex;
 
+							// @Robustness: We cast u64 to float, still seems to work fine though.
 							float barLeft = mapRange(slot->cycles - baseCycleCount, startCycleCount, endCycleCount, 0, graphWidth);
 							float barRight = mapRange(slot->cycles - baseCycleCount + (u64)slot->size, startCycleCount, endCycleCount, 0, graphWidth);
 
@@ -2808,6 +2831,8 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 								char* text = fillString("%s %s", tInfo->function, tInfo->name);
 
 								if(gui->getMouseOver(gui->input.mousePos, r)) {
+									char* text = fillString("%s %s (%ic)", tInfo->function, tInfo->name, slot->size);
+
 									mouseHighlight = true;
 									hRect = r;
 									hc = c;
@@ -2855,7 +2880,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 			if(gui->button("Reset")) {
 				cp = vec2(graphWidth/2,0);
-				zoom = 1;
+				zoom = zoomInit; // To see the most right bar.
 			}
 
 			gui->label(fillString("Cam: %f, Zoom: %f",cp.x, zoom));

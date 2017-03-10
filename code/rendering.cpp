@@ -23,7 +23,16 @@ char* fillString(char* text, ...) {
 	while(true) {
 		char t = text[ti];
 
-		if(text[ti] == '%' && text[ti+1] == 'f') {
+		if(text[ti] == '%' && text[ti+1] == '.') {
+			float v = va_arg(vl, double);
+			floatToStr(valueBuffer, v, charToInt(text[ti+2]));
+			int sLen = strLen(valueBuffer);
+			memCpy(buffer + bi, valueBuffer, sLen);
+
+			ti += 4;
+			bi += sLen;
+			getTString(sLen);
+		} else if(text[ti] == '%' && text[ti+1] == 'f') {
 			float v = va_arg(vl, double);
 			floatToStr(valueBuffer, v, 2);
 			int sLen = strLen(valueBuffer);
@@ -383,6 +392,7 @@ void recreateTexture(Texture* t) {
 //
 
 struct Font {
+	int id;
 	char* fileBuffer;
 	Texture tex;
 	int glyphStart, glyphCount;
@@ -627,6 +637,7 @@ Font* getFont(int fontId, int height) {
 		unsigned char* fontBitmapBuffer = (unsigned char*)getTMemory(size.x*size.y);
 		unsigned char* fontBitmap = (unsigned char*)getTMemory(size.x*size.y*4);
 		
+		font.id = fontId;
 		font.height = height;
 		font.baseOffset = 0.8f;
 		font.glyphStart = 32;
