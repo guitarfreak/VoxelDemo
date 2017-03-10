@@ -679,6 +679,18 @@ void shellExecute(char* command) {
 	system(command);
 }
 
+void shellExecuteNoWindow(char* command) {
+	STARTUPINFO si = {};
+	PROCESS_INFORMATION pi = {};
+	si.cb = sizeof(si);
+
+	if (CreateProcess(NULL, command, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+	    WaitForSingleObject(pi.hProcess, INFINITE);
+	    CloseHandle(pi.hProcess);
+	    CloseHandle(pi.hThread);
+	}
+}
+
 // MetaPlatformFunction();
 void sleep(int milliseconds) {
     Sleep(milliseconds);

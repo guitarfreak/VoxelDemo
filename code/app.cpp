@@ -2572,7 +2572,11 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				debugStringSize = 30;
 				buffer = getTStringDebug(debugStringSize);
 				_snprintf_s(buffer, debugStringSize, debugStringSize, "%s", tInfo->function);
-				gui->label(buffer,0);
+				Vec4 buttonColor = vec4(gui->colors.regionColor.rgb, 0.2f);
+				if(gui->button(buffer,0, buttonColor)) {
+					char* command = fillString("%s %s:%i", editor_executable_path, tInfo->file, tInfo->line);
+					shellExecuteNoWindow(command);
+				}
 
 				debugStringSize = 30;
 				buffer = getTStringDebug(debugStringSize);
@@ -2713,10 +2717,13 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 					uint cyc = cyclesPerFrame*div;
 					float heightMod = 1.3f;
 					float heightSub = 0.10f;
-					float spreadWidthMod = 0.6f;
-
-					float zoomBarInterval = cyclesInWidth;
+					
 					float orthoWidth = graphWidth*zoom;
+
+					float scaleToGraphwidth = (float)ws->currentRes.w/graphWidth;
+					float spreadWidthMod = 0.5f * scaleToGraphwidth;
+					
+					float zoomBarInterval = cyclesInWidth;
 					while(zoomBarInterval/orthoWidth > spreadWidthMod) {
 						zoomBarInterval /= div;
 						heightMod -= heightSub;
