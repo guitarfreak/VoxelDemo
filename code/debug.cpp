@@ -30,6 +30,9 @@ struct DebugState {
 	int savedBufferCounts[120];
 	int savedBufferMax;
 
+	u64 mainThreadSlotCycleRange[120][2];
+	int graphSortingIndex;
+
 	GuiInput gInput;
 	Gui* gui;
 	Gui* gui2;

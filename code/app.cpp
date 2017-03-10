@@ -92,24 +92,27 @@ Changing course for now:
  - Sound perturbation. (Whatever that is.) 
 
 
-
- - Using makros and defines to make templated vectors and hashtables and such.
- - Look at font drawing.
- - Clean up gui.
-
  * Fix putting Timer_blocks somewhere.
  * Move statistics out of debug.cpp.
  * Stop text in graph when pressing key.
  * Remove f key for stopping.
- - Goto editor when clicking in graph.
- - Sort graph texts.
- - Threading in timerblocks not working.
-   - Use thread id information that's already in the timerinfo.
- - Drawing the timerinfo gets really slow.
- - Zoom bars need to be on top.
+ * Goto editor when clicking in graph.
+ * Sort graph texts.
+ * Drawing the timerinfo gets really slow.
+ * Zoom bars need to be on top.
+ * Minimizing window bug.
+ * Scroll left and right up to furthest slot. (Or the right frame.)
+
+ - Clean up gui.
+ - Look at font drawing.
+ - Using makros and defines to make templated vectors and hashtables and such.
+ - Crashing once in a while at startup.
  - Improve fillString.
    - Add scaling: 3m -> 4000k -> 4000000
    - Add commas: 3,000,000, or spaces: 3 000 000
+
+ - Threading in timerblocks not working.
+   - Use thread id information that's already in the timerinfo.
 
 //-------------------------------------
 //               BUGS
@@ -372,21 +375,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// @AppInit.
 
 		//
-		// AppData.
-		//
-
-		getPMemory(sizeof(AppData));
-		*ad = {};
-		
-		initSystem(systemData, ws, windowsData, vec2i(1920, 1080), true, true, true);
-		windowHandle = systemData->windowHandle;
-
-		loadFunctions();
-		wglSwapIntervalEXT(1);
-
-		initInput(&ad->input);
-
-		//
 		// DebugState.
 		//
 
@@ -427,6 +415,24 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ds->showConsole = true;
 		ds->showHud = true;
 		ds->guiAlpha = 0.95f;
+
+		TIMER_BLOCK_NAMED("Init");
+
+		//
+		// AppData.
+		//
+
+		getPMemory(sizeof(AppData));
+		*ad = {};
+		
+		initSystem(systemData, ws, windowsData, vec2i(1920, 1080), true, true, true);
+		windowHandle = systemData->windowHandle;
+
+		loadFunctions();
+		wglSwapIntervalEXT(1);
+
+		initInput(&ad->input);
+
 
 		//
 		// Init Folder Handles.
@@ -644,7 +650,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-
 	// Update timer.
 	{
 		LARGE_INTEGER counter;
@@ -740,8 +745,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 	if(windowSizeChanged(windowHandle, ws)) {
-		updateResolution(windowHandle, ws);
-		ad->updateFrameBuffers = true;
+		if(!windowIsMinimized(windowHandle)) {
+			updateResolution(windowHandle, ws);
+			ad->updateFrameBuffers = true;
+		}
 	}
 
 	if(ad->updateFrameBuffers) {
@@ -2456,15 +2463,22 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				TimerSlot* slots[16];
 				int index = 0;
 
+				u64 startCycleCount = 0;
+				u64 endCycleCount = 0;
+
 				for(int i = 0; i < bufferIndex; ++i) {
 					TimerSlot* slot = ds->savedBuffer[cycleIndex] + i;
 
 					if(slot->threadId != threadQueue->threadIds[threadIndex]) continue;
 
 					if(slot->type == TIMER_TYPE_BEGIN) {
+						if(startCycleCount == 0) startCycleCount = slot->cycles;
+
 						slots[index] = slot;
 						index++;
 					} else {
+						endCycleCount = slot->cycles;
+
 						index--;
 						if(index < 0) index = 0; // @Hack, to keep things running.
 
@@ -2476,7 +2490,13 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 						slots[index]->size = slotSize;
 					}
 				}
+
+				if(threadIndex == 0) {
+					ds->mainThreadSlotCycleRange[cycleIndex][0] = startCycleCount;
+					ds->mainThreadSlotCycleRange[cycleIndex][1] = endCycleCount;
+				}
 			}
+
 
 			for(int i = 0; i < timer->timerInfoCount; i++) {
 				Timings* t = timings + i;
@@ -2536,31 +2556,48 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			gui->div(sectionWidths, arrayCount(sectionWidths));
 
 			float textSectionEnd;
-
 			for(int i = 0; i < arrayCount(sectionWidths); i++) {
 				// @Hack: Get the end of the text region by looking at last region.
 				if(i == arrayCount(sectionWidths)-1) textSectionEnd = gui->getCurrentRegion().max.x;
 
-				gui->label(headers[i],1, vec4(0,0,0,0.3f), vec4(0,0,0,1));
+				Vec4 buttonColor = vec4(gui->colors.regionColor.rgb, 0.5f);
+				if(gui->button(headers[i], 0, buttonColor, vec4(0,0,0,1))) {
+					if(abs(ds->graphSortingIndex) == i) ds->graphSortingIndex *= -1;
+					else ds->graphSortingIndex = i;
+				}
 			}
 
-			for(int i = 0; i < infoCount; i++) {
+			SortPair* sortList = getTArrayDebug(SortPair, infoCount+1);
+			{
+				for(int i = 0; i < infoCount+1; i++) sortList[i].index = i;
+
+		   			 if(abs(ds->graphSortingIndex) == 3) for(int i = 0; i < infoCount+1; i++) sortList[i].key = timings[i].cycles;
+		   		else if(abs(ds->graphSortingIndex) == 4) for(int i = 0; i < infoCount+1; i++) sortList[i].key = timings[i].hits;
+		   		else if(abs(ds->graphSortingIndex) == 5) for(int i = 0; i < infoCount+1; i++) sortList[i].key = timings[i].cyclesOverHits;
+		   		else if(abs(ds->graphSortingIndex) == 6) for(int i = 0; i < infoCount+1; i++) sortList[i].key = statistics[i].avg;
+		   		else if(abs(ds->graphSortingIndex) == 7) for(int i = 0; i < infoCount+1; i++) sortList[i].key = timings[i].cycles/cyclesPerFrame;
+
+		   		bool sortDirection = true;
+		   		if(ds->graphSortingIndex < 0) sortDirection = false;
+
+		   		if(valueBetween(abs(ds->graphSortingIndex), 3, 7)) 
+					bubbleSort(sortList, infoCount, sortDirection);
+			}
+
+			for(int index = 0; index < infoCount; index++) {
+				int i = sortList[index].index;
+
 				TimerInfo* tInfo = timer->timerInfos + i;
 				Timings* timing = timings + i;
 
 				if(!tInfo->initialised) continue;
-
-				float cycleCountPercent = (float)timing->cycles/cyclesPerFrame;
-				char * percentString = getTStringDebug(50);
-				percentString = floatToStr(percentString, cycleCountPercent*100, 3);
 
 				int debugStringSize = 50;
 				char* buffer = 0;
 
 				gui->div(sectionWidths, arrayCount(sectionWidths)); 
 
-				buffer = getTStringDebug(debugStringSize);
-				_snprintf_s(buffer, debugStringSize, debugStringSize, "%s", tInfo->file + 21);
+				buffer = fillString("%s", tInfo->file + 21);
 				gui->label(buffer,0);
 
 				if(highlightedIndex == i) {
@@ -2569,50 +2606,37 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 					dcRect(line, highlightColor);
 				}
 
-				debugStringSize = 30;
-				buffer = getTStringDebug(debugStringSize);
-				_snprintf_s(buffer, debugStringSize, debugStringSize, "%s", tInfo->function);
+				buffer = fillString("%s", tInfo->function);
 				Vec4 buttonColor = vec4(gui->colors.regionColor.rgb, 0.2f);
 				if(gui->button(buffer,0, buttonColor)) {
 					char* command = fillString("%s %s:%i", editor_executable_path, tInfo->file, tInfo->line);
 					shellExecuteNoWindow(command);
 				}
 
-				debugStringSize = 30;
-				buffer = getTStringDebug(debugStringSize);
-				_snprintf_s(buffer, debugStringSize, debugStringSize, "%s", tInfo->name);
+				buffer = fillString("%s", tInfo->name);
 				gui->label(buffer,0);
 
 				debugStringSize = 30;
 				buffer = getTStringDebug(debugStringSize);
-				_snprintf_s(buffer, debugStringSize, debugStringSize, "%I64uc", timing->cycles);
-				// if(timing->cycles < 1000) 
-				// 	_snprintf_s(buffer, debugStringSize, debugStringSize, "%I64uc", timing->cycles);
-				// else if(timing->cycles < 1000000) 
-				// 	_snprintf_s(buffer, debugStringSize, debugStringSize, "%I64u,%0.3I64uc", (u64)(timing->cycles/1000), (u64)(timing->cycles%1000));
-				// else 
-				// 	_snprintf_s(buffer, debugStringSize, debugStringSize, "%I64u,%0.3I64u,%0.3I64uc", (u64)(timing->cycles/1000000), (u64)(timing->cycles/1000), (u64)(timing->cycles%1000));
-
+				sprintfu64NumberDots(buffer, "c", debugStringSize, debugStringSize, timing->cycles);
 				gui->label(buffer,2);
 
 				debugStringSize = 30;
 				buffer = getTStringDebug(debugStringSize);
-				_snprintf_s(buffer, debugStringSize, debugStringSize, "%u", timing->hits);
+				sprintfu64NumberDots(buffer, "", debugStringSize, debugStringSize, timing->hits);
 				gui->label(buffer,2);
 
 				debugStringSize = 30;
 				buffer = getTStringDebug(debugStringSize);
-				_snprintf_s(buffer, debugStringSize, debugStringSize, "%I64u", timing->cyclesOverHits);
+				sprintfu64NumberDots(buffer, "c", debugStringSize, debugStringSize, timing->cyclesOverHits);
 				gui->label(buffer,2);
 
 				debugStringSize = 30;
 				buffer = getTStringDebug(debugStringSize);
-				_snprintf_s(buffer, debugStringSize, debugStringSize, "%.0fc", statistics[i].avg);
+				sprintfu64NumberDots(buffer, "c", debugStringSize, debugStringSize, statistics[i].avg);
 				gui->label(buffer,2);
 
-				debugStringSize = 30;
-				buffer = getTStringDebug(debugStringSize);
-				_snprintf_s(buffer, debugStringSize, debugStringSize, "%s%%", percentString);
+				buffer = fillString("%.3f%%", ((float)timing->cycles/cyclesPerFrame)*100);
 				gui->label(buffer,2);
 
 				// Bar graphs.
@@ -2673,32 +2697,49 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 			gui->heightPop();
 
-			if(gui->input.mouseWheel) {
-				float oldWidth = graphWidth*zoom;
-
-				float wheel = gui->input.mouseWheel;
-
-				float offset = wheel < 0 ? 1.1f : 0.9f;
-				if(!input->keysDown[KEYCODE_SHIFT] && input->keysDown[KEYCODE_CTRL]) 
-					offset = wheel < 0 ? 1.2f : 0.8f;
-				if(input->keysDown[KEYCODE_SHIFT] && input->keysDown[KEYCODE_CTRL]) 
-					offset = wheel < 0 ? 1.4f : 0.6f;
-
-				zoom *= offset;
-				zoom = clampMax(zoom, 4.0f);
-
-				float addedWidth = graphWidth*zoom - oldWidth;
-				float mouseZoomOffset = mapRange(input->mousePos.x, bgRect.min.x, bgRect.max.x, -1, 1);
-				cp.x -= (addedWidth/2)*mouseZoomOffset;
-			}
-
-			// cp.x = clamp(cp.x, (graphWidth*zoom)/2, graphWidth - (graphWidth*zoom)/2);
-			cp.x = clampMin(cp.x, (graphWidth*zoom)/2);
-
-			if(true) {
-				u64 baseCycleCount = graphTimerBuffer[0].cycles;
+			{
+				// u64 baseCycleCount = graphTimerBuffer[0].cycles;
+				u64 baseCycleCount = ds->mainThreadSlotCycleRange[cycleIndex][0];
 				u64 startCycleCount = 0;
 				u64 endCycleCount = cyclesPerFrame;
+				u64 furthestCycleCount = ds->mainThreadSlotCycleRange[cycleIndex][1] - baseCycleCount;
+				float furthestRightSlot = mapRange(furthestCycleCount, startCycleCount, endCycleCount, 0, graphWidth);
+
+				bool extendedView = endCycleCount < furthestCycleCount;
+
+				float oldWidth = -1;
+				if(gui->input.mouseWheel) {
+					oldWidth = graphWidth*zoom;
+
+					float wheel = gui->input.mouseWheel;
+
+					float offset = wheel < 0 ? 1.1f : 0.9f;
+					if(!input->keysDown[KEYCODE_SHIFT] && input->keysDown[KEYCODE_CTRL]) 
+						offset = wheel < 0 ? 1.2f : 0.8f;
+					if(input->keysDown[KEYCODE_SHIFT] && input->keysDown[KEYCODE_CTRL]) 
+						offset = wheel < 0 ? 1.4f : 0.6f;
+
+					zoom *= offset;
+				}
+
+				// zoom = clampMax(zoom, 4.0f);
+				if(extendedView) zoom = clampMax(zoom, furthestRightSlot / graphWidth);
+				else zoom = clampMax(zoom, 1);
+
+				if(gui->input.mouseWheel) {
+					float addedWidth = graphWidth*zoom - oldWidth;
+					float mouseZoomOffset = mapRange(input->mousePos.x, bgRect.min.x, bgRect.max.x, -1, 1);
+					cp.x -= (addedWidth/2)*mouseZoomOffset;
+				}
+
+				cp.x = clampMin(cp.x, (graphWidth*zoom)/2);
+
+				if(!extendedView) {
+					cp.x = clampMax(cp.x, -(graphWidth*zoom)/2 + graphWidth);
+				} else {
+					cp.x = clampMax(cp.x, -(graphWidth*zoom)/2 + furthestRightSlot);
+				}
+
 
 				float orthoLeft = cp.x - (graphWidth*zoom)/2;
 				float orthoRight = cp.x + (graphWidth*zoom)/2;
@@ -2713,21 +2754,19 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 					float g = 0.7f;
 					float div = 4;
-					float cyclesInWidth = mapRange(cyclesPerFrame*div, startCycleCount, endCycleCount, 0, graphWidth);
-					uint cyc = cyclesPerFrame*div;
+					float cyclesInWidth = mapRange(cyclesPerFrame*div*2, startCycleCount, endCycleCount, 0, graphWidth);
 					float heightMod = 1.3f;
 					float heightSub = 0.10f;
 					
 					float orthoWidth = graphWidth*zoom;
 
 					float scaleToGraphwidth = (float)ws->currentRes.w/graphWidth;
-					float spreadWidthMod = 0.5f * scaleToGraphwidth;
+					float spreadWidthMod = 0.6f * scaleToGraphwidth;
 					
 					float zoomBarInterval = cyclesInWidth;
 					while(zoomBarInterval/orthoWidth > spreadWidthMod) {
 						zoomBarInterval /= div;
 						heightMod -= heightSub;
-						cyc /= div;
 					}
 
 					heightMod = clampMax(heightMod, 1);
@@ -2830,26 +2869,34 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 							if(!(barRight < bgRect.min.x || barLeft > bgRect.max.x)) {
 								if(barRight - barLeft < 1) barRight = barLeft + 1;
 
+								bool textRectVisible = (barRight - barLeft) > 3;
+
 								float y = startPos.y+index*-lineHeight;
 								Rect r = rect(vec2(barLeft,y), vec2(barRight, y + lineHeight));
 
 								float cOff = slot->timerIndex/(float)timer->timerInfoCount;
 								Vec4 c = vec4(1-cOff, 0, cOff, 1);
-								char* text = fillString("%s %s", tInfo->function, tInfo->name);
 
 								if(gui->getMouseOver(gui->input.mousePos, r)) {
-									char* text = fillString("%s %s (%ic)", tInfo->function, tInfo->name, slot->size);
-
 									mouseHighlight = true;
 									hRect = r;
 									hc = c;
+
+									char* numberFormatted = getTStringDebug(30);
+									sprintfu64NumberDots(numberFormatted, "c", 30, 30, slot->size);
+									char* text = fillString("%s %s (%s)", tInfo->function, tInfo->name, numberFormatted);
+
 									hText = text;
 									highlightedIndex = slot->timerIndex;
 								} else {
 									float g = 0.1f;
 									gui->drawRect(r, vec4(g,g,g,1));
 
-									if(rectGetDim(r).w > 3) {
+									if(textRectVisible) {
+										char* numberFormatted = getTStringDebug(30);
+										sprintfu64NumberDots(numberFormatted, "c", 30, 30, slot->size);
+										char* text = fillString("%s %s (%s)", tInfo->function, tInfo->name, numberFormatted);
+
 										if(barLeft < bgRect.min.x) r.min.x = bgRect.min.x;
 										gui->drawTextBox(rect(r.min+vec2(1,1), r.max-vec2(1,1)), text, c);
 									}

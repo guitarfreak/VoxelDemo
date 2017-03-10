@@ -2779,17 +2779,35 @@ Vec3 colorSRGB(Vec3 color) {
 }
 
 
-
+struct SortPair {
+	float key;
+	int index;
+};
 
 void bubbleSort(int* list, int size) {
-
 	for(int off = 0; off < size-2; off++) {
 		bool sw = false;
 
 		for(int i = 0; i < size-1 - off; i++) {
 			if(list[i+1] < list[i]) {
-				// swap(list + i, list + (i+1) );
 				swap(&off, &size);
+				sw = true;
+			}
+		}
+
+		if(!sw) break;
+	}
+}
+
+void bubbleSort(SortPair* list, int size, bool sortDirection = false) {
+	for(int off = 0; off < size-1; off++) {
+		bool sw = false;
+
+		for(int i = 0; i < size-1 - off; i++) {
+			bool result = sortDirection ? (list[i+1].key > list[i].key) : 
+										  (list[i+1].key < list[i].key);
+			if(result) {
+				swapGeneric(SortPair, list[i], list[i+1]);
 				sw = true;
 			}
 		}
@@ -2924,12 +2942,6 @@ void radixSortSimd(int* list, int size) {
 
 	free(buffer);
 }
-
-
-struct SortPair {
-	float key;
-	int index;
-};
 
 void radixSortPair(SortPair* list, int size) {
 	// SortPair* buffer = getTArray(SortPair, size);

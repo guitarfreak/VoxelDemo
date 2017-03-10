@@ -907,6 +907,26 @@ void endStatistic(Statistic* stat) {
 
 //
 
-// void sprintfu64NumberDots(char* buffer, int size, int size2, char* s, ) {
+void sprintfu64NumberDots(char* buffer, char* suffix, int size, int size2, u64 num) {
+	if(num < 1000) {
+		_snprintf_s(buffer, size, size2, "%I64u%s", num, suffix);
+	} else if(num < 1000000) {
+		_snprintf_s(buffer, size, size2, "%I64u,%0.3I64u%s", 
+		            (u64)(num/1000), 
+		            (u64)(num%1000), suffix);
+	} else if(num < 1000000000) {
+		_snprintf_s(buffer, size, size2, "%I64u,%0.3I64u,%0.3I64u%s", 
+		            (u64)(num/1000000) % 1000, 
+		            (u64)(num/1000) % 1000, 
+		            (u64)(num%1000), suffix);
+	} else {
+		_snprintf_s(buffer, size, size2, "%I64u,%0.3I64u,%0.3I64u,%0.3I64u%s", 
+		            (u64)(num/1000000000), 
+		            (u64)(num/1000000) % 1000, 
+		            (u64)(num/1000) % 1000, 
+		            (u64)(num%1000), suffix);
+	} 
 
-// }
+}
+
+

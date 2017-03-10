@@ -679,6 +679,10 @@ void shellExecute(char* command) {
 	system(command);
 }
 
+bool windowIsMinimized(HWND windowHandle) {
+	return IsIconic(windowHandle);
+}
+
 void shellExecuteNoWindow(char* command) {
 	STARTUPINFO si = {};
 	PROCESS_INFORMATION pi = {};

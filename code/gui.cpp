@@ -703,7 +703,7 @@ struct Gui {
 		return active;
 	}
 
-	bool button(char* text, int switcher = 0, Vec4 bgColor = vec4(0,0,0,0)) {
+	bool button(char* text, int switcher = 0, Vec4 bgColor = vec4(0,0,0,0), Vec4 shadowColor = vec4(0,0,0,0)) {
 		if(!pre()) return false;
 
 		Rect region = getCurrentRegion();
@@ -719,7 +719,7 @@ struct Gui {
 		}
 
 		drawRect(region, finalColor);
-		drawText(text);
+		drawText(text, 1, shadowColor);
 
 		post();
 		return active;
