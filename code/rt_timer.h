@@ -9,11 +9,12 @@ enum TimerType {
 };
 
 struct TimerInfo {
-	int initialised;
+	bool initialised;
+	bool stringsSaved;
 
-	const char* file;
-	const char* function;
-	const char* name;
+	char* file;
+	char* function;
+	char* name;
 	int line, line2;
 	uint type;
 };
@@ -31,6 +32,14 @@ struct TimerSlot {
 	uint size;
 };
 #pragma pack(pop)
+
+// struct GraphSlot {
+// 	char type;
+// 	char threadId;
+// 	char timerIndex;
+// 	u64 cycles;
+// 	uint size;
+// };
 
 struct Timings {
 	u64 cycles;
@@ -67,7 +76,7 @@ void addTimerSlot(int timerIndex, int type) {
 	slot->timerIndex = timerIndex;
 }
 
-void addTimerSlotAndInfo(int timerIndex, int type, const char* file, const char* function, int line, char* name = "") {
+void addTimerSlotAndInfo(int timerIndex, int type, char* file, char* function, int line, char* name = "") {
 
 	TimerInfo* timerInfo = globalTimer->timerInfos + timerIndex;
 
@@ -87,7 +96,7 @@ void addTimerSlotAndInfo(int timerIndex, int type, const char* file, const char*
 struct TimerBlock {
 	int counter;
 
-	TimerBlock(int counter, const char* file, const char* function, int line, char* name = "") {
+	TimerBlock(int counter, char* file, char* function, int line, char* name = "") {
 
 		this->counter = counter;
 		addTimerSlotAndInfo(counter, TIMER_TYPE_BEGIN, file, function, line, name);

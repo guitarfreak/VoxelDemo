@@ -255,7 +255,7 @@ struct VoxelMesh {
 };
 
 void initVoxelMesh(VoxelMesh* m, Vec2i coord) {
-	TIMER_BLOCK();
+	// TIMER_BLOCK();
 
 	*m = {};
 	m->coord = coord;
@@ -296,7 +296,7 @@ struct VoxelNode {
 };
 
 VoxelMesh* getVoxelMesh(VoxelNode** voxelHash, int voxelHashSize, Vec2i coord) {
-	TIMER_BLOCK();
+	// TIMER_BLOCK();
 
 	int hashIndex = mod(coord.x*9 + coord.y*23, voxelHashSize);
 
@@ -325,7 +325,7 @@ VoxelMesh* getVoxelMesh(VoxelNode** voxelHash, int voxelHashSize, Vec2i coord) {
 
 
 void generateVoxelMeshThreaded(void* data) {
-	TIMER_BLOCK();
+	// TIMER_BLOCK();
 
 	VoxelMesh* m = (VoxelMesh*)data;
 	Vec2i coord = m->coord;
@@ -454,7 +454,7 @@ struct MakeMeshThreadedData {
 };
 
 void makeMeshThreaded(void* data) {	
-	TIMER_BLOCK();
+	// TIMER_BLOCK();
 	
 	MakeMeshThreadedData* d = (MakeMeshThreadedData*)data;
 	VoxelMesh* m = d->m;
@@ -601,7 +601,7 @@ void makeMeshThreaded(void* data) {
 }
 
 void makeMesh(VoxelMesh* m, VoxelNode** voxelHash, int voxelHashSize) {
-	TIMER_BLOCK();
+	// TIMER_BLOCK();
 
 	// int threadJobsMax = 20;
 
@@ -791,7 +791,7 @@ uchar* getLightingFromCoord(VoxelNode** voxelHash, int voxelHashSize, Vec3 coord
 }
 
 void setupVoxelUniforms(Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit, Mat4 view, Mat4 proj, Vec3 fogColor, Vec3 trans = vec3(0,0,0), Vec3 scale = vec3(1,1,1), Vec3 rotation = vec3(0,0,0)) {
-	TIMER_BLOCK();
+	// TIMER_BLOCK();
 
 	buildColorPalette();
 
@@ -896,7 +896,7 @@ void setupVoxelUniforms(Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit
 }
 
 void drawVoxelMesh(VoxelMesh* m, int drawMode = 0) {
-	TIMER_BLOCK();
+	// TIMER_BLOCK();
 
 	globalGraphicsState->textureUnits[0] = globalGraphicsState->textures3d[0].id;
 	globalGraphicsState->textureUnits[1] = globalGraphicsState->textures3d[1].id;

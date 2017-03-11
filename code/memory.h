@@ -13,6 +13,7 @@ extern MemoryBlock* globalMemory;
 
 #define getPStruct(type) 		(type*)(getPMemory(sizeof(type)))
 #define getPArray(type, count) 	(type*)(getPMemory(sizeof(type) * count))
+#define getPString(count) 	(char*)(getPMemory(count))
 #define getTStruct(type) 		(type*)(getTMemory(sizeof(type)))
 #define getTArray(type, count) 	(type*)(getTMemory(sizeof(type) * count))
 #define getTString(size) 		(char*)(getTMemory(size)) 
@@ -38,6 +39,7 @@ void * getTMemory(int size, MemoryBlock * memory = 0) {
 
 #define getPStructDebug(type) 		(type*)(getPMemoryDebug(sizeof(type)))
 #define getPArrayDebug(type, count) 	(type*)(getPMemoryDebug(sizeof(type) * count))
+#define getPStringDebug(count) (char*)(getPMemoryDebug(count))
 #define getTStructDebug(type) 		(type*)(getTMemoryDebug(sizeof(type)))
 #define getTArrayDebug(type, count) 	(type*)(getTMemoryDebug(sizeof(type) * count))
 #define getTStringDebug(size) 		(char*)(getTMemoryDebug(size)) 

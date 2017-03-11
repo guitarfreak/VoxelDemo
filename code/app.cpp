@@ -102,6 +102,7 @@ Changing course for now:
  * Zoom bars need to be on top.
  * Minimizing window bug.
  * Scroll left and right up to furthest slot. (Or the right frame.)
+ * TimerInfo should not vanish if we reload.
 
  - Clean up gui.
  - Look at font drawing.
@@ -110,9 +111,11 @@ Changing course for now:
  - Improve fillString.
    - Add scaling: 3m -> 4000k -> 4000000
    - Add commas: 3,000,000, or spaces: 3 000 000
+ - Add instant screen string debug push to debugstate.
 
  - Threading in timerblocks not working.
    - Use thread id information that's already in the timerinfo.
+ - Add some kind of timer for the debug processing to get a hint about timer collating expenses.
 
 //-------------------------------------
 //               BUGS
@@ -389,7 +392,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		globalTimer = ds->timer;
 		int timerSlots = 5000;
 		ds->timer->bufferSize = timerSlots;
-		ds->timer->timerBuffer = (TimerSlot*)getPMemoryDebug(sizeof(TimerSlot) * timerSlots);
+		ds->timer->timerBuffer = (TimerSlot*)getPMemoryDebug(sizeof(TimerSlot) * timerSlots * 4);
 
 		int cycleCount = arrayCount(ds->timings);
 		ds->savedBufferMax = timerSlots * cycleCount;
@@ -2315,6 +2318,8 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		dcText(fillString("Acc  : (%f,%f,%f)", PVEC3(ad->player->acc)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
 		dcText(fillString("Draws: (%i)", 	   ad->voxelDrawCount), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
 		dcText(fillString("Quads: (%i)", 	   ad->voxelTriangleCount), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
+		dcText(fillString("BufferIndex: %i",    ds->timer->bufferIndex), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
+		dcText(fillString("LastBufferIndex: %i",ds->lastBufferIndex), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
 	}
 
 	if(ds->showMenu) {
@@ -2412,18 +2417,37 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		gui->end();
 	}
 
-	if(reload) {
-		for(int i = 0; i < arrayCount(ds->timer->timerInfos); i++) ds->timer->timerInfos[i].initialised = false;
-		return;
-	}
-
 	ds->timer->timerInfoCount = __COUNTER__;
 
 	int fontHeight = 18;
 	Timer* timer = ds->timer;
 	int cycleCount = arrayCount(ds->timings);
 	int bufferIndex = timer->bufferIndex;
-	timer->bufferIndex = 0;
+	// timer->bufferIndex = 0;
+
+	// Save const strings from initialised timerinfos.
+	{
+		for(int i = 0; i < timer->timerInfoCount; i++) {
+			TimerInfo* info = timer->timerInfos + i;
+
+			if(!info->initialised || info->stringsSaved) continue;
+			char* s;
+			
+			s = info->file;
+			info->file = getPStringDebug(strLen(s) + 1);
+			strCpy(info->file, s);
+
+			s = info->function;
+			info->function = getPStringDebug(strLen(s) + 1);
+			strCpy(info->function, s);
+
+			s = info->name;
+			info->name = getPStringDebug(strLen(s) + 1);
+			strCpy(info->name, s);
+
+			info->stringsSaved = true;
+		}
+	}
 
 	if(ds->setPause) {
 		ds->lastCycleIndex = ds->cycleIndex;
@@ -2442,17 +2466,27 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 	int cycleIndex = ds->cycleIndex;
 	int newCycleIndex = (ds->cycleIndex + 1)%cycleCount;
 
+	{
+		// timer->timerBuffer bufferIndex
+
+		if(threadQueueFinished(threadQueue)) {
+			timer->bufferIndex = 0;
+		}
+
+	}
+
 	// Timer update.
 	{
 
 		if(!ds->noCollating) {
+		// if(false) {
 			zeroMemory(timings, timer->timerInfoCount*sizeof(Timings));
 			zeroMemory(statistics, timer->timerInfoCount*sizeof(Statistic));
 
 			// Save current timerBuffer.
 			{
-				memCpy(ds->savedBuffer[cycleIndex], timer->timerBuffer, bufferIndex * sizeof(TimerSlot));
-				ds->savedBufferCounts[cycleIndex] = bufferIndex;
+				// memCpy(ds->savedBuffer[cycleIndex], timer->timerBuffer + ds->lastBufferIndex, bufferIndex * sizeof(TimerSlot));
+				// ds->savedBufferCounts[cycleIndex] = bufferIndex - ds->lastBufferIndex;
 			}
 
 			ds->cycleIndex = newCycleIndex;
@@ -2466,8 +2500,10 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				u64 startCycleCount = 0;
 				u64 endCycleCount = 0;
 
-				for(int i = 0; i < bufferIndex; ++i) {
-					TimerSlot* slot = ds->savedBuffer[cycleIndex] + i;
+				// for(int i = 0; i < bufferIndex; ++i) {
+				for(int i = ds->lastBufferIndex; i < bufferIndex; ++i) {
+					// TimerSlot* slot = ds->savedBuffer[cycleIndex] + i;
+					TimerSlot* slot = timer->timerBuffer + i;
 
 					if(slot->threadId != threadQueue->threadIds[threadIndex]) continue;
 
@@ -2491,12 +2527,16 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 					}
 				}
 
+				// Missing one or more slot endings.
+				if(index > 0) {
+
+				}
+
 				if(threadIndex == 0) {
 					ds->mainThreadSlotCycleRange[cycleIndex][0] = startCycleCount;
 					ds->mainThreadSlotCycleRange[cycleIndex][1] = endCycleCount;
 				}
 			}
-
 
 			for(int i = 0; i < timer->timerInfoCount; i++) {
 				Timings* t = timings + i;
@@ -2516,6 +2556,8 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			}
 		}
 	}
+
+	ds->lastBufferIndex = bufferIndex;
 
 	TimerSlot* graphTimerBuffer = ds->savedBuffer[cycleIndex];
 	int graphBufferIndex = ds->savedBufferCounts[cycleIndex];
