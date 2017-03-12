@@ -7,8 +7,6 @@
 #include "rt_misc_win32.h"
 
 
-
-
 int CALLBACK WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR commandLine, int showCode) {
 	HotloadDll hotloadDll;
 	initDll(&hotloadDll, "app.dll", "appTemp.dll", "lock.tmp");
@@ -20,29 +18,12 @@ int CALLBACK WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR commandLi
 
 	AppMemory appMemory = {};
 
-	// i64 size = gigaBytes(12);
-    // char* data = (char*)VirtualAlloc((void*)gigaBytes(5), size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-    // int stop = 234;
-
-    // char* data = (char*)VirtualAlloc((void*)gigaBytes(5), gigaBytes(32), MEM_RESERVE, PAGE_READWRITE);
-    // data = (char*)VirtualAlloc((void*)gigaBytes(5), gigaBytes(1), MEM_COMMIT, PAGE_READWRITE);
-    // memSetLarge(data, 234, gigaBytes(1));
-
-    // data = (char*)VirtualAlloc((void*)gigaBytes(5) + gigaBytes(1), gigaBytes(1), MEM_COMMIT, PAGE_READWRITE);
-    // memSetLarge(data, 234, gigaBytes(1));
-
-    // Sleep(5000);
-
-    // return 0;
-
-
     bool firstFrame = true;
     bool secondFrame = false;
     bool isRunning = true;
     while(isRunning) {
 
     	bool reload = false;
-    	// if(threadQueueFull()threadQueue.completionCount == threadQueue.completionGoal)
 		if(threadQueueFinished(&threadQueue)) reload = updateDll(&hotloadDll);
      	platform_appMain = (appMainType*)getDllFunction(&hotloadDll, "appMain");
         platform_appMain(firstFrame, reload, &isRunning, wData, &threadQueue, &appMemory);

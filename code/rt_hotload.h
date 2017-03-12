@@ -1,8 +1,8 @@
 #pragma once
 // #include <Shlwapi.h> // PathFileExists()
-#define LWSTDAPI_(type)   EXTERN_C DECLSPEC_IMPORT type STDAPICALLTYPE
-LWSTDAPI_(BOOL)     PathFileExistsA(__in LPCSTR pszPath);
-#define PathFileExists  PathFileExistsA
+#define LWSTDAPI_(type) EXTERN_C DECLSPEC_IMPORT type STDAPICALLTYPE
+LWSTDAPI_(BOOL) PathFileExistsA(__in LPCSTR pszPath);
+#define PathFileExists PathFileExistsA
 
 struct HotloadDll {
     char * libFilePath; 

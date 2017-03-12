@@ -33,20 +33,20 @@ struct TimerSlot {
 };
 #pragma pack(pop)
 
-// struct GraphSlot {
-// 	char type;
-// 	char threadId;
-// 	char timerIndex;
-// 	u64 cycles;
-// 	uint size;
-// };
+struct GraphSlot {
+	char type;
+	char threadIndex;
+	char timerIndex;
+	char stackIndex;
+	u64 cycles;
+	uint size;
+};
 
 struct Timings {
 	u64 cycles;
 	int hits;
 	u64 cyclesOverHits;
 };
-
 
 struct Timer {
 	bool isInitialised;

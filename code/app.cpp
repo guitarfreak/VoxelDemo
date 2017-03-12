@@ -116,6 +116,10 @@ Changing course for now:
  - Threading in timerblocks not working.
    - Use thread id information that's already in the timerinfo.
  - Add some kind of timer for the debug processing to get a hint about timer collating expenses.
+ - Graph about relative timings.
+  - Averages should only count when the timerblock actually gets hit.
+
+ - Changing route: replace the frame buffer graph with a seemless graph.
 
 //-------------------------------------
 //               BUGS
@@ -297,6 +301,19 @@ struct AppData {
 };
 
 
+// void (*function)(void* data);
+
+void threadBench(void* data) {
+	int startTime = *(int*)data;
+	int time = *(((int*)data) + 1);
+
+	Sleep(startTime);
+
+	TIMER_BLOCK();
+
+	Sleep(time);
+}
+
 
 // void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, bool* isRunning, bool init);
 void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, bool* isRunning, bool init, ThreadQueue* threadQueue);
@@ -397,7 +414,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		int cycleCount = arrayCount(ds->timings);
 		ds->savedBufferMax = timerSlots * cycleCount;
 		for(int i = 0; i < cycleCount; i++) {
-			ds->savedBuffer[i] = (TimerSlot*)getPMemoryDebug(sizeof(TimerSlot) * timerSlots);
+			ds->savedBuffer[i] = (GraphSlot*)getPMemoryDebug(sizeof(GraphSlot) * timerSlots);
 		}
 
 		ds->gui = getPStructDebug(Gui);
@@ -2246,6 +2263,29 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
+	if(input->keysPressed[KEYCODE_1]) { 
+		int t[] = {1,5};
+		threadQueueAdd(threadQueue, threadBench, &t);
+		threadQueueAdd(threadQueue, threadBench, &t);
+		threadQueueAdd(threadQueue, threadBench, &t);
+	}
+
+	if(input->keysPressed[KEYCODE_2]) { 
+		int t[] = {1,20};
+		threadQueueAdd(threadQueue, threadBench, &t);
+		threadQueueAdd(threadQueue, threadBench, &t);
+		threadQueueAdd(threadQueue, threadBench, &t);
+	}
+
+	if(input->keysPressed[KEYCODE_3]) { 
+		int t[] = {1,50};
+		threadQueueAdd(threadQueue, threadBench, &t);
+		threadQueueAdd(threadQueue, threadBench, &t);
+		threadQueueAdd(threadQueue, threadBench, &t);
+	}
+
+
+
 	// Swap window background buffer.
 	{
 		TIMER_BLOCK_NAMED("Swap");
@@ -2422,8 +2462,10 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 	int fontHeight = 18;
 	Timer* timer = ds->timer;
 	int cycleCount = arrayCount(ds->timings);
+
+	bool threadsFinished = threadQueueFinished(threadQueue);
+
 	int bufferIndex = timer->bufferIndex;
-	// timer->bufferIndex = 0;
 
 	// Save const strings from initialised timerinfos.
 	{
@@ -2466,15 +2508,6 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 	int cycleIndex = ds->cycleIndex;
 	int newCycleIndex = (ds->cycleIndex + 1)%cycleCount;
 
-	{
-		// timer->timerBuffer bufferIndex
-
-		if(threadQueueFinished(threadQueue)) {
-			timer->bufferIndex = 0;
-		}
-
-	}
-
 	// Timer update.
 	{
 
@@ -2493,16 +2526,25 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 			// Collate timing buffer.
 
+			GraphSlot* savedBuffer = ds->savedBuffer[cycleIndex];
+			int savedBufferCount = 0;
+
 			for(int threadIndex = 0; threadIndex < threadQueue->threadCount; threadIndex++) {
-				TimerSlot* slots[16];
-				int index = 0;
+				GraphSlot* graphSlots = ds->graphSlots[threadIndex];
+				int index = ds->graphSlotCount[threadIndex];
+
+				// One or more slots did not get resolved.
+				if(index > 0) {
+					for(int i = index; i > 0; i--) {
+						GraphSlot* slotWithoutStart = graphSlots + (index-1);
+						slotWithoutStart->type = 1;
+					}
+				}
 
 				u64 startCycleCount = 0;
 				u64 endCycleCount = 0;
 
-				// for(int i = 0; i < bufferIndex; ++i) {
 				for(int i = ds->lastBufferIndex; i < bufferIndex; ++i) {
-					// TimerSlot* slot = ds->savedBuffer[cycleIndex] + i;
 					TimerSlot* slot = timer->timerBuffer + i;
 
 					if(slot->threadId != threadQueue->threadIds[threadIndex]) continue;
@@ -2510,7 +2552,14 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 					if(slot->type == TIMER_TYPE_BEGIN) {
 						if(startCycleCount == 0) startCycleCount = slot->cycles;
 
-						slots[index] = slot;
+						GraphSlot graphSlot;
+						graphSlot.threadIndex = threadIndex;
+						graphSlot.timerIndex = slot->timerIndex;
+						graphSlot.stackIndex = index;
+						graphSlot.cycles = slot->cycles;
+						graphSlot.type = 0;
+						graphSlots[index] = graphSlot;
+
 						index++;
 					} else {
 						endCycleCount = slot->cycles;
@@ -2518,25 +2567,40 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 						index--;
 						if(index < 0) index = 0; // @Hack, to keep things running.
 
-						Timings* timing = timings + slots[index]->timerIndex;
-						uint slotSize = slot->cycles - slots[index]->cycles;
-						timing->cycles += slotSize;
-						timing->hits++;
+						graphSlots[index].size = slot->cycles - graphSlots[index].cycles;
+						savedBuffer[savedBufferCount++] = graphSlots[index];
 
-						slots[index]->size = slotSize;
+						Timings* timing = timings + graphSlots[index].timerIndex;
+						timing->cycles += graphSlots[index].size;
+						timing->hits++;
 					}
 				}
 
-				// Missing one or more slot endings.
+				// One or more slots did not get resolved.
 				if(index > 0) {
+					for(int i = index; i > 0; i--) {
+						GraphSlot* slot = graphSlots + (index-1);
+						if(slot->type == 1) slot->type = 3;
+						else slot->type = 2;
 
+						// slot.size = getTimestamp() - slot.cycles;
+
+						GraphSlot slotWithoutEnd = *slot;
+						// slotWithoutEnd.size = getTimestamp() - slot->cycles;
+						slotWithoutEnd.size = 1234567;
+						savedBuffer[savedBufferCount++] = slotWithoutEnd;
+					}
 				}
+
+				ds->graphSlotCount[threadIndex] = index;
 
 				if(threadIndex == 0) {
 					ds->mainThreadSlotCycleRange[cycleIndex][0] = startCycleCount;
 					ds->mainThreadSlotCycleRange[cycleIndex][1] = endCycleCount;
 				}
 			}
+
+			ds->savedBufferCounts[cycleIndex] = savedBufferCount;
 
 			for(int i = 0; i < timer->timerInfoCount; i++) {
 				Timings* t = timings + i;
@@ -2559,8 +2623,10 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 	ds->lastBufferIndex = bufferIndex;
 
-	TimerSlot* graphTimerBuffer = ds->savedBuffer[cycleIndex];
-	int graphBufferIndex = ds->savedBufferCounts[cycleIndex];
+	if(threadsFinished) {
+		timer->bufferIndex = 0;
+		ds->lastBufferIndex = 0;
+	}
 
 	//
 	// Draw timing info.
@@ -2879,93 +2945,117 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				Rect hRect;
 				Vec4 hc;
 				char* hText;
+				GraphSlot* hSlot;
 
 				startPos -= vec2(0, lineHeight);
 				for(int threadIndex = 0; threadIndex < threadQueue->threadCount; threadIndex++) {
-					int index = 0;
 
 					// Horizontal lines to distinguish thread bars.
 					if(threadIndex > 0) {
-						Vec2 p = startPos;
+						Vec2 p = startPos + vec2(0,lineHeight);
 						float g = 0.8f;
 						dcRect(rect(p, vec2(bgRect.max.x, p.y+1)), vec4(g,g,g,1));
 					}
 
+					GraphSlot* graphTimerBuffer = ds->savedBuffer[cycleIndex];
+					int graphBufferIndex = ds->savedBufferCounts[cycleIndex];
+
 					for(int i = 0; i < graphBufferIndex; ++i) {
-						TimerSlot* slot = graphTimerBuffer + i;
-						if(slot->threadId != threadQueue->threadIds[threadIndex]) continue;
+						GraphSlot* slot = graphTimerBuffer + i;
+						if(slot->threadIndex != threadIndex) continue;
 
-						if(slot->type == TIMER_TYPE_BEGIN) {
 
-							Timings* t = timings + slot->timerIndex;
-							TimerInfo* tInfo = timer->timerInfos + slot->timerIndex;
+						Timings* t = timings + slot->timerIndex;
+						TimerInfo* tInfo = timer->timerInfos + slot->timerIndex;
 
-							// @Robustness: We cast u64 to float, still seems to work fine though.
-							float barLeft = mapRange(slot->cycles - baseCycleCount, startCycleCount, endCycleCount, 0, graphWidth);
-							float barRight = mapRange(slot->cycles - baseCycleCount + (u64)slot->size, startCycleCount, endCycleCount, 0, graphWidth);
+						// @Robustness: We cast u64 to float, still seems to work fine though.
 
-							barLeft = mapRange(barLeft, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
-							barRight = mapRange(barRight, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
+						u64 slotCycleStart = slot->cycles - baseCycleCount;
+						u64 slotCycleEnd = slotCycleStart + (u64)slot->size;
 
-							// Skip nonvisible bars.
-							if(!(barRight < bgRect.min.x || barLeft > bgRect.max.x)) {
-								if(barRight - barLeft < 1) barRight = barLeft + 1;
+						if(slot->type == 1 || slot->type == 3) {
+							slotCycleStart = startCycleCount;
+						} else if(slot->type == 2 || slot->type == 3) {
+							slotCycleEnd = endCycleCount;
+						}
 
-								bool textRectVisible = (barRight - barLeft) > 3;
+						uint slotSize = slotCycleEnd - slotCycleStart;
+						// if(slot->type == 2 || slot->type == 3) {
+						// 	slotSize = slot->size;
+						// }
 
-								float y = startPos.y+index*-lineHeight;
-								Rect r = rect(vec2(barLeft,y), vec2(barRight, y + lineHeight));
+						float barLeft = mapRange(slotCycleStart, startCycleCount, endCycleCount, 0, graphWidth);
+						float barRight = mapRange(slotCycleEnd, startCycleCount, endCycleCount, 0, graphWidth);
 
-								float cOff = slot->timerIndex/(float)timer->timerInfoCount;
-								Vec4 c = vec4(1-cOff, 0, cOff, 1);
+						barLeft = mapRange(barLeft, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
+						barRight = mapRange(barRight, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
 
-								if(gui->getMouseOver(gui->input.mousePos, r)) {
-									mouseHighlight = true;
-									hRect = r;
-									hc = c;
+						// Skip nonvisible bars.
+						if(!(barRight < bgRect.min.x || barLeft > bgRect.max.x)) {
+							if(barRight - barLeft < 1) barRight = barLeft + 1;
 
+							bool textRectVisible = (barRight - barLeft) > 3;
+
+							float y = startPos.y+slot->stackIndex*-lineHeight;
+							Rect r = rect(vec2(barLeft,y), vec2(barRight, y + lineHeight));
+
+							float cOff = slot->timerIndex/(float)timer->timerInfoCount;
+							Vec4 c = vec4(1-cOff, 0, cOff, 1);
+
+							if(gui->getMouseOver(gui->input.mousePos, r)) {
+								mouseHighlight = true;
+								hRect = r;
+								hc = c;
+
+								char* numberFormatted = getTStringDebug(30);
+								sprintfu64NumberDots(numberFormatted, "c", 30, 30, slotSize);
+								char* text = fillString("%s %s (%s)", tInfo->function, tInfo->name, numberFormatted);
+
+								hText = text;
+								highlightedIndex = slot->timerIndex;
+								hSlot = slot;
+							} else {
+								float g = 0.1f;
+								gui->drawRect(r, vec4(g,g,g,1));
+
+								if(textRectVisible) {
 									char* numberFormatted = getTStringDebug(30);
-									sprintfu64NumberDots(numberFormatted, "c", 30, 30, slot->size);
+									sprintfu64NumberDots(numberFormatted, "c", 30, 30, slotSize);
 									char* text = fillString("%s %s (%s)", tInfo->function, tInfo->name, numberFormatted);
 
-									hText = text;
-									highlightedIndex = slot->timerIndex;
-								} else {
-									float g = 0.1f;
-									gui->drawRect(r, vec4(g,g,g,1));
+									if(barLeft < bgRect.min.x) r.min.x = bgRect.min.x;
+									Rect textRect = rect(r.min+vec2(1,1), r.max-vec2(1,1));
 
-									if(textRectVisible) {
-										char* numberFormatted = getTStringDebug(30);
-										sprintfu64NumberDots(numberFormatted, "c", 30, 30, slot->size);
-										char* text = fillString("%s %s (%s)", tInfo->function, tInfo->name, numberFormatted);
+									if(slot->type == 1 || slot->type == 3) text = fillString("<-- %s", text);
+									if(slot->type == 2 || slot->type == 3) text = fillString("%s -->", text);
 
-										if(barLeft < bgRect.min.x) r.min.x = bgRect.min.x;
-										gui->drawTextBox(rect(r.min+vec2(1,1), r.max-vec2(1,1)), text, c);
-									}
+									gui->drawTextBox(textRect, text, c);
 								}
 							}
-
-							index++;
 						}
 
-						if(slot->type == TIMER_TYPE_END) {
-							index--;
-						}
 					}
 
-					startPos.y -= lineHeight*2;
+					if(threadIndex == 0) startPos.y -= lineHeight*3;
+					else startPos.y -= lineHeight*2;
 
 				}
 
 				if(mouseHighlight) {
+					if(hRect.min.x < bgRect.min.x) hRect.min.x = bgRect.min.x;
+
 					float tw = getTextDim(hText, gui->font).w + 2;
 					if(tw > rectGetDim(hRect).w) hRect.max.x = hRect.min.x + tw;
 
 					float g = 0.8f;
 					gui->drawRect(hRect, vec4(g,g,g,1));
 
-					if(hRect.min.x < bgRect.min.x) hRect.min.x = bgRect.min.x;
-					gui->drawTextBox(rect(hRect.min+vec2(1,1), hRect.max-vec2(1,1)), hText, hc);
+					Rect textRect = rect(hRect.min+vec2(1,1), hRect.max-vec2(1,1));
+
+					if(hSlot->type == 1 || hSlot->type == 3) hText = fillString("<-- %s", hText);
+					if(hSlot->type == 2 || hSlot->type == 3) hText = fillString("%s -->", hText);
+
+					gui->drawTextBox(textRect, hText, hc);
 				} else {
 					highlightedIndex = -1;
 				}

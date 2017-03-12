@@ -26,9 +26,15 @@ struct DebugState {
 	bool setPlay;
 	bool noCollating;
 	int lastCycleIndex;
-	TimerSlot* savedBuffer[120];
+	GraphSlot* savedBuffer[120];
 	int savedBufferCounts[120];
 	int savedBufferMax;
+
+	TimerSlot* threadSlotBuffer;
+	int threadSlotBufferSize;
+
+	GraphSlot graphSlots[16][8]; // threads, stackIndex
+	int graphSlotCount[16];
 
 	int lastBufferIndex;
 	u64 mainThreadSlotCycleRange[120][2];
