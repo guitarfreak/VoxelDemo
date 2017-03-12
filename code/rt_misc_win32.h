@@ -164,3 +164,12 @@ int threadQueueOpenJobs(ThreadQueue* queue) {
 	int result = queue->completionGoal - queue->completionCount;
 	return result;
 }
+
+int threadIdToIndex(ThreadQueue* queue, int id) {
+	int threadCount = queue->threadCount;
+	for(int i = 0; i < threadCount; i++) {
+		if(id == queue->threadIds[i]) return i;
+	}
+
+	return -1;
+}

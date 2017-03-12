@@ -48,7 +48,7 @@ struct Timings {
 	u64 cyclesOverHits;
 };
 
-struct Timer {
+struct  Timer {
 	bool isInitialised;
 	int timerInfoCount;
 	TimerInfo timerInfos[32]; // timerInfoCount

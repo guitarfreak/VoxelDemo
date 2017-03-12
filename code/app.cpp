@@ -231,6 +231,7 @@ struct AppData {
 
 	float dt;
 	float time;
+	int frameCount;
 
 	DrawCommandList commandList2d;
 	DrawCommandList commandList3d;
@@ -407,15 +408,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		ds->timer = getPStructDebug(Timer);
 		globalTimer = ds->timer;
-		int timerSlots = 5000;
+		int timerSlots = 50000;
 		ds->timer->bufferSize = timerSlots;
-		ds->timer->timerBuffer = (TimerSlot*)getPMemoryDebug(sizeof(TimerSlot) * timerSlots * 4);
+		ds->timer->timerBuffer = (TimerSlot*)getPMemoryDebug(sizeof(TimerSlot) * timerSlots);
 
-		int cycleCount = arrayCount(ds->timings);
-		ds->savedBufferMax = timerSlots * cycleCount;
-		for(int i = 0; i < cycleCount; i++) {
-			ds->savedBuffer[i] = (GraphSlot*)getPMemoryDebug(sizeof(GraphSlot) * timerSlots);
-		}
+		ds->savedBufferMax = 20000;
+		ds->savedBufferIndex = 0;
+		ds->savedBufferCount = 0;
+		ds->savedBuffer = (GraphSlot*)getPMemoryDebug(sizeof(GraphSlot) * ds->savedBufferMax);
+
 
 		ds->gui = getPStructDebug(Gui);
 		// gui->init(rectCenDim(vec2(0,1), vec2(300,800)));
@@ -721,6 +722,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		ad->dt = ds->dt;
 		ad->time = ds->time;
+
+		ad->frameCount++;
 	}
 
 	// Handle recording.
@@ -2346,8 +2349,20 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 		Vec2 tp = vec2(ad->wSettings.currentRes.x, 0) - offset;
 
+		static float timer = 0;
+		static int fpsCounter = 0;
+		static int fps = 0;
+		timer += ds->dt;
+		fpsCounter++;
+		if(timer >= 1.0f) {
+			fps = fpsCounter;
+			fpsCounter = 0;
+			timer = 0;
+		}
+
 		#define PVEC3(v) v.x, v.y, v.z
 		#define PVEC2(v) v.x, v.y
+		dcText(fillString("Fps  : %i", fps), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
 		dcText(fillString("Pos  : (%f,%f,%f)", PVEC3(ad->activeCam.pos)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
 		dcText(fillString("Pos  : (%f,%f,%f)", PVEC3(ad->selectedBlock)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
 		dcText(fillString("Look : (%f,%f,%f)", PVEC3(ad->activeCam.look)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
@@ -2516,41 +2531,22 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			zeroMemory(timings, timer->timerInfoCount*sizeof(Timings));
 			zeroMemory(statistics, timer->timerInfoCount*sizeof(Statistic));
 
-			// Save current timerBuffer.
-			{
-				// memCpy(ds->savedBuffer[cycleIndex], timer->timerBuffer + ds->lastBufferIndex, bufferIndex * sizeof(TimerSlot));
-				// ds->savedBufferCounts[cycleIndex] = bufferIndex - ds->lastBufferIndex;
-			}
-
 			ds->cycleIndex = newCycleIndex;
 
 			// Collate timing buffer.
 
-			GraphSlot* savedBuffer = ds->savedBuffer[cycleIndex];
-			int savedBufferCount = 0;
-
-			for(int threadIndex = 0; threadIndex < threadQueue->threadCount; threadIndex++) {
-				GraphSlot* graphSlots = ds->graphSlots[threadIndex];
-				int index = ds->graphSlotCount[threadIndex];
-
-				// One or more slots did not get resolved.
-				if(index > 0) {
-					for(int i = index; i > 0; i--) {
-						GraphSlot* slotWithoutStart = graphSlots + (index-1);
-						slotWithoutStart->type = 1;
-					}
-				}
-
-				u64 startCycleCount = 0;
-				u64 endCycleCount = 0;
+			// for(int threadIndex = 0; threadIndex < threadQueue->threadCount; threadIndex++) 
+			{
+				// GraphSlot* graphSlots = ds->graphSlots[threadIndex];
+				// int index = ds->graphSlotCount[threadIndex];
 
 				for(int i = ds->lastBufferIndex; i < bufferIndex; ++i) {
 					TimerSlot* slot = timer->timerBuffer + i;
-
-					if(slot->threadId != threadQueue->threadIds[threadIndex]) continue;
+					
+					int threadIndex = threadIdToIndex(threadQueue, slot->threadId);
 
 					if(slot->type == TIMER_TYPE_BEGIN) {
-						if(startCycleCount == 0) startCycleCount = slot->cycles;
+						int index = ds->graphSlotCount[threadIndex];
 
 						GraphSlot graphSlot;
 						graphSlot.threadIndex = threadIndex;
@@ -2558,49 +2554,32 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 						graphSlot.stackIndex = index;
 						graphSlot.cycles = slot->cycles;
 						graphSlot.type = 0;
-						graphSlots[index] = graphSlot;
+						ds->graphSlots[threadIndex][index] = graphSlot;
 
-						index++;
+						ds->graphSlotCount[threadIndex]++;
 					} else {
-						endCycleCount = slot->cycles;
-
-						index--;
+						ds->graphSlotCount[threadIndex]--;
+						int index = ds->graphSlotCount[threadIndex];
 						if(index < 0) index = 0; // @Hack, to keep things running.
 
-						graphSlots[index].size = slot->cycles - graphSlots[index].cycles;
-						savedBuffer[savedBufferCount++] = graphSlots[index];
+						ds->graphSlots[threadIndex][index].size = slot->cycles - ds->graphSlots[threadIndex][index].cycles;
+						ds->savedBuffer[ds->savedBufferIndex] = ds->graphSlots[threadIndex][index];
+						ds->savedBufferIndex = (ds->savedBufferIndex+1)%ds->savedBufferMax;
+						ds->savedBufferCount = clampMax(ds->savedBufferCount + 1, ds->savedBufferMax);
 
-						Timings* timing = timings + graphSlots[index].timerIndex;
-						timing->cycles += graphSlots[index].size;
+
+						Timings* timing = timings + ds->graphSlots[threadIndex][index].timerIndex;
+						timing->cycles += ds->graphSlots[threadIndex][index].size;
 						timing->hits++;
 					}
 				}
 
-				// One or more slots did not get resolved.
-				if(index > 0) {
-					for(int i = index; i > 0; i--) {
-						GraphSlot* slot = graphSlots + (index-1);
-						if(slot->type == 1) slot->type = 3;
-						else slot->type = 2;
 
-						// slot.size = getTimestamp() - slot.cycles;
 
-						GraphSlot slotWithoutEnd = *slot;
-						// slotWithoutEnd.size = getTimestamp() - slot->cycles;
-						slotWithoutEnd.size = 1234567;
-						savedBuffer[savedBufferCount++] = slotWithoutEnd;
-					}
-				}
-
-				ds->graphSlotCount[threadIndex] = index;
-
-				if(threadIndex == 0) {
-					ds->mainThreadSlotCycleRange[cycleIndex][0] = startCycleCount;
-					ds->mainThreadSlotCycleRange[cycleIndex][1] = endCycleCount;
-				}
+				// ds->graphSlotCount[threadIndex] = index;
 			}
 
-			ds->savedBufferCounts[cycleIndex] = savedBufferCount;
+			// ds->savedBufferCounts[cycleIndex] = savedBufferCount;
 
 			for(int i = 0; i < timer->timerInfoCount; i++) {
 				Timings* t = timings + i;
@@ -2621,12 +2600,20 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		}
 	}
 
+	for(int i = 0; i < ds->savedBufferCount; i++) {
+		if(ds->savedBuffer[(ds->savedBufferIndex + i)%ds->savedBufferMax].type != 0) {
+			int stop = 234;
+		}
+	}
+
 	ds->lastBufferIndex = bufferIndex;
 
 	if(threadsFinished) {
 		timer->bufferIndex = 0;
 		ds->lastBufferIndex = 0;
 	}
+
+	assert(timer->bufferIndex < timer->bufferSize);
 
 	//
 	// Draw timing info.
@@ -2797,27 +2784,44 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 			float graphWidth = rectGetDim(bgRect).w;
 
-			static Vec2 cp = vec2(graphWidth/2,0);
-			float zoomInit = 1.0001f;
-			static float zoom = zoomInit; // To see the most right bar.
+			Vec2 camPosInit = vec2(graphWidth/2,0);
+			float zoomInit = 1.0001f; // To see the most right bar.
+			if(init) {
+				ds->camPos = camPosInit;
+				ds->zoom = zoomInit; 
+			}
 
-			cp.x -= dragDelta.x * ((graphWidth*zoom)/graphWidth);
+
+			ds->camPos.x -= dragDelta.x * ((graphWidth*ds->zoom)/graphWidth);
 
 			gui->heightPop();
 
 			{
-				// u64 baseCycleCount = graphTimerBuffer[0].cycles;
-				u64 baseCycleCount = ds->mainThreadSlotCycleRange[cycleIndex][0];
+				GraphSlot* graphTimerBuffer = ds->savedBuffer;
+				int graphTimerBufferIndex = ds->savedBufferIndex;
+				int graphTimerBufferMax = ds->savedBufferMax;
+				int graphTimerBufferCount = ds->savedBufferCount;
+
+				// int lastBufferIndex = mod(ds->savedBufferIndex - 1, ds->savedBufferMax);
+				// int firstBufferIndex = mod(ds->savedBufferIndex - 1 - 3000, ds->savedBufferMax);
+
+				int firstBufferIndex = mod(ds->savedBufferIndex, ds->savedBufferMax);
+				int lastBufferIndex = mod(ds->savedBufferIndex + 5000, ds->savedBufferMax);
+
+				GraphSlot firstSlot = ds->savedBuffer[firstBufferIndex];
+				GraphSlot lastSlot = ds->savedBuffer[lastBufferIndex];
+
+				u64 baseCycleCount = firstSlot.cycles;
 				u64 startCycleCount = 0;
 				u64 endCycleCount = cyclesPerFrame;
-				u64 furthestCycleCount = ds->mainThreadSlotCycleRange[cycleIndex][1] - baseCycleCount;
+				u64 furthestCycleCount = lastSlot.cycles + lastSlot.size - baseCycleCount;
 				float furthestRightSlot = mapRange(furthestCycleCount, startCycleCount, endCycleCount, 0, graphWidth);
 
 				bool extendedView = endCycleCount < furthestCycleCount;
 
 				float oldWidth = -1;
 				if(gui->input.mouseWheel) {
-					oldWidth = graphWidth*zoom;
+					oldWidth = graphWidth*ds->zoom;
 
 					float wheel = gui->input.mouseWheel;
 
@@ -2827,30 +2831,31 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 					if(input->keysDown[KEYCODE_SHIFT] && input->keysDown[KEYCODE_CTRL]) 
 						offset = wheel < 0 ? 1.4f : 0.6f;
 
-					zoom *= offset;
+					ds->zoom *= offset;
+					ds->zoom = clampMin(ds->zoom, 0.00001f);
 				}
 
-				// zoom = clampMax(zoom, 4.0f);
-				if(extendedView) zoom = clampMax(zoom, furthestRightSlot / graphWidth);
-				else zoom = clampMax(zoom, 1);
+				// ds->zoom = clampMax(ds->zoom, 4.0f);
+				if(extendedView) ds->zoom = clampMax(ds->zoom, furthestRightSlot / graphWidth);
+				else ds->zoom = clampMax(ds->zoom, 1);
 
 				if(gui->input.mouseWheel) {
-					float addedWidth = graphWidth*zoom - oldWidth;
+					float addedWidth = graphWidth*ds->zoom - oldWidth;
 					float mouseZoomOffset = mapRange(input->mousePos.x, bgRect.min.x, bgRect.max.x, -1, 1);
-					cp.x -= (addedWidth/2)*mouseZoomOffset;
+					ds->camPos.x -= (addedWidth/2)*mouseZoomOffset;
 				}
 
-				cp.x = clampMin(cp.x, (graphWidth*zoom)/2);
+				ds->camPos.x = clampMin(ds->camPos.x, (graphWidth*ds->zoom)/2);
 
 				if(!extendedView) {
-					cp.x = clampMax(cp.x, -(graphWidth*zoom)/2 + graphWidth);
+					ds->camPos.x = clampMax(ds->camPos.x, -(graphWidth*ds->zoom)/2 + graphWidth);
 				} else {
-					cp.x = clampMax(cp.x, -(graphWidth*zoom)/2 + furthestRightSlot);
+					ds->camPos.x = clampMax(ds->camPos.x, -(graphWidth*ds->zoom)/2 + furthestRightSlot);
 				}
 
 
-				float orthoLeft = cp.x - (graphWidth*zoom)/2;
-				float orthoRight = cp.x + (graphWidth*zoom)/2;
+				float orthoLeft = ds->camPos.x - (graphWidth*ds->zoom)/2;
+				float orthoRight = ds->camPos.x + (graphWidth*ds->zoom)/2;
 
 				// Header.
 				{
@@ -2862,16 +2867,22 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 					float g = 0.7f;
 					float div = 4;
-					float cyclesInWidth = mapRange(cyclesPerFrame*div*2, startCycleCount, endCycleCount, 0, graphWidth);
+					float cyclesInWidth = mapRange(cyclesPerFrame, startCycleCount, endCycleCount, 0, graphWidth);
 					float heightMod = 1.3f;
 					float heightSub = 0.10f;
 					
-					float orthoWidth = graphWidth*zoom;
+					float orthoWidth = graphWidth*ds->zoom;
 
 					float scaleToGraphwidth = (float)ws->currentRes.w/graphWidth;
 					float spreadWidthMod = 0.6f * scaleToGraphwidth;
 					
 					float zoomBarInterval = cyclesInWidth;
+
+					// Find the right zoom level by searching up and down.
+					while(zoomBarInterval/orthoWidth < spreadWidthMod) {
+						zoomBarInterval *= div;
+					}
+
 					while(zoomBarInterval/orthoWidth > spreadWidthMod) {
 						zoomBarInterval /= div;
 						heightMod -= heightSub;
@@ -2948,6 +2959,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				GraphSlot* hSlot;
 
 				startPos -= vec2(0, lineHeight);
+				
 				for(int threadIndex = 0; threadIndex < threadQueue->threadCount; threadIndex++) {
 
 					// Horizontal lines to distinguish thread bars.
@@ -2957,13 +2969,10 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 						dcRect(rect(p, vec2(bgRect.max.x, p.y+1)), vec4(g,g,g,1));
 					}
 
-					GraphSlot* graphTimerBuffer = ds->savedBuffer[cycleIndex];
-					int graphBufferIndex = ds->savedBufferCounts[cycleIndex];
+					for(int i = 0; i < graphTimerBufferCount; ++i) {
 
-					for(int i = 0; i < graphBufferIndex; ++i) {
-						GraphSlot* slot = graphTimerBuffer + i;
+						GraphSlot* slot = graphTimerBuffer + ((graphTimerBufferIndex+i)%graphTimerBufferMax);
 						if(slot->threadIndex != threadIndex) continue;
-
 
 						Timings* t = timings + slot->timerIndex;
 						TimerInfo* tInfo = timer->timerInfos + slot->timerIndex;
@@ -2973,11 +2982,11 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 						u64 slotCycleStart = slot->cycles - baseCycleCount;
 						u64 slotCycleEnd = slotCycleStart + (u64)slot->size;
 
-						if(slot->type == 1 || slot->type == 3) {
-							slotCycleStart = startCycleCount;
-						} else if(slot->type == 2 || slot->type == 3) {
-							slotCycleEnd = endCycleCount;
-						}
+						// if(slot->type == 1 || slot->type == 3) {
+						// 	slotCycleStart = startCycleCount;
+						// } else if(slot->type == 2 || slot->type == 3) {
+						// 	slotCycleEnd = endCycleCount;
+						// }
 
 						uint slotSize = slotCycleEnd - slotCycleStart;
 						// if(slot->type == 2 || slot->type == 3) {
@@ -3065,11 +3074,11 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			gui->div(0.1f,0); 
 
 			if(gui->button("Reset")) {
-				cp = vec2(graphWidth/2,0);
-				zoom = zoomInit; // To see the most right bar.
+				ds->camPos = vec2(graphWidth/2,0);
+				ds->zoom = zoomInit; // To see the most right bar.
 			}
 
-			gui->label(fillString("Cam: %f, Zoom: %f",cp.x, zoom));
+			gui->label(fillString("Cam: %f, Zoom: %f",ds->camPos.x, ds->zoom));
 		}
 
 		gui->end();

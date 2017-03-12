@@ -26,19 +26,19 @@ struct DebugState {
 	bool setPlay;
 	bool noCollating;
 	int lastCycleIndex;
-	GraphSlot* savedBuffer[120];
-	int savedBufferCounts[120];
+	GraphSlot* savedBuffer;
+	int savedBufferIndex;
 	int savedBufferMax;
-
-	TimerSlot* threadSlotBuffer;
-	int threadSlotBufferSize;
+	int savedBufferCount;
 
 	GraphSlot graphSlots[16][8]; // threads, stackIndex
 	int graphSlotCount[16];
 
 	int lastBufferIndex;
-	u64 mainThreadSlotCycleRange[120][2];
 	int graphSortingIndex;
+
+	Vec2 camPos;
+	float zoom;
 
 	GuiInput gInput;
 	Gui* gui;
