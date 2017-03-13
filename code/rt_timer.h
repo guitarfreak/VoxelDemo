@@ -34,7 +34,6 @@ struct TimerSlot {
 #pragma pack(pop)
 
 struct GraphSlot {
-	char type;
 	char threadIndex;
 	char timerIndex;
 	char stackIndex;

@@ -703,7 +703,7 @@ struct Gui {
 		return active;
 	}
 
-	bool button(char* text, int switcher = 0, Vec4 bgColor = vec4(0,0,0,0), Vec4 shadowColor = vec4(0,0,0,0)) {
+	bool button(char* text, int switcher = 0, int align = 1, Vec4 bgColor = vec4(0,0,0,0), Vec4 shadowColor = vec4(0,0,0,0)) {
 		if(!pre()) return false;
 
 		Rect region = getCurrentRegion();
@@ -719,7 +719,7 @@ struct Gui {
 		}
 
 		drawRect(region, finalColor);
-		drawText(text, 1, shadowColor);
+		drawText(text, align, shadowColor);
 
 		post();
 		return active;
@@ -1106,7 +1106,7 @@ void guiSettings(Gui* gui) {
 			gui->div(divWidths, arrayCount(divWidths)); 
 
 			gui->label(guiColorStrings[i],0); 
-			if(gui->button("", 0, gui->colors.e[i]) && !main) {
+			if(gui->button("", 0, 1, gui->colors.e[i]) && !main) {
 				gui->colors.e[i] = vec4(0,0,0,1);
 			}
 		gui->heightPop();

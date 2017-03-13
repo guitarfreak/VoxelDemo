@@ -4,6 +4,9 @@ const int INTERNAL_TEXTURE_FORMAT = USE_SRGB ? GL_SRGB8_ALPHA8 : GL_RGBA8;
 
 #define editor_executable_path "C:\\Program Files\\Sublime Text 3\\sublime_text.exe"
 
+#define HOTRELOAD_SHADERS 0
+
+
 //
 
 const char* watchFolders[] = {
@@ -177,8 +180,6 @@ enum UniformType {
 	UNIFORM_TYPE_SIZE,
 };
 
-#define HOTRELOAD_SHADERS 0
-
 #define GLSL(src) "#version 430\n \
 	#extension GL_ARB_bindless_texture 			: enable\n \
 	#extension GL_ARB_shading_language_include 	: enable\n \
@@ -286,6 +287,10 @@ enum QuadUniforms {
 	QUAD_UNIFORM_MOD,
 	QUAD_UNIFORM_COLOR,
 	QUAD_UNIFORM_CAMERA,
+	
+	QUAD_UNIFORM_PRIMITIVE_MODE,
+	QUAD_UNIFORM_VERTS,
+
 	QUAD_UNIFORM_SIZE,
 };
 
@@ -295,6 +300,9 @@ ShaderUniformType quadShaderUniformType[] = {
 	{UNIFORM_TYPE_VEC4, "mod"},
 	{UNIFORM_TYPE_VEC4, "setColor"},
 	{UNIFORM_TYPE_VEC4, "camera"},
+
+	{UNIFORM_TYPE_INT, "primitiveMode"},
+	{UNIFORM_TYPE_VEC2, "verts"},
 };
 
 const char* vertexShaderQuad = GLSL (
@@ -318,18 +326,36 @@ const char* vertexShaderQuad = GLSL (
 	uniform vec4 setColor;
 	uniform vec4 camera; // left bottom right top
 
+	uniform bool primitiveMode = false;
+	uniform vec2 verts[32];
+
 	out gl_PerVertex { vec4 gl_Position; };
-	// smooth out vec2 uv;
 	smooth out vec3 uv;
 	out vec4 Color;
 
 	void main() {
-		ivec2 pos = quad_uv[gl_VertexID];
-		uv = vec3(setUV[pos.x], setUV[2 + pos.y], texZ);
-		Color = setColor;
-		vec2 model = quad[gl_VertexID]*mod.zw + mod.xy;
-		vec2 view = model/(camera.zw*0.5f) - camera.xy/(camera.zw*0.5f);
-		gl_Position = vec4(view, 0, 1);
+
+		if(primitiveMode) {
+			uv = vec3(0,0,-1);
+			Color = setColor;
+
+			vec2 model = verts[gl_VertexID];
+			vec2 view = model/(camera.zw*0.5f) - camera.xy/(camera.zw*0.5f);
+			gl_Position = vec4(view, 0, 1);
+
+		} else {
+			
+			ivec2 pos = quad_uv[gl_VertexID];
+			uv = vec3(setUV[pos.x], setUV[2 + pos.y], texZ);
+			vec2 v = quad[gl_VertexID];
+
+			Color = setColor;
+
+			vec2 model = v*mod.zw + mod.xy;
+			vec2 view = model/(camera.zw*0.5f) - camera.xy/(camera.zw*0.5f);
+			gl_Position = vec4(view, 0, 1);
+		}
+
 	}
 );
 

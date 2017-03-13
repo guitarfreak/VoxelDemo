@@ -97,6 +97,7 @@ enum DrawListCommand {
 	Draw_Command_Disable_Type,
 	Draw_Command_Cube_Type,
 	Draw_Command_Line_Type,
+	Draw_Command_Line2d_Type,
 	Draw_Command_Quad_Type,
 	Draw_Command_Rect_Type,
 	Draw_Command_Text_Type,
@@ -128,6 +129,11 @@ struct Draw_Command_Cube {
 
 struct Draw_Command_Line {
 	Vec3 p0, p1;
+	Vec4 color;
+};
+
+struct Draw_Command_Line2d {
+	Vec2 p0, p1;
 	Vec4 color;
 };
 
@@ -196,6 +202,14 @@ void dcCube(Vec3 trans, Vec3 scale, Vec4 color, float degrees = 0, Vec3 rot = ve
 
 void dcLine(Vec3 p0, Vec3 p1, Vec4 color, DrawCommandList* drawList = 0) {
 	PUSH_DRAW_COMMAND(Line, Line);
+
+	command->p0 = p0;
+	command->p1 = p1;
+	command->color = color;
+}
+
+void dcLine2d(Vec2 p0, Vec2 p1, Vec4 color, DrawCommandList* drawList = 0) {
+	PUSH_DRAW_COMMAND(Line2d, Line2d);
 
 	command->p0 = p0;
 	command->p1 = p1;
@@ -760,7 +774,7 @@ void getUniform(uint shaderId, int shaderStage, uint uniformId, float* data) {
 
 
 void drawRect(Rect r, Rect uv, Vec4 color, int texture, float texZ = -1) {	
-	// TIMER_BLOCK();
+	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_PRIMITIVE_MODE, 0);
 
 	Rect cd = rectGetCenDim(r);
 
@@ -1216,6 +1230,20 @@ void executeCommandList(DrawCommandList* list, bool print = false, bool skipStri
 			case Draw_Command_Line_Type: {
 				dcGetStructAndIncrement(Line);
 				drawLine(dc.p0, dc.p1, dc.color);
+			} break;
+
+			case Draw_Command_Line2d_Type: {
+				dcGetStructAndIncrement(Line2d);
+
+				Vec2 verts[] = {dc.p0, dc.p1};
+				pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_VERTS, verts, 2);
+				pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_PRIMITIVE_MODE, 1);
+				pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_COLOR, colorSRGB(dc.color).e);
+
+				uint tex[1] = {getTexture(TEXTURE_WHITE)->id};
+				glBindTextures(0,1,tex);
+
+				glDrawArraysInstancedBaseInstance(GL_LINES, 0, 2, 1, 0);
 			} break;
 
 			case Draw_Command_Quad_Type: {

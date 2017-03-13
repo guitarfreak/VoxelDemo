@@ -103,6 +103,10 @@ Changing course for now:
  * Minimizing window bug.
  * Scroll left and right up to furthest slot. (Or the right frame.)
  * TimerInfo should not vanish if we reload.
+ * Changing route: replace the frame buffer graph with a seemless graph.
+ * Threading in timerblocks not working.
+   * Use thread id information that's already in the timerinfo.
+ + Add primitive drawing. (Lines for example.)
 
  - Clean up gui.
  - Look at font drawing.
@@ -112,14 +116,11 @@ Changing course for now:
    - Add scaling: 3m -> 4000k -> 4000000
    - Add commas: 3,000,000, or spaces: 3 000 000
  - Add instant screen string debug push to debugstate.
-
- - Threading in timerblocks not working.
-   - Use thread id information that's already in the timerinfo.
  - Add some kind of timer for the debug processing to get a hint about timer collating expenses.
  - Graph about relative timings.
   - Averages should only count when the timerblock actually gets hit.
 
- - Changing route: replace the frame buffer graph with a seemless graph.
+ - 2d drawing is messed up. Lines with 1 width have 2 width.
 
 //-------------------------------------
 //               BUGS
@@ -435,7 +436,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ds->showStats = true;
 		ds->showConsole = true;
 		ds->showHud = true;
-		ds->guiAlpha = 0.95f;
+		// ds->guiAlpha = 0.95f;
+		ds->guiAlpha = 1;
 
 		TIMER_BLOCK_NAMED("Init");
 
@@ -2216,6 +2218,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
+
+
 	// Render.
 	{
 		TIMER_BLOCK_NAMED("Render");
@@ -2239,7 +2243,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		bindFrameBuffer(FRAMEBUFFER_Debug);
 		glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		glBlendEquationSeparate(GL_FUNC_ADD, GL_MAX);
-
 		// Skipping strings for now when reloading because hardcoded ones get a new memory address after changing the dll.
 		executeCommandList(&ds->commandListDebug, false, reload);
 
@@ -2249,6 +2252,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// glBlendEquation(GL_FUNC_ADD);
 		drawRect(rect(0, -ws->currentRes.h, ws->currentRes.w, 0), rect(0,1,1,0), vec4(1,1,1,ds->guiAlpha), 
 		         getFrameBuffer(FRAMEBUFFER_Debug)->colorSlot[0]->id);
+
 
 
 		#if USE_SRGB 
@@ -2553,7 +2557,6 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 						graphSlot.timerIndex = slot->timerIndex;
 						graphSlot.stackIndex = index;
 						graphSlot.cycles = slot->cycles;
-						graphSlot.type = 0;
 						ds->graphSlots[threadIndex][index] = graphSlot;
 
 						ds->graphSlotCount[threadIndex]++;
@@ -2573,8 +2576,6 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 						timing->hits++;
 					}
 				}
-
-
 
 				// ds->graphSlotCount[threadIndex] = index;
 			}
@@ -2597,12 +2598,6 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 				endStatistic(stat);
 			}
-		}
-	}
-
-	for(int i = 0; i < ds->savedBufferCount; i++) {
-		if(ds->savedBuffer[(ds->savedBufferIndex + i)%ds->savedBufferMax].type != 0) {
-			int stop = 234;
 		}
 	}
 
@@ -2645,7 +2640,8 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		{
 			int barWidth = 1;
 			int barCount = arrayCount(ds->timings);
-			float sectionWidths[] = {0,0,0,0,0,0,0,0, barWidth*barCount};
+			float sectionWidths[] = {0,0.2f,0,0,0,0,0,0, barWidth*barCount};
+			// float sectionWidths[] = {0.1f,0,0.1f,0,0.05f,0,0,0.1f, barWidth*barCount};
 
 			char* headers[] = {"File", "Function", "Description", "Cycles", "Hits", "C/H", "Avg. Cycl.", "Total Time", "Graphs"};
 			gui->div(sectionWidths, arrayCount(sectionWidths));
@@ -2656,7 +2652,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				if(i == arrayCount(sectionWidths)-1) textSectionEnd = gui->getCurrentRegion().max.x;
 
 				Vec4 buttonColor = vec4(gui->colors.regionColor.rgb, 0.5f);
-				if(gui->button(headers[i], 0, buttonColor, vec4(0,0,0,1))) {
+				if(gui->button(headers[i], 0, 1, buttonColor, vec4(0,0,0,1))) {
 					if(abs(ds->graphSortingIndex) == i) ds->graphSortingIndex *= -1;
 					else ds->graphSortingIndex = i;
 				}
@@ -2703,7 +2699,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 				buffer = fillString("%s", tInfo->function);
 				Vec4 buttonColor = vec4(gui->colors.regionColor.rgb, 0.2f);
-				if(gui->button(buffer,0, buttonColor)) {
+				if(gui->button(buffer,0, 0, buttonColor)) {
 					char* command = fillString("%s %s:%i", editor_executable_path, tInfo->file, tInfo->line);
 					shellExecuteNoWindow(command);
 				}
@@ -2757,8 +2753,13 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			}
 		}
 
-		{
+		if(init) ds->graphMode = true;
 
+		gui->switcher("Timeline/MinMax", &ds->graphMode);
+
+		// Timeline graph.
+		if(ds->graphMode)
+		{
 			gui->empty();
 			Rect cyclesRect = gui->getCurrentRegion();
 			gui->heightPush(1.5f);
@@ -2789,8 +2790,8 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			if(init) {
 				ds->camPos = camPosInit;
 				ds->zoom = zoomInit; 
+				ds->graphSizeMod = 1;
 			}
-
 
 			ds->camPos.x -= dragDelta.x * ((graphWidth*ds->zoom)/graphWidth);
 
@@ -2802,16 +2803,32 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				int graphTimerBufferMax = ds->savedBufferMax;
 				int graphTimerBufferCount = ds->savedBufferCount;
 
-				// int lastBufferIndex = mod(ds->savedBufferIndex - 1, ds->savedBufferMax);
-				// int firstBufferIndex = mod(ds->savedBufferIndex - 1 - 3000, ds->savedBufferMax);
+				int firstBufferIndex = graphTimerBufferIndex;
+				int lastBufferIndex = mod(graphTimerBufferIndex - 1, graphTimerBufferIndex);
+				int count = 0;
+				GraphSlot lastSlot = graphTimerBuffer[lastBufferIndex];
+				GraphSlot firstSlot = graphTimerBuffer[firstBufferIndex];
 
-				int firstBufferIndex = mod(ds->savedBufferIndex, ds->savedBufferMax);
-				int lastBufferIndex = mod(ds->savedBufferIndex + 5000, ds->savedBufferMax);
+				float targetCycles = cyclesPerFrame * ds->graphSizeMod;
+				// float targetCycles = cyclesPerFrame;
+				float maxCycles = lastSlot.cycles + lastSlot.size - firstSlot.cycles;
+				clampMax(&targetCycles, maxCycles);
 
-				GraphSlot firstSlot = ds->savedBuffer[firstBufferIndex];
-				GraphSlot lastSlot = ds->savedBuffer[lastBufferIndex];
+				u64 baseCycleCount = lastSlot.cycles + lastSlot.size - targetCycles;
 
-				u64 baseCycleCount = firstSlot.cycles;
+				// Searching backwards until we find our cycle target.
+				for(int i = 0; i < graphTimerBufferCount; i++) {
+					int slotIndex = mod(lastBufferIndex-i, graphTimerBufferMax);
+					GraphSlot* slot = graphTimerBuffer + slotIndex;
+					if(slot->cycles < baseCycleCount) {
+						firstBufferIndex = mod(slotIndex+1, graphTimerBufferMax); // Get first slot that is inside our region.
+						firstSlot = graphTimerBuffer[firstBufferIndex];
+						break;
+					}
+					count++;
+				}
+
+				// u64 baseCycleCount = firstSlot.cycles;
 				u64 startCycleCount = 0;
 				u64 endCycleCount = cyclesPerFrame;
 				u64 furthestCycleCount = lastSlot.cycles + lastSlot.size - baseCycleCount;
@@ -2845,6 +2862,9 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 					ds->camPos.x -= (addedWidth/2)*mouseZoomOffset;
 				}
 
+				float orthoMin = (graphWidth*ds->zoom)/2 - (graphWidth*ds->zoom)/2;
+				float orthoMax = -(graphWidth*ds->zoom)/2 + furthestRightSlot + (graphWidth*ds->zoom)/2;
+
 				ds->camPos.x = clampMin(ds->camPos.x, (graphWidth*ds->zoom)/2);
 
 				if(!extendedView) {
@@ -2852,7 +2872,6 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				} else {
 					ds->camPos.x = clampMax(ds->camPos.x, -(graphWidth*ds->zoom)/2 + furthestRightSlot);
 				}
-
 
 				float orthoLeft = ds->camPos.x - (graphWidth*ds->zoom)/2;
 				float orthoRight = ds->camPos.x + (graphWidth*ds->zoom)/2;
@@ -2890,6 +2909,21 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 					heightMod = clampMax(heightMod, 1);
 					heightMod = clampMin(heightMod, 0.2f);
+
+					{
+						float viewAreaLeft = mapRange(orthoLeft, orthoMin, orthoMax, cyclesRect.min.x, cyclesRect.max.x);
+						float viewAreaRight = mapRange(orthoRight, orthoMin, orthoMax, cyclesRect.min.x, cyclesRect.max.x);
+
+						float viewSize = viewAreaRight - viewAreaLeft;
+						float viewMid = viewAreaRight + viewSize/2;
+						float viewMinSize = 2;
+						if(viewSize < viewMinSize) {
+							viewAreaLeft = viewMid - viewMinSize*0.5;
+							viewAreaRight = viewMid + viewMinSize*0.5;
+						}
+
+						dcRect(rect(viewAreaLeft, cyclesRect.min.y, viewAreaRight, cyclesRect.max.y), vec4(1,1,1,0.03f));
+					}
 
 					float pos = roundMod(orthoLeft, zoomBarInterval);
 					while(pos < orthoRight + zoomBarInterval) {
@@ -2959,6 +2993,16 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				GraphSlot* hSlot;
 
 				startPos -= vec2(0, lineHeight);
+
+				int swapTimerIndex = 0;
+				for(int i = 0; i < timer->timerInfoCount; i++) {
+					if(!timer->timerInfos[i].initialised) continue;
+
+					if(strCompare(timer->timerInfos[i].name, "Swap")) {
+						swapTimerIndex = i;
+						break;
+					}
+				}
 				
 				for(int threadIndex = 0; threadIndex < threadQueue->threadCount; threadIndex++) {
 
@@ -2969,35 +3013,31 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 						dcRect(rect(p, vec2(bgRect.max.x, p.y+1)), vec4(g,g,g,1));
 					}
 
-					for(int i = 0; i < graphTimerBufferCount; ++i) {
-
-						GraphSlot* slot = graphTimerBuffer + ((graphTimerBufferIndex+i)%graphTimerBufferMax);
+					for(int i = 0; i < count; ++i) {
+						GraphSlot* slot = graphTimerBuffer + ((firstBufferIndex+i)%graphTimerBufferMax);
 						if(slot->threadIndex != threadIndex) continue;
 
 						Timings* t = timings + slot->timerIndex;
 						TimerInfo* tInfo = timer->timerInfos + slot->timerIndex;
 
-						// @Robustness: We cast u64 to float, still seems to work fine though.
+
 
 						u64 slotCycleStart = slot->cycles - baseCycleCount;
 						u64 slotCycleEnd = slotCycleStart + (u64)slot->size;
-
-						// if(slot->type == 1 || slot->type == 3) {
-						// 	slotCycleStart = startCycleCount;
-						// } else if(slot->type == 2 || slot->type == 3) {
-						// 	slotCycleEnd = endCycleCount;
-						// }
-
 						uint slotSize = slotCycleEnd - slotCycleStart;
-						// if(slot->type == 2 || slot->type == 3) {
-						// 	slotSize = slot->size;
-						// }
 
+						// @Robustness: We cast u64 to float, still seems to work fine though.
 						float barLeft = mapRange(slotCycleStart, startCycleCount, endCycleCount, 0, graphWidth);
 						float barRight = mapRange(slotCycleEnd, startCycleCount, endCycleCount, 0, graphWidth);
 
 						barLeft = mapRange(barLeft, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
 						barRight = mapRange(barRight, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
+
+						// Draw vertical line at swap boundaries.
+						if(slot->timerIndex == swapTimerIndex) {
+							float g = 0.8f;
+							dcRect(rect(barRight, bgRect.min.y, barRight+1, bgRect.max.y), vec4(g,g,g,1));
+						}
 
 						// Skip nonvisible bars.
 						if(!(barRight < bgRect.min.x || barLeft > bgRect.max.x)) {
@@ -3035,9 +3075,6 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 									if(barLeft < bgRect.min.x) r.min.x = bgRect.min.x;
 									Rect textRect = rect(r.min+vec2(1,1), r.max-vec2(1,1));
 
-									if(slot->type == 1 || slot->type == 3) text = fillString("<-- %s", text);
-									if(slot->type == 2 || slot->type == 3) text = fillString("%s -->", text);
-
 									gui->drawTextBox(textRect, text, c);
 								}
 							}
@@ -3061,24 +3098,116 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 					Rect textRect = rect(hRect.min+vec2(1,1), hRect.max-vec2(1,1));
 
-					if(hSlot->type == 1 || hSlot->type == 3) hText = fillString("<-- %s", hText);
-					if(hSlot->type == 2 || hSlot->type == 3) hText = fillString("%s -->", hText);
-
 					gui->drawTextBox(textRect, hText, hc);
 				} else {
 					highlightedIndex = -1;
+
+
 				}
 
 			}
 
-			gui->div(0.1f,0); 
+			gui->div(0.1f, 0.3f, 0); 
 
 			if(gui->button("Reset")) {
 				ds->camPos = vec2(graphWidth/2,0);
 				ds->zoom = zoomInit; // To see the most right bar.
 			}
 
+			gui->slider(&ds->graphSizeMod, 1, 60);
+
 			gui->label(fillString("Cam: %f, Zoom: %f",ds->camPos.x, ds->zoom));
+		}
+		else 
+		{
+			float timerInfoMaxStringSize = 0;
+
+			int cycleCount = arrayCount(ds->timings);
+			int timerCount = ds->timer->timerInfoCount;
+			for(int timerIndex = 0; timerIndex < timerCount; timerIndex++) {
+				TimerInfo* info = &timer->timerInfos[timerIndex];
+				if(!info->initialised) continue;
+
+				char* text = strLen(info->name) > 0 ? info->name : info->function;
+				timerInfoMaxStringSize = max(getTextDim(text, gui->font).w, timerInfoMaxStringSize);
+			}
+
+
+			float lineHeight = gui->getDefaultHeight();
+
+			gui->heightPush(lineHeight * 25);
+			gui->empty();
+			Rect region = gui->getCurrentRegion();
+			gui->heightPop();
+			gui->scissorPush(region);
+
+			float rLeft = region.min.x;
+			float rRight = region.max.x;
+			float rBottom = region.min.y;
+			float rTop = region.max.y;
+			float rWidth = rectGetDim(region).w;
+
+			dcState(STATE_LINEWIDTH, 2);
+
+			static float zoom = 1;
+
+			float wheel = gui->input.mouseWheel;
+			if(wheel) {
+				float offset = wheel < 0 ? 1.1f : 0.9f;
+				if(!input->keysDown[KEYCODE_SHIFT] && input->keysDown[KEYCODE_CTRL]) 
+					offset = wheel < 0 ? 1.2f : 0.8f;
+				if(input->keysDown[KEYCODE_SHIFT] && input->keysDown[KEYCODE_CTRL]) 
+					offset = wheel < 0 ? 1.4f : 0.6f;
+
+				zoom *= offset;
+				zoom = clampMin(zoom, 0.00001f);
+			}
+
+			u64 cyclesTop = 100000 * zoom;
+			u64 cyclesBottom = 0;
+
+			for(int timerIndex = 0; timerIndex < timerCount; timerIndex++) {
+				TimerInfo* info = &timer->timerInfos[timerIndex];
+				if(!info->initialised) continue;
+
+				Statistic* stat = &ds->statistics[cycleIndex][timerIndex];
+				if(stat->avg == 0) continue;
+
+
+				float s = timerIndex%(timerCount/2) / ((float)timerCount/2);
+				float h = timerIndex < timerCount/2 ? 0.1f : -0.1f;
+
+				Vec4 color = vec4(0,0,0,1);
+				hslToRgb(color.e, 360*s, 0.5f, 0.5f+h);
+
+
+				float yAvg = mapRange(stat->avg, cyclesBottom, cyclesTop, rBottom, rTop);
+				dcState(STATE_LINEWIDTH, 1);
+
+				char* text = strLen(info->name) > 0 ? info->name : info->function;
+				dcText(text, gui->font, vec2(rLeft, yAvg), vec4(1,1,1,1), vec2i(-1,-1));
+				dcLine2d(vec2(rLeft, yAvg), vec2(rRight, yAvg), color);
+
+				dcState(STATE_LINEWIDTH, 2);
+
+				float lineLeft = rLeft + timerInfoMaxStringSize;
+				float lineWidth = rRight - lineLeft;
+
+				for(int i = 0; i < cycleCount-1; i++) {
+					Timings* t = &ds->timings[i][timerIndex];
+					Timings* t2 = &ds->timings[i+1][timerIndex];
+
+					float y = mapRange(t->cyclesOverHits, cyclesBottom, cyclesTop, rBottom, rTop);
+					float y2 = mapRange(t2->cyclesOverHits, cyclesBottom, cyclesTop, rBottom, rTop);
+
+					float xOff = lineWidth/(cycleCount-1);
+					dcLine2d(vec2(lineLeft + xOff*i, y), vec2(lineLeft + xOff*(i+1), y2), color);
+
+					// dcRect(rectCenDim(vec2(rLeft+100 + timerIndex*30, rBottom+100), vec2(20,20)), color);
+				}
+			}
+
+			gui->scissorPop();
 		}
 
 		gui->end();

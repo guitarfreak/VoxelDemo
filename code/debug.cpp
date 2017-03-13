@@ -39,6 +39,8 @@ struct DebugState {
 
 	Vec2 camPos;
 	float zoom;
+	float graphSizeMod;
+	bool graphMode;
 
 	GuiInput gInput;
 	Gui* gui;
