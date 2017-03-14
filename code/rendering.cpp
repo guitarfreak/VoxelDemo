@@ -785,6 +785,7 @@ void drawRect(Rect r, Rect uv, Vec4 color, int texture, float texZ = -1) {
 
 	uint tex[2] = {texture, texture};
 	glBindTextures(0,2,tex);
+	glBindSamplers(0, 1, globalGraphicsState->samplers);
 
 	glDrawArraysInstancedBaseInstance(GL_TRIANGLE_STRIP, 0, 4, 1, 0);
 }
@@ -1235,7 +1236,8 @@ void executeCommandList(DrawCommandList* list, bool print = false, bool skipStri
 			case Draw_Command_Line2d_Type: {
 				dcGetStructAndIncrement(Line2d);
 
-				Vec2 verts[] = {dc.p0, dc.p1};
+				// Vec2 verts[] = {dc.p0, dc.p1};
+				Vec2 verts[] = {(int)dc.p0.x, (int)dc.p0.y, (int)dc.p1.x, (int)dc.p1.y};
 				pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_VERTS, verts, 2);
 				pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_PRIMITIVE_MODE, 1);
 				pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_COLOR, colorSRGB(dc.color).e);
@@ -1300,6 +1302,7 @@ void executeCommandList(DrawCommandList* list, bool print = false, bool skipStri
 				if(dc.shadow != 0) 
 					drawText(dc.text, dc.font, dc.pos + vec2(dc.shadow,-dc.shadow), dc.shadowColor, vec2i(dc.vAlign, dc.hAlign), dc.wrapWidth);
 				drawText(dc.text, dc.font, dc.pos, dc.color, vec2i(dc.vAlign, dc.hAlign), dc.wrapWidth);
+
 			} break;
 
 			case Draw_Command_Scissor_Type: {

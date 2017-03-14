@@ -4,7 +4,7 @@ const int INTERNAL_TEXTURE_FORMAT = USE_SRGB ? GL_SRGB8_ALPHA8 : GL_RGBA8;
 
 #define editor_executable_path "C:\\Program Files\\Sublime Text 3\\sublime_text.exe"
 
-#define HOTRELOAD_SHADERS 0
+#define HOTRELOAD_SHADERS 1
 
 
 //
@@ -64,7 +64,8 @@ enum FontId {
 };
 
 char* fontPaths[] = {
-	"..\\data\\Fonts\\LiberationMono-Bold.ttf",
+	// "..\\data\\Fonts\\LiberationMono-Bold.ttf",
+	"..\\data\\Fonts\\LiberationMono-Regular.ttf",
 	"..\\data\\Fonts\\SourceSansPro-Regular.ttf",
 	"..\\data\\Fonts\\consola.ttf",
 	"..\\data\\Fonts\\arial.ttf",

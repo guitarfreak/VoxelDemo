@@ -108,6 +108,7 @@ Changing course for now:
    * Use thread id information that's already in the timerinfo.
  * Graph about relative timings.
   * Averages should only count when the timerblock actually gets hit.
+ * Font bad outline is caused by clearcolor 0,0,0,0.
  + Add primitive drawing. (Lines for example.)
 
  - Clean up gui.
@@ -119,14 +120,12 @@ Changing course for now:
    - Add commas: 3,000,000, or spaces: 3 000 000
  - Add instant screen string debug push to debugstate.
  - Add some kind of timer for the debug processing to get a hint about timer collating expenses.
-
- - 2d drawing is messed up. Lines with 1 width have 2 width.
  - Rounded corners.
 
 //-------------------------------------
 //               BUGS
 //-------------------------------------
-- window operations only work after first frame
+* window operations only work after first frame
 - look has to be negative to work in view projection matrix
 - distance jumping collision bug, possibly precision loss in distances
 - gpu fucks up at some point making swapBuffers alternates between time steps 
@@ -514,6 +513,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		//
 
 		gs->samplers[SAMPLER_NORMAL] = createSampler(16.0f, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
+		// gs->samplers[SAMPLER_NORMAL] = createSampler(16.0f, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_NEAREST, GL_NEAREST_MIPMAP_NEAREST);
+
 		gs->samplers[SAMPLER_VOXEL_1] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_NEAREST, GL_NEAREST_MIPMAP_LINEAR);
 		gs->samplers[SAMPLER_VOXEL_2] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_NEAREST, GL_NEAREST_MIPMAP_LINEAR);
 		gs->samplers[SAMPLER_VOXEL_3] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
@@ -834,15 +835,38 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// Clear all the framebuffers and window backbuffer.
 	{
-		glClearColor(0,0,0,0);
 
+
+		// for(int i = 0; i < arrayCount(gs->frameBuffers); i++) {
+		// 	FrameBuffer* fb = getFrameBuffer(i);
+		// 	bindFrameBuffer(i);
+
+		// 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+		// }
+
+		glClearColor(0,0,0,1);
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 		glClear(GL_COLOR_BUFFER_BIT);
 
-		for(int i = 0; i < arrayCount(gs->frameBuffers); i++) {
-			bindFrameBuffer(i);
-			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-		}
+		bindFrameBuffer(FRAMEBUFFER_3dMsaa);
+		glClearColor(1,1,1,1);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+
+		bindFrameBuffer(FRAMEBUFFER_3dNoMsaa);
+		glClearColor(1,1,1,1);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+
+		bindFrameBuffer(FRAMEBUFFER_Reflection);
+		glClearColor(1,1,1,1);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+
+		bindFrameBuffer(FRAMEBUFFER_2d);
+		glClearColor(0,0,0,0);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+
+		bindFrameBuffer(FRAMEBUFFER_Debug);
+		glClearColor(0,0,0,0);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 	}
 
 	// Setup opengl.
@@ -853,6 +877,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glEnable(GL_CULL_FACE);
 		glDisable(GL_SCISSOR_TEST);
 		glEnable(GL_LINE_SMOOTH);
+		// glEnable(GL_POLYGON_SMOOTH);
+		// glDisable(GL_POLYGON_SMOOTH);
+		// glDisable(GL_SMOOTH);
+		
 		glEnable(GL_TEXTURE_2D);
 		// glEnable(GL_ALPHA_TEST);
 		// glAlphaFunc(GL_GREATER, 0.9);
@@ -2245,7 +2273,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		glBlendEquationSeparate(GL_FUNC_ADD, GL_MAX);
 		// Skipping strings for now when reloading because hardcoded ones get a new memory address after changing the dll.
-		executeCommandList(&ds->commandListDebug, false, reload);
+		// executeCommandList(&ds->commandListDebug, false, reload);
 
 
 		bindFrameBuffer(FRAMEBUFFER_2d);
@@ -2255,6 +2283,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 		         getFrameBuffer(FRAMEBUFFER_Debug)->colorSlot[0]->id);
 
 
+		executeCommandList(&ds->commandListDebug, false, reload);
+
+
+		int abc = 234;
 
 		#if USE_SRGB 
 			glEnable(GL_FRAMEBUFFER_SRGB);
