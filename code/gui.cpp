@@ -525,7 +525,10 @@ struct Gui {
 		for(int i = 0; i < size; i++) {
 			float val = c[i];
 			if(val <= 1) {
-				columnArray[i] = val * totalWidth;
+				if(totalWidth > 0) 
+					columnArray[i] = val * totalWidth;
+				else 
+					columnArray[i] = 0;
 			} else {
 				columnArray[i] = val;
 			}

@@ -106,6 +106,8 @@ Changing course for now:
  * Changing route: replace the frame buffer graph with a seemless graph.
  * Threading in timerblocks not working.
    * Use thread id information that's already in the timerinfo.
+ * Graph about relative timings.
+  * Averages should only count when the timerblock actually gets hit.
  + Add primitive drawing. (Lines for example.)
 
  - Clean up gui.
@@ -117,10 +119,9 @@ Changing course for now:
    - Add commas: 3,000,000, or spaces: 3 000 000
  - Add instant screen string debug push to debugstate.
  - Add some kind of timer for the debug processing to get a hint about timer collating expenses.
- - Graph about relative timings.
-  - Averages should only count when the timerblock actually gets hit.
 
  - 2d drawing is messed up. Lines with 1 width have 2 width.
+ - Rounded corners.
 
 //-------------------------------------
 //               BUGS
@@ -432,9 +433,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		ds->input = getPStructDebug(Input);
 		// ds->showMenu = false;
-		ds->showMenu = true;
+		ds->showMenu = false;
 		ds->showStats = true;
-		ds->showConsole = true;
+		ds->showConsole = false;
 		ds->showHud = true;
 		// ds->guiAlpha = 0.95f;
 		ds->guiAlpha = 1;
@@ -2593,10 +2594,13 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 				for(int i = 0; i < arrayCount(ds->timings); i++) {
 					Timings* t = &ds->timings[i][timerIndex];
+					if(t->hits == 0) continue;
+
 					updateStatistic(stat, t->cyclesOverHits);
 				}
 
 				endStatistic(stat);
+				if(stat->count == 0) stat->avg = 0;
 			}
 		}
 	}
@@ -2609,6 +2613,18 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 	}
 
 	assert(timer->bufferIndex < timer->bufferSize);
+
+	if(init) {
+		ds->cHeight = 100000;
+		ds->cPos = ds->cHeight/2;
+		ds->mode = 0;
+		ds->lineGraphHeight = 40;
+	}
+
+	if(init) {
+		ds->graphSizeMod = 1;
+	}
+
 
 	//
 	// Draw timing info.
@@ -2630,6 +2646,13 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 		gui->label("App Statistics", 1, gui->colors.sectionColor, vec4(0,0,0,1));
 
+		float sectionWidth = 120;
+		gui->div(vec4(sectionWidth,sectionWidth,sectionWidth,0));
+		if(gui->button("Data", (int)(ds->mode == 0) + 1)) ds->mode = 0;
+		if(gui->button("Line graph", (int)(ds->mode == 1) + 1)) ds->mode = 1;
+		if(gui->button("Timeline", (int)(ds->mode == 2) + 1)) ds->mode = 2;
+		gui->empty();
+
 		gui->div(vec2(0.2f,0));
 		if(gui->switcher("Freeze", &ds->noCollating)) {
 			if(ds->noCollating) ds->setPause = true;
@@ -2637,6 +2660,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		}
 		gui->slider(&ds->cycleIndex, 0, cycleCount-1);
 
+		if(ds->mode == 0)
 		{
 			int barWidth = 1;
 			int barCount = arrayCount(ds->timings);
@@ -2753,12 +2777,8 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			}
 		}
 
-		if(init) ds->graphMode = true;
-
-		gui->switcher("Timeline/MinMax", &ds->graphMode);
-
 		// Timeline graph.
-		if(ds->graphMode)
+		if(ds->mode == 2)
 		{
 			gui->empty();
 			Rect cyclesRect = gui->getCurrentRegion();
@@ -2784,16 +2804,13 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			gui->drag(bgRect, &dragDelta, vec4(0,0,0,0));
 
 			float graphWidth = rectGetDim(bgRect).w;
-
 			Vec2 camPosInit = vec2(graphWidth/2,0);
 			float zoomInit = 1.0001f; // To see the most right bar.
-			if(init) {
-				ds->camPos = camPosInit;
-				ds->zoom = zoomInit; 
-				ds->graphSizeMod = 1;
-			}
 
-			ds->camPos.x -= dragDelta.x * ((graphWidth*ds->zoom)/graphWidth);
+			static Vec2 camPos = camPosInit;
+			static float zoom = zoomInit;
+
+			camPos.x -= dragDelta.x * ((graphWidth*zoom)/graphWidth);
 
 			gui->heightPop();
 
@@ -2838,7 +2855,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 				float oldWidth = -1;
 				if(gui->input.mouseWheel) {
-					oldWidth = graphWidth*ds->zoom;
+					oldWidth = graphWidth*zoom;
 
 					float wheel = gui->input.mouseWheel;
 
@@ -2848,33 +2865,33 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 					if(input->keysDown[KEYCODE_SHIFT] && input->keysDown[KEYCODE_CTRL]) 
 						offset = wheel < 0 ? 1.4f : 0.6f;
 
-					ds->zoom *= offset;
-					ds->zoom = clampMin(ds->zoom, 0.00001f);
+					zoom *= offset;
+					zoom = clampMin(zoom, 0.00001f);
 				}
 
-				// ds->zoom = clampMax(ds->zoom, 4.0f);
-				if(extendedView) ds->zoom = clampMax(ds->zoom, furthestRightSlot / graphWidth);
-				else ds->zoom = clampMax(ds->zoom, 1);
+				// zoom = clampMax(zoom, 4.0f);
+				if(extendedView) zoom = clampMax(zoom, furthestRightSlot / graphWidth);
+				else zoom = clampMax(zoom, 1);
 
 				if(gui->input.mouseWheel) {
-					float addedWidth = graphWidth*ds->zoom - oldWidth;
-					float mouseZoomOffset = mapRange(input->mousePos.x, bgRect.min.x, bgRect.max.x, -1, 1);
-					ds->camPos.x -= (addedWidth/2)*mouseZoomOffset;
+					float addedWidth = graphWidth*zoom - oldWidth;
+					float mZoomOffset = mapRange(input->mousePos.x, bgRect.min.x, bgRect.max.x, -1, 1);
+					camPos.x -= (addedWidth/2)*mZoomOffset;
 				}
 
-				float orthoMin = (graphWidth*ds->zoom)/2 - (graphWidth*ds->zoom)/2;
-				float orthoMax = -(graphWidth*ds->zoom)/2 + furthestRightSlot + (graphWidth*ds->zoom)/2;
+				float orthoMin = (graphWidth*zoom)/2 - (graphWidth*zoom)/2;
+				float orthoMax = -(graphWidth*zoom)/2 + furthestRightSlot + (graphWidth*zoom)/2;
 
-				ds->camPos.x = clampMin(ds->camPos.x, (graphWidth*ds->zoom)/2);
+				camPos.x = clampMin(camPos.x, (graphWidth*zoom)/2);
 
 				if(!extendedView) {
-					ds->camPos.x = clampMax(ds->camPos.x, -(graphWidth*ds->zoom)/2 + graphWidth);
+					camPos.x = clampMax(camPos.x, -(graphWidth*zoom)/2 + graphWidth);
 				} else {
-					ds->camPos.x = clampMax(ds->camPos.x, -(graphWidth*ds->zoom)/2 + furthestRightSlot);
+					camPos.x = clampMax(camPos.x, -(graphWidth*zoom)/2 + furthestRightSlot);
 				}
 
-				float orthoLeft = ds->camPos.x - (graphWidth*ds->zoom)/2;
-				float orthoRight = ds->camPos.x + (graphWidth*ds->zoom)/2;
+				float orthoLeft = camPos.x - (graphWidth*zoom)/2;
+				float orthoRight = camPos.x + (graphWidth*zoom)/2;
 
 				// Header.
 				{
@@ -2890,7 +2907,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 					float heightMod = 1.3f;
 					float heightSub = 0.10f;
 					
-					float orthoWidth = graphWidth*ds->zoom;
+					float orthoWidth = graphWidth*zoom;
 
 					float scaleToGraphwidth = (float)ws->currentRes.w/graphWidth;
 					float spreadWidthMod = 0.6f * scaleToGraphwidth;
@@ -3110,46 +3127,48 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			gui->div(0.1f, 0.3f, 0); 
 
 			if(gui->button("Reset")) {
-				ds->camPos = vec2(graphWidth/2,0);
-				ds->zoom = zoomInit; // To see the most right bar.
+				camPos = vec2(graphWidth/2,0);
+				zoom = zoomInit; // To see the most right bar.
 			}
 
 			gui->slider(&ds->graphSizeMod, 1, 60);
 
-			gui->label(fillString("Cam: %f, Zoom: %f",ds->camPos.x, ds->zoom));
+			gui->label(fillString("Cam: %f, Zoom: %f", camPos.x, zoom));
 		}
-		else 
+		
+		// Line graph.
+		if(ds->mode == 1)
 		{
-			float timerInfoMaxStringSize = 0;
+			dcState(STATE_LINEWIDTH, 1);
 
+			// Get longest function name string.
+			float timerInfoMaxStringSize = 0;
 			int cycleCount = arrayCount(ds->timings);
 			int timerCount = ds->timer->timerInfoCount;
 			for(int timerIndex = 0; timerIndex < timerCount; timerIndex++) {
 				TimerInfo* info = &timer->timerInfos[timerIndex];
 				if(!info->initialised) continue;
 
+				Statistic* stat = &ds->statistics[cycleIndex][timerIndex];
+				if(stat->avg == 0) continue;
+
 				char* text = strLen(info->name) > 0 ? info->name : info->function;
 				timerInfoMaxStringSize = max(getTextDim(text, gui->font).w, timerInfoMaxStringSize);
 			}
 
-
-			float lineHeight = gui->getDefaultHeight();
-
-			gui->heightPush(lineHeight * 25);
-			gui->empty();
-			Rect region = gui->getCurrentRegion();
+			gui->slider(&ds->lineGraphHeight, 1, 60);
+			gui->heightPush(gui->getDefaultHeight() * ds->lineGraphHeight);
+			gui->div(vec3(timerInfoMaxStringSize + 2, 0, 120));
+			gui->empty(); Rect rectNames = gui->getCurrentRegion();
+			gui->empty(); Rect rectLines = gui->getCurrentRegion();
+			gui->empty(); Rect rectNumbers = gui->getCurrentRegion();
 			gui->heightPop();
-			gui->scissorPush(region);
 
-			float rLeft = region.min.x;
-			float rRight = region.max.x;
-			float rBottom = region.min.y;
-			float rTop = region.max.y;
-			float rWidth = rectGetDim(region).w;
+			float rTop = rectLines.max.y;
+			float rBottom = rectLines.min.y;
 
-			dcState(STATE_LINEWIDTH, 2);
-
-			static float zoom = 1;
+			Vec2 dragDelta = vec2(0,0);
+			gui->drag(rectLines, &dragDelta, vec4(0,0,0,0.2f));
 
 			float wheel = gui->input.mouseWheel;
 			if(wheel) {
@@ -3159,12 +3178,48 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				if(input->keysDown[KEYCODE_SHIFT] && input->keysDown[KEYCODE_CTRL]) 
 					offset = wheel < 0 ? 1.4f : 0.6f;
 
-				zoom *= offset;
-				zoom = clampMin(zoom, 0.00001f);
+				float heightDiff = ds->cHeight;
+				ds->cHeight *= offset;
+				ds->cHeight = clampMin(ds->cHeight, 0.00001f);
+				heightDiff -= ds->cHeight;
+
+				float mouseOffset = mapRange(input->mousePosNegative.y, rBottom, rTop, -0.5f, 0.5f);
+				ds->cPos += heightDiff * mouseOffset;
 			}
 
-			u64 cyclesTop = 100000 * zoom;
-			u64 cyclesBottom = 0;
+			ds->cPos -= dragDelta.y * ((ds->cHeight)/(rTop - rBottom));
+			clampMin(&ds->cPos, ds->cHeight/2.05f);
+
+			float orthoTop = ds->cPos + ds->cHeight/2;
+			float orthoBottom = ds->cPos - ds->cHeight/2;
+
+			// Draw numbers.
+			{
+				gui->scissorPush(rectNumbers);
+
+				float y = 0;
+				float length = 10;
+
+				float timelineSection = 10;
+				while(timelineSection < ds->cHeight*0.06f*(ws->currentRes.h/(rTop-rBottom))) timelineSection *= 10;
+
+				float start = roundMod(orthoBottom, timelineSection) - timelineSection;
+
+				float p = start;
+				while(p < orthoTop) {
+					p += timelineSection;
+					y = mapRange(p, orthoBottom, orthoTop, rBottom, rTop);
+
+					dcLine2d(vec2(rectNumbers.min.x, y), vec2(rectNumbers.min.x + length, y), vec4(1,1,1,1)); 
+
+					float cycles = p;
+					char* s = getTStringDebug(30);
+					sprintfu64NumberDots(s, "c", 30, 30, cycles);
+					dcText(s, gui->font, vec2(rectNumbers.min.x + length + 2, y), vec4(1,1,1,1), vec2i(-1,0));
+				}
+
+				gui->scissorPop();
+			}
 
 			for(int timerIndex = 0; timerIndex < timerCount; timerIndex++) {
 				TimerInfo* info = &timer->timerInfos[timerIndex];
@@ -3173,41 +3228,62 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				Statistic* stat = &ds->statistics[cycleIndex][timerIndex];
 				if(stat->avg == 0) continue;
 
+				float statMin = mapRange(stat->min, orthoBottom, orthoTop, rBottom, rTop);
+				float statMax = mapRange(stat->max, orthoBottom, orthoTop, rBottom, rTop);
+				if(statMax < rBottom || statMin > rTop) continue;
+
 
 				float s = timerIndex%(timerCount/2) / ((float)timerCount/2);
 				float h = timerIndex < timerCount/2 ? 0.1f : -0.1f;
-
 				Vec4 color = vec4(0,0,0,1);
 				hslToRgb(color.e, 360*s, 0.5f, 0.5f+h);
 
-
-				float yAvg = mapRange(stat->avg, cyclesBottom, cyclesTop, rBottom, rTop);
-				dcState(STATE_LINEWIDTH, 1);
-
+				float yAvg = mapRange(stat->avg, orthoBottom, orthoTop, rBottom, rTop);
 				char* text = strLen(info->name) > 0 ? info->name : info->function;
-				dcText(text, gui->font, vec2(rLeft, yAvg), vec4(1,1,1,1), vec2i(-1,-1));
-				dcLine2d(vec2(rLeft, yAvg), vec2(rRight, yAvg), color);
+				float textWidth = getTextDim(text, gui->font, vec2(rectNames.max.x - 2, yAvg)).w;
+				gui->scissorPush(rectNames);
+				dcText(text, gui->font, vec2(rectNames.max.x - 2, yAvg), vec4(1,1,1,1), vec2i(1,-1));
+				gui->scissorPop();
+
+				Rect rectNamesAndLines = rect(rectNames.min, rectLines.max);
+				gui->scissorPush(rectNamesAndLines);
+				dcLine2d(vec2(rectLines.min.x - textWidth - 2, yAvg), vec2(rectLines.max.x, yAvg), color);
+				gui->scissorPop();
+
+				gui->scissorPush(rectLines);
 
 				dcState(STATE_LINEWIDTH, 2);
-
-				float lineLeft = rLeft + timerInfoMaxStringSize;
-				float lineWidth = rRight - lineLeft;
 
 				for(int i = 0; i < cycleCount-1; i++) {
 					Timings* t = &ds->timings[i][timerIndex];
 					Timings* t2 = &ds->timings[i+1][timerIndex];
 
-					float y = mapRange(t->cyclesOverHits, cyclesBottom, cyclesTop, rBottom, rTop);
-					float y2 = mapRange(t2->cyclesOverHits, cyclesBottom, cyclesTop, rBottom, rTop);
+					float y = mapRange(t->cyclesOverHits, orthoBottom, orthoTop, rBottom, rTop);
+					float y2 = mapRange(t2->cyclesOverHits, orthoBottom, orthoTop, rBottom, rTop);
 
-					float xOff = lineWidth/(cycleCount-1);
-					dcLine2d(vec2(lineLeft + xOff*i, y), vec2(lineLeft + xOff*(i+1), y2), color);
+					float xOff = rectGetDim(rectLines).w/(cycleCount-1);
 
-					// dcRect(rectCenDim(vec2(rLeft+100 + timerIndex*30, rBottom+100), vec2(20,20)), color);
+					dcLine2d(vec2(rectLines.min.x + xOff*i, y), vec2(rectLines.min.x + xOff*(i+1), y2), color);
+				}
+
+				dcState(STATE_LINEWIDTH, 1);
+
+				gui->scissorPop();
+			}
+
+			// Draw color rectangles.
+			float size = 20;
+			if(rectGetDim(rectLines).w >= size*2) {
+				for(int timerIndex = 0; timerIndex < timerCount; timerIndex++) {
+					float s = timerIndex%(timerCount/2) / ((float)timerCount/2);
+					float h = timerIndex < timerCount/2 ? 0.1f : -0.1f;
+					Vec4 color = vec4(0,0,0,1);
+					hslToRgb(color.e, 360*s, 0.5f, 0.5f+h);
+
+					dcRect(rectCenDim(vec2(rectLines.min.x + size + ((rectGetDim(rectLines).w-(size*2))/(timerCount-1))*timerIndex, rectLines.max.y - size), vec2(size,size)), color);
 				}
 			}
 
-			gui->scissorPop();
 		}
 
 		gui->end();

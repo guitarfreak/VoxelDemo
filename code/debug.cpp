@@ -37,10 +37,18 @@ struct DebugState {
 	int lastBufferIndex;
 	int graphSortingIndex;
 
-	Vec2 camPos;
-	float zoom;
+	// Vec2 camPos;
+	// float zoom;
 	float graphSizeMod;
-	bool graphMode;
+
+	//
+
+	int mode;
+	float cHeight;
+	float cPos;
+	float lineGraphHeight;
+
+	//
 
 	GuiInput gInput;
 	Gui* gui;
