@@ -4,9 +4,11 @@ struct DebugState {
 	Asset* assets;
 	int assetCount;
 
-	LONGLONG lastTimeStamp;
-	float dt;
-	float time;
+	i64 lastTimeStamp;
+	f64 dt;
+	f64 time;
+
+	f64 debugTime;
 
 	bool showMenu;
 	bool showStats;

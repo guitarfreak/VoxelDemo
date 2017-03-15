@@ -110,6 +110,8 @@ Changing course for now:
   * Averages should only count when the timerblock actually gets hit.
  * Font bad outline is caused by clearcolor 0,0,0,0.
  + Add primitive drawing. (Lines for example.)
+ * Rounded corners.
+ * Add some kind of timer for the debug processing to get a hint about timer collating expenses.
 
  - Clean up gui.
  - Look at font drawing.
@@ -119,8 +121,6 @@ Changing course for now:
    - Add scaling: 3m -> 4000k -> 4000000
    - Add commas: 3,000,000, or spaces: 3 000 000
  - Add instant screen string debug push to debugstate.
- - Add some kind of timer for the debug processing to get a hint about timer collating expenses.
- - Rounded corners.
  - Slot slider.
 
 //-------------------------------------
@@ -231,8 +231,8 @@ struct AppData {
 	WindowSettings wSettings;
 	GraphicsState graphicsState;
 
-	float dt;
-	float time;
+	f64 dt;
+	f64 time;
 	int frameCount;
 
 	DrawCommandList commandList2d;
@@ -676,29 +676,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	TIMER_BLOCK_END(reload);
 
-
-
 	// Update timer.
 	{
-		LARGE_INTEGER counter;
-		LARGE_INTEGER frequency;
-		QueryPerformanceFrequency(&frequency); 
-
 		if(init) {
-			QueryPerformanceCounter(&counter);
-			ds->lastTimeStamp = counter.QuadPart;
+			ds->lastTimeStamp = timerInit();
 			ds->dt = 1/(float)60;
 		} else {
-			QueryPerformanceCounter(&counter);
-			float timeStamp = counter.QuadPart;
-			ds->dt = (timeStamp - ds->lastTimeStamp);
-			ds->dt *= 1000000;
-			ds->dt = ds->dt/frequency.QuadPart;
-			ds->dt = ds->dt / 1000000;
-			ds->dt = clampMax(ds->dt, 1/(float)20);
-
-			ds->lastTimeStamp = timeStamp;
-
+			ds->dt = timerUpdate(ds->lastTimeStamp, &ds->lastTimeStamp);
 			ds->time += ds->dt;
 		}
 	}
@@ -2393,6 +2377,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, bool* isRunning, bool init, ThreadQueue* threadQueue) {
 	// @DebugStart.
 
+	i64 timeStamp = timerInit();
+
 	Input* input = ds->input;
 	WindowSettings* ws = &ad->wSettings;
 
@@ -2429,7 +2415,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 		Vec2 tp = vec2(ad->wSettings.currentRes.x, 0) - offset;
 
-		static float timer = 0;
+		static f64 timer = 0;
 		static int fpsCounter = 0;
 		static int fps = 0;
 		timer += ds->dt;
@@ -2692,8 +2678,9 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 	assert(timer->bufferIndex < timer->bufferSize);
 
 	if(init) {
-		ds->cHeight = 100000;
-		ds->cPos = ds->cHeight/2;
+		ds->cHeight = 700000;
+		// ds->cPos = ds->cHeight/2;
+		ds->cPos = 0;
 		ds->mode = 0;
 		ds->lineGraphHeight = 30;
 	}
@@ -2724,11 +2711,13 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		gui->label("App Statistics", 1, gui->colors.sectionColor, vec4(0,0,0,1));
 
 		float sectionWidth = 120;
-		gui->div(vec4(sectionWidth,sectionWidth,sectionWidth,0));
+		float headerDivs[] = {sectionWidth,sectionWidth,sectionWidth,0,80};
+		gui->div(headerDivs, arrayCount(headerDivs));
 		if(gui->button("Data", (int)(ds->mode == 0) + 1)) ds->mode = 0;
 		if(gui->button("Line graph", (int)(ds->mode == 1) + 1)) ds->mode = 1;
 		if(gui->button("Timeline", (int)(ds->mode == 2) + 1)) ds->mode = 2;
 		gui->empty();
+		gui->label(fillString("%fms", ds->debugTime*1000), 1);
 
 		gui->div(vec2(0.2f,0));
 		if(gui->switcher("Freeze", &ds->noCollating)) {
@@ -3430,6 +3419,14 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 	if(*isRunning == false) {
 		guiSave(ds->gui, 2, 0);
 		if(globalDebugState->gui2) guiSave(globalDebugState->gui2, 2, 3);
+	}
+
+	// Update debugTime every second.
+	static f64 tempTime = 0;
+	tempTime += ds->dt;
+	if(tempTime >= 1) {
+		ds->debugTime = timerUpdate(timeStamp);
+		tempTime = 0;
 	}
 }
 

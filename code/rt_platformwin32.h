@@ -659,8 +659,33 @@ uint getTicks() {
     return result;
 }
 
-__int64 getTimestamp() {
+__int64 getCycleStamp() {
 	return __rdtsc();
+}
+
+i64 timerInit() {
+	LARGE_INTEGER counter;
+	QueryPerformanceCounter(&counter);
+
+	return counter.QuadPart;
+}
+
+// Returns time in milliseconds;
+f64 timerUpdate(i64 lastTimeStamp, i64* setTimeStamp = 0) {
+	LARGE_INTEGER counter;
+	LARGE_INTEGER frequency;
+	QueryPerformanceFrequency(&frequency); 
+	QueryPerformanceCounter(&counter);
+
+	i64 timeStamp = counter.QuadPart;
+	f64 dt = (timeStamp - lastTimeStamp);
+	dt *= 1000000;
+	dt /= frequency.QuadPart;
+	dt /= 1000000;
+	
+	if(setTimeStamp) *setTimeStamp = timeStamp;
+
+	return dt;
 }
 
 // MetaPlatformFunction();
