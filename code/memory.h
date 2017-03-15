@@ -1,5 +1,7 @@
 
 struct MemoryBlock {
+	bool debugMode;
+
 	ExtendibleMemoryArray* pMemory;
 	MemoryArray* tMemory;
 	ExtendibleBucketMemory* dMemory;
@@ -11,26 +13,26 @@ struct MemoryBlock {
 
 extern MemoryBlock* globalMemory;
 
-#define getPStruct(type) 		(type*)(getPMemory(sizeof(type)))
-#define getPArray(type, count) 	(type*)(getPMemory(sizeof(type) * count))
-#define getPString(count) 	(char*)(getPMemory(count))
-#define getTStruct(type) 		(type*)(getTMemory(sizeof(type)))
-#define getTArray(type, count) 	(type*)(getTMemory(sizeof(type) * count))
-#define getTString(size) 		(char*)(getTMemory(size)) 
-#define getDStruct(type) 		(type*)(getDMemory(sizeof(type)))
-#define getDArray(type, count) 	(type*)(getDMemory(sizeof(type) * count))
+#define getPStruct(type) 		(type*)(getPMemoryMain(sizeof(type)))
+#define getPArray(type, count) 	(type*)(getPMemoryMain(sizeof(type) * count))
+#define getPString(count) 	(char*)(getPMemoryMain(count))
+#define getTStruct(type) 		(type*)(getTMemoryMain(sizeof(type)))
+#define getTArray(type, count) 	(type*)(getTMemoryMain(sizeof(type) * count))
+#define getTString(size) 		(char*)(getTMemoryMain(size)) 
+#define getDStruct(type) 		(type*)(getDMemoryMain(sizeof(type)))
+#define getDArray(type, count) 	(type*)(getDMemoryMain(sizeof(type) * count))
 
 // void* getPMemory(int size, MemoryBlock * memory = 0);
 // void* getTMemory(int size, MemoryBlock * memory = 0);
 
-void *getPMemory(int size, MemoryBlock * memory = 0) {
+void *getPMemoryMain(int size, MemoryBlock * memory = 0) {
 	if(memory == 0) memory = globalMemory;
 
 	void* location = getExtendibleMemoryArray(size, memory->pMemory);
     return location;
 }
 
-void * getTMemory(int size, MemoryBlock * memory = 0) {
+void * getTMemoryMain(int size, MemoryBlock * memory = 0) {
 	if(memory == 0) memory = globalMemory;
 
 	void* location = getMemoryArray(size, memory->tMemory);
@@ -85,7 +87,7 @@ void clearTMemoryDebug(MemoryBlock * memory = 0) {
     // freeTMemory(size, memory);
 // }
 
-void * getDMemory(int size, MemoryBlock * memory = 0) {
+void * getDMemoryMain(int size, MemoryBlock * memory = 0) {
 	if(memory == 0) memory = globalMemory;
 
 	void* location = getExtendibleBucketMemory(memory->dMemory);
@@ -97,3 +99,30 @@ void freeDMemory(void* address, MemoryBlock * memory = 0) {
 
 	freeExtendibleBucketMemory(address, memory->dMemory);
 }
+
+
+// Choose right function according to memory mode thats set globally.
+
+#define getPStructX(type) 		(type*)(getPMemory(sizeof(type)))
+#define getPArrayX(type, count) 	(type*)(getPMemory(sizeof(type) * count))
+#define getPStringX(count) 	(char*)(getPMemory(count))
+#define getTStructX(type) 		(type*)(getTMemory(sizeof(type)))
+#define getTArrayX(type, count) 	(type*)(getTMemory(sizeof(type) * count))
+#define getTStringX(size) 		(char*)(getTMemory(size)) 
+
+void *getPMemory(int size, MemoryBlock * memory = 0) {
+	if(memory == 0) memory = globalMemory;
+
+	if(!memory->debugMode) return getPMemoryMain(size, memory);
+	else return getPMemoryDebug(size, memory);
+}
+
+void *getTMemory(int size, MemoryBlock * memory = 0) {
+	if(memory == 0) memory = globalMemory;
+
+	if(!memory->debugMode) return getTMemoryMain(size, memory);
+	else return getTMemoryDebug(size, memory);
+}
+
+
+

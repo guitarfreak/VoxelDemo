@@ -1,4 +1,7 @@
 
+#define DEBUG_NOTE_LENGTH 50
+#define DEBUG_NOTE_DURATION 3
+
 struct Asset;
 struct DebugState {
 	Asset* assets;
@@ -68,10 +71,35 @@ struct DebugState {
 	int playbackIndex;
 	bool playbackSwapMemory;
 
-	// Console.
-
 	Console console;
+
+	char* notificationStack[10];
+	float notificationTimes[10];
+	int notificationCount;
+
+	char* infoStack[10];
+	int infoStackCount;
 };
+
+void addDebugNote(char* string, float duration = DEBUG_NOTE_DURATION) {
+	DebugState* ds = globalDebugState;
+
+	assert(strLen(string) < DEBUG_NOTE_LENGTH);
+	if(ds->notificationCount >= arrayCount(ds->notificationStack)) return;
+
+	int count = ds->notificationCount;
+	strClear(ds->notificationStack[count]);
+	ds->notificationTimes[count] = duration;
+	strCpy(ds->notificationStack[count], string);
+	ds->notificationCount++;
+}
+
+void addDebugInfo(char* string) {
+	DebugState* ds = globalDebugState;
+
+	if(ds->infoStackCount >= arrayCount(ds->infoStack)) return;
+	ds->infoStack[ds->infoStackCount++] = string;
+}
 
 
 

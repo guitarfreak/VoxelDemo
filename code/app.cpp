@@ -112,16 +112,17 @@ Changing course for now:
  + Add primitive drawing. (Lines for example.)
  * Rounded corners.
  * Add some kind of timer for the debug processing to get a hint about timer collating expenses.
+ * Look at font drawing.
 
  - Clean up gui.
- - Look at font drawing.
  - Using makros and defines to make templated vectors and hashtables and such.
  - Crashing once in a while at startup.
  - Improve fillString.
    - Add scaling: 3m -> 4000k -> 4000000
    - Add commas: 3,000,000, or spaces: 3 000 000
- - Add instant screen string debug push to debugstate.
+ - Add instant screen string debug push to debugstate. 
  - Slot slider.
+ - Clean up timeline.
 
 //-------------------------------------
 //               BUGS
@@ -439,6 +440,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ds->showHud = true;
 		// ds->guiAlpha = 0.95f;
 		ds->guiAlpha = 1;
+
+		for(int i = 0; i < arrayCount(ds->notificationStack); i++) {
+			ds->notificationStack[i] = getPStringDebug(DEBUG_NOTE_LENGTH+1);
+		}
 
 		TIMER_BLOCK_NAMED("Init");
 
@@ -2351,8 +2356,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		threadQueueAdd(threadQueue, threadBench, &t);
 	}
 
-
-
 	// Swap window background buffer.
 	{
 		TIMER_BLOCK_NAMED("Swap");
@@ -2377,6 +2380,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, bool* isRunning, bool init, ThreadQueue* threadQueue) {
 	// @DebugStart.
 
+	globalMemory->debugMode = true;
+
 	i64 timeStamp = timerInit();
 
 	Input* input = ds->input;
@@ -2400,50 +2405,6 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 	if(input->keysPressed[KEYCODE_F6]) ds->showMenu = !ds->showMenu;
 	if(input->keysPressed[KEYCODE_F7]) ds->showStats = !ds->showStats;
 	if(input->keysPressed[KEYCODE_F8]) ds->showHud = !ds->showHud;
-
-
-	if(ds->showHud) {
-		int fontSize = 19;
-		int pi = 0;
-		// Vec4 c = vec4(1.0f,0.2f,0.0f,1);
-		Vec4 c = vec4(1.0f,0.4f,0.0f,1);
-		Vec4 c2 = vec4(0,0,0,1);
-		Font* font = getFont(FONT_CONSOLAS, fontSize);
-		int sh = 1;
-		Vec2 offset = vec2(6,6);
-		Vec2i ali = vec2i(1,1);
-
-		Vec2 tp = vec2(ad->wSettings.currentRes.x, 0) - offset;
-
-		static f64 timer = 0;
-		static int fpsCounter = 0;
-		static int fps = 0;
-		timer += ds->dt;
-		fpsCounter++;
-		if(timer >= 1.0f) {
-			fps = fpsCounter;
-			fpsCounter = 0;
-			timer = 0;
-		}
-
-		fillString("Aasdfasdf"); // @Bug: First string with fillString flickers.
-
-		#define PVEC3(v) v.x, v.y, v.z
-		#define PVEC2(v) v.x, v.y
-		dcText(fillString("Fps  : %i", fps), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-		dcText(fillString("Pos  : (%f,%f,%f)", PVEC3(ad->activeCam.pos)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-		dcText(fillString("Pos  : (%f,%f,%f)", PVEC3(ad->selectedBlock)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-		dcText(fillString("Look : (%f,%f,%f)", PVEC3(ad->activeCam.look)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-		dcText(fillString("Up   : (%f,%f,%f)", PVEC3(ad->activeCam.up)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-		dcText(fillString("Right: (%f,%f,%f)", PVEC3(ad->activeCam.right)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-		dcText(fillString("Rot  : (%f,%f)",    PVEC2(ad->player->rot)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-		dcText(fillString("Vec  : (%f,%f,%f)", PVEC3(ad->player->vel)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-		dcText(fillString("Acc  : (%f,%f,%f)", PVEC3(ad->player->acc)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-		dcText(fillString("Draws: (%i)", 	   ad->voxelDrawCount), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-		dcText(fillString("Quads: (%i)", 	   ad->voxelTriangleCount), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-		dcText(fillString("BufferIndex: %i",    ds->timer->bufferIndex), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-		dcText(fillString("LastBufferIndex: %i",ds->lastBufferIndex), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-	}
 
 	if(ds->showMenu) {
 		int fontSize = 20;
@@ -3415,6 +3376,88 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		con->updateBody();
 
 	}
+
+	// Notifications.
+	{
+		// Update notes.
+		int deletionCount = 0;
+		for(int i = 0; i < ds->notificationCount; i++) {
+			ds->notificationTimes[i] -= ds->dt;
+			if(ds->notificationTimes[i] <= 0) {
+				deletionCount++;
+			}
+		}
+
+		// Delete expired notes.
+		if(deletionCount > 0) {
+			for(int i = 0; i < ds->notificationCount-deletionCount; i++) {
+				ds->notificationStack[i] = ds->notificationStack[i+deletionCount];
+				ds->notificationTimes[i] = ds->notificationTimes[i+deletionCount];
+			}
+			ds->notificationCount -= deletionCount;
+		}
+
+		// Draw notes.
+		float fontSize = 24;
+		Font* font = getFont(FONT_CALIBRI, fontSize);
+		Vec4 color = vec4(1,0.5f,0,1);
+
+		float y = -fontSize/2;
+		for(int i = 0; i < ds->notificationCount; i++) {
+			char* note = ds->notificationStack[i];
+			dcText(note, font, vec2(ws->currentRes.w/2, y), color, vec2i(0,0), 0, 2);
+			y -= fontSize;
+		}
+	}
+
+	if(ds->showHud) {
+		int fontSize = 19;
+		int pi = 0;
+		// Vec4 c = vec4(1.0f,0.2f,0.0f,1);
+		Vec4 c = vec4(1.0f,0.4f,0.0f,1);
+		Vec4 c2 = vec4(0,0,0,1);
+		Font* font = getFont(FONT_CONSOLAS, fontSize);
+		int sh = 1;
+		Vec2 offset = vec2(6,6);
+		Vec2i ali = vec2i(1,1);
+
+		Vec2 tp = vec2(ad->wSettings.currentRes.x, 0) - offset;
+
+		static f64 timer = 0;
+		static int fpsCounter = 0;
+		static int fps = 0;
+		timer += ds->dt;
+		fpsCounter++;
+		if(timer >= 1.0f) {
+			fps = fpsCounter;
+			fpsCounter = 0;
+			timer = 0;
+		}
+
+		#define PVEC3(v) v.x, v.y, v.z
+		#define PVEC2(v) v.x, v.y
+		dcText(fillString("Fps  : %i", fps), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
+		dcText(fillString("Pos  : (%f,%f,%f)", PVEC3(ad->activeCam.pos)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
+		dcText(fillString("Pos  : (%f,%f,%f)", PVEC3(ad->selectedBlock)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
+		dcText(fillString("Look : (%f,%f,%f)", PVEC3(ad->activeCam.look)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
+		dcText(fillString("Up   : (%f,%f,%f)", PVEC3(ad->activeCam.up)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
+		dcText(fillString("Right: (%f,%f,%f)", PVEC3(ad->activeCam.right)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
+		dcText(fillString("Rot  : (%f,%f)",    PVEC2(ad->player->rot)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
+		dcText(fillString("Vec  : (%f,%f,%f)", PVEC3(ad->player->vel)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
+		dcText(fillString("Acc  : (%f,%f,%f)", PVEC3(ad->player->acc)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
+		dcText(fillString("Draws: (%i)", 	   ad->voxelDrawCount), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
+		dcText(fillString("Quads: (%i)", 	   ad->voxelTriangleCount), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
+		dcText(fillString("BufferIndex: %i",    ds->timer->bufferIndex), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
+		dcText(fillString("LastBufferIndex: %i",ds->lastBufferIndex), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
+		#undef PVEC3
+		#undef PVEC2
+
+		for(int i = 0; i < ds->infoStackCount; i++) {
+			dcText(fillString("%s", ds->infoStack[i]), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
+		}
+		ds->infoStackCount = 0;
+	}
+
 
 	if(*isRunning == false) {
 		guiSave(ds->gui, 2, 0);

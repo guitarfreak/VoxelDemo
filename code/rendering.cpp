@@ -14,7 +14,7 @@ char* fillString(char* text, ...) {
 	va_start(vl, text);
 
 	int length = strLen(text);
-	char* buffer = getTString(length+1);
+	char* buffer = getTStringX(length+1);
 
 	char valueBuffer[20] = {};
 
@@ -31,7 +31,7 @@ char* fillString(char* text, ...) {
 
 			ti += 4;
 			bi += sLen;
-			getTString(sLen);
+			getTStringX(sLen);
 		} else if(text[ti] == '%' && text[ti+1] == 'f') {
 			float v = va_arg(vl, double);
 			floatToStr(valueBuffer, v, 2);
@@ -40,7 +40,7 @@ char* fillString(char* text, ...) {
 
 			ti += 2;
 			bi += sLen;
-			getTString(sLen);
+			getTStringX(sLen);
 		} else if(text[ti] == '%' && text[ti+1] == 'i') {
 			int v = va_arg(vl, int);
 			intToStr(valueBuffer, v);
@@ -49,7 +49,7 @@ char* fillString(char* text, ...) {
 
 			ti += 2;
 			bi += sLen;
-			getTString(sLen);
+			getTStringX(sLen);
 		} if(text[ti] == '%' && text[ti+1] == 's') {
 			char* str = va_arg(vl, char*);
 			int sLen = strLen(str);
@@ -57,14 +57,14 @@ char* fillString(char* text, ...) {
 
 			ti += 2;
 			bi += sLen;
-			getTString(sLen);
+			getTStringX(sLen);
 		} if(text[ti] == '%' && text[ti+1] == '%') {
 			buffer[bi++] = '%';
 			ti += 2;
-			getTString(1);
+			getTStringX(1);
 		} else {
 			buffer[bi++] = text[ti++];
-			getTString(1);
+			getTStringX(1);
 
 			if(buffer[bi-1] == '\0') break;
 		}
