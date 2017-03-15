@@ -391,8 +391,9 @@ struct Gui {
 		setScissor(true);
 		scissorPush(background);
 
-		drawRect(background, colors.panelColor, false);
-		drawRect(resizeRegion, colors.resizeButtonColor, false);
+		// drawRect(background, colors.panelColor, false);
+		dcRoundedRect(background, colors.panelColor, 7, 0);
+		// drawRect(resizeRegion, colors.resizeButtonColor, false);
 
 		startPos = cornerPos + settings.border;
 		// currentPos = startPos + vec2(0, getDefaultYOffset());

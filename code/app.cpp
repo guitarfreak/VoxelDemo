@@ -884,7 +884,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glEnable(GL_DEPTH_TEST);
 		glEnable(GL_CULL_FACE);
 		glDisable(GL_SCISSOR_TEST);
-		glEnable(GL_LINE_SMOOTH);
+		// glEnable(GL_LINE_SMOOTH);
 		// glEnable(GL_POLYGON_SMOOTH);
 		// glDisable(GL_POLYGON_SMOOTH);
 		// glDisable(GL_SMOOTH);
@@ -1910,7 +1910,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			glDisable(GL_DEPTH_TEST);
 
 			bindShader(SHADER_QUAD);
-			drawRect(rect(0, -ws->currentRes.h, ws->currentRes.w, 0), rect(0,1,1,0), vec4(1,1,1,reflectionAlpha), 
+			drawRect(rect(0, -ws->currentRes.h, ws->currentRes.w, 0), vec4(1,1,1,reflectionAlpha), rect(0,1,1,0), 
 			         getFrameBuffer(FRAMEBUFFER_Reflection)->colorSlot[0]->id);
 
 			glEnable(GL_DEPTH_TEST);
@@ -2272,10 +2272,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		bindFrameBuffer(FRAMEBUFFER_2d);
 		glViewport(0,0, ws->currentRes.x, ws->currentRes.y);
-		drawRect(rect(0, -ws->currentRes.h, ws->currentRes.w, 0), rect(0,1,1,0), vec4(1), 
+		drawRect(rect(0, -ws->currentRes.h, ws->currentRes.w, 0), vec4(1), rect(0,1,1,0), 
 		         getFrameBuffer(FRAMEBUFFER_3dNoMsaa)->colorSlot[0]->id);
 		// executeCommandList(&ad->commandList2d);
-
 
 
 		glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
@@ -2285,6 +2284,38 @@ extern "C" APPMAINFUNCTION(appMain) {
 		executeCommandList(&ad->commandList2d);
 		executeCommandList(&ds->commandListDebug, false, reload);
 
+
+
+		// {	
+		// 	Vec2 corner = vec2(100,-100);
+		// 	float round = 10;
+
+		// 	// Vec2 verts[] = {(int)dc.p0.x, (int)dc.p0.y, (int)dc.p1.x, (int)dc.p1.y};
+		// 	// Vec2 verts[] = { corner, corner + vec2(-round,0), corner + vec2(0, round)};
+
+		// 	const int steps = 3;
+		// 	Vec2 verts[steps + 1];
+		// 	verts[0] = corner;
+
+		// 	float start = M_PI_2*3;
+		// 	for(int i = 0; i < steps; i++) {
+		// 		float angle = start + i*(M_PI_2/(steps-1));
+		// 		Vec2 v = vec2(sin(angle), cos(angle));
+
+		// 		verts[i+1] = corner + v*round;
+		// 	}
+
+
+		// 	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_VERTS, verts, arrayCount(verts));
+		// 	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_PRIMITIVE_MODE, 1);
+		// 	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_COLOR, colorSRGB(vec4(0,0,1,1)).e);
+
+		// 	uint tex[1] = {getTexture(TEXTURE_WHITE)->id};
+		// 	glBindTextures(0,1,tex);
+
+		// 	glDrawArraysInstancedBaseInstance(GL_TRIANGLE_FAN, 0, arrayCount(verts), 1, 0);
+		// }
+
 		blitFrameBuffers(FRAMEBUFFER_DebugMsaa, FRAMEBUFFER_DebugNoMsaa, ws->currentRes, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 
 
@@ -2292,7 +2323,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glBlendEquation(GL_FUNC_ADD);
 
 		bindFrameBuffer(FRAMEBUFFER_2d);
-		drawRect(rect(0, -ws->currentRes.h, ws->currentRes.w, 0), rect(0,1,1,0), vec4(1,1,1,ds->guiAlpha), 
+		drawRect(rect(0, -ws->currentRes.h, ws->currentRes.w, 0), vec4(1,1,1,ds->guiAlpha), rect(0,1,1,0), 
 		         getFrameBuffer(FRAMEBUFFER_DebugNoMsaa)->colorSlot[0]->id);
 
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -2305,7 +2336,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		#endif 
 
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
-		drawRect(rect(0, -ws->currentRes.h, ws->currentRes.w, 0), rect(0,1,1,0), vec4(1), 
+		drawRect(rect(0, -ws->currentRes.h, ws->currentRes.w, 0), vec4(1), rect(0,1,1,0), 
 		         getFrameBuffer(FRAMEBUFFER_2d)->colorSlot[0]->id);
 
 		#if USE_SRGB

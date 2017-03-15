@@ -100,6 +100,7 @@ enum DrawListCommand {
 	Draw_Command_Line2d_Type,
 	Draw_Command_Quad_Type,
 	Draw_Command_Rect_Type,
+	Draw_Command_RoundedRect_Type,
 	Draw_Command_Text_Type,
 	Draw_Command_Scissor_Type,
 };
@@ -147,6 +148,14 @@ struct Draw_Command_Rect {
 	Vec4 color;
 	int texture;
 	int texZ;
+};
+
+struct Draw_Command_RoundedRect {
+	Rect r;
+	Vec4 color;
+
+	float steps;
+	float size;
 };
 
 struct Font;
@@ -243,6 +252,15 @@ void dcRect(Rect r, Vec4 color, DrawCommandList* drawList = 0) {
 	command->color = color;
 	command->texture = -1;
 	command->texZ = -1;
+}
+
+void dcRoundedRect(Rect r, Vec4 color, float size, float steps = 0, DrawCommandList* drawList = 0) {
+	PUSH_DRAW_COMMAND(RoundedRect, RoundedRect);
+
+	command->r = r;
+	command->color = color;
+	command->steps = steps;
+	command->size = size;
 }
 
 void dcText(char* text, Font* font, Vec2 pos, Vec4 color, Vec2i align = vec2i(-1,1), int wrapWidth = 0, int shadow = 0, Vec4 shadowColor = vec4(0,0,0,1), DrawCommandList* drawList = 0) {
@@ -772,8 +790,7 @@ void getUniform(uint shaderId, int shaderStage, uint uniformId, float* data) {
 
 
 
-
-void drawRect(Rect r, Rect uv, Vec4 color, int texture, float texZ = -1) {	
+void drawRect(Rect r, Vec4 color, Rect uv = rect(0,0,1,1), int texture = -1, float texZ = -1) {	
 	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_PRIMITIVE_MODE, 0);
 
 	Rect cd = rectGetCenDim(r);
@@ -782,6 +799,8 @@ void drawRect(Rect r, Rect uv, Vec4 color, int texture, float texZ = -1) {
 	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_UV, uv.min.x, uv.max.x, uv.max.y, uv.min.y);
 	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_COLOR, colorSRGB(color).e);
 	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_TEXZ, texZ);
+
+	if(texture == -1) texture = getTexture(TEXTURE_WHITE)->id;
 
 	uint tex[2] = {texture, texture};
 	glBindTextures(0,2,tex);
@@ -984,7 +1003,7 @@ void drawText(char* text, Font* font, Vec2 startPos, Vec4 color, Vec2i align = v
 		if(!textSim(text, font, &tsi, &ti, startPos, wrapWidth)) break;
 		if(text[ti.index] == '\n') continue;
 
-		drawRect(ti.r, ti.uv, color, font->tex.id);
+		drawRect(ti.r, color, ti.uv, font->tex.id);
 	}
 }
 
@@ -1236,8 +1255,8 @@ void executeCommandList(DrawCommandList* list, bool print = false, bool skipStri
 			case Draw_Command_Line2d_Type: {
 				dcGetStructAndIncrement(Line2d);
 
-				// Vec2 verts[] = {dc.p0, dc.p1};
-				Vec2 verts[] = {(int)dc.p0.x, (int)dc.p0.y, (int)dc.p1.x, (int)dc.p1.y};
+				Vec2 verts[] = {dc.p0, dc.p1};
+				// Vec2 verts[] = {(int)dc.p0.x, (int)dc.p0.y, (int)dc.p1.x, (int)dc.p1.y};
 				pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_VERTS, verts, 2);
 				pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_PRIMITIVE_MODE, 1);
 				pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_COLOR, colorSRGB(dc.color).e);
@@ -1291,7 +1310,47 @@ void executeCommandList(DrawCommandList* list, bool print = false, bool skipStri
 			case Draw_Command_Rect_Type: {
 				dcGetStructAndIncrement(Rect);
 				int texture = dc.texture == -1 ? getTexture(TEXTURE_WHITE)->id : dc.texture;
-				drawRect(dc.r, dc.uv, dc.color, texture, dc.texZ-1);
+				drawRect(dc.r, dc.color, dc.uv, texture, dc.texZ-1);
+			} break;
+
+			case Draw_Command_RoundedRect_Type: {
+				dcGetStructAndIncrement(RoundedRect);
+
+				if(dc.steps == 0) dc.steps = 6;
+
+				float s = dc.size;
+				Rect r = dc.r;
+				drawRect(rect(r.min.x+s, r.min.y, r.max.x-s, r.max.y), dc.color);
+				drawRect(rect(r.min.x, r.min.y+s, r.max.x, r.max.y-s), dc.color);
+
+				Vec2 verts[10];
+
+				pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_PRIMITIVE_MODE, 1);
+				pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_COLOR, colorSRGB(dc.color).e);
+				uint tex[1] = {getTexture(TEXTURE_WHITE)->id};
+				glBindTextures(0,1,tex);
+
+				Rect rc = rectExpand(r, -vec2(s,s)*2);
+				Vec2 corners[] = {rc.max, vec2(rc.max.x, rc.min.y), rc.min, vec2(rc.min.x, rc.max.y)};
+				for(int cornerIndex = 0; cornerIndex < 4; cornerIndex++) {
+
+					Vec2 corner = corners[cornerIndex];
+					float round = s;
+					float start = M_PI_2*cornerIndex;
+
+					verts[0] = corner;
+
+					for(int i = 0; i < dc.steps; i++) {
+						float angle = start + i*(M_PI_2/(dc.steps-1));
+						Vec2 v = vec2(sin(angle), cos(angle));
+
+						verts[i+1] = corner + v*round;
+					}
+
+					pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_VERTS, verts, dc.steps+1);
+					glDrawArraysInstancedBaseInstance(GL_TRIANGLE_FAN, 0, dc.steps+1, 1, 0);
+				}
+
 			} break;
 
 			case Draw_Command_Text_Type: {
