@@ -2386,7 +2386,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 
 	if(ds->showHud) {
-		int fontSize = 18;
+		int fontSize = 19;
 		int pi = 0;
 		// Vec4 c = vec4(1.0f,0.2f,0.0f,1);
 		Vec4 c = vec4(1.0f,0.4f,0.0f,1);
@@ -2409,6 +2409,8 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			timer = 0;
 		}
 
+		fillString("Aasdfasdf"); // @Bug: First string with fillString flickers.
+
 		#define PVEC3(v) v.x, v.y, v.z
 		#define PVEC2(v) v.x, v.y
 		dcText(fillString("Fps  : %i", fps), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
@@ -2427,7 +2429,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 	}
 
 	if(ds->showMenu) {
-		int fontSize = 18;
+		int fontSize = 20;
 
 		bool initSections = false;
 
@@ -2662,7 +2664,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		ds->cHeight = 100000;
 		ds->cPos = ds->cHeight/2;
 		ds->mode = 0;
-		ds->lineGraphHeight = 40;
+		ds->lineGraphHeight = 30;
 	}
 
 	if(init) {
@@ -2681,7 +2683,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 		// float cyclesPerFrame = (float)((3.5f*((float)1/60))*1024*1024*1024);
 		float cyclesPerFrame = (float)((3.5f*((float)1/60))*1000*1000*1000);
-		fontHeight = 18;
+		fontHeight = 20;
 		Vec2 textPos = vec2(550, -fontHeight);
 		int infoCount = timer->timerInfoCount;
 
@@ -3162,19 +3164,18 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 					gui->drawTextBox(textRect, hText, hc);
 				} else {
 					highlightedIndex = -1;
-
-
 				}
 
 			}
 
-			gui->div(0.1f, 0.3f, 0); 
+			gui->div(0.1f, 0.3f, 0.3f, 0); 
 
 			if(gui->button("Reset")) {
 				camPos = vec2(graphWidth/2,0);
 				zoom = zoomInit; // To see the most right bar.
 			}
 
+			gui->slider(&ds->graphSizeMod, 1, 60);
 			gui->slider(&ds->graphSizeMod, 1, 60);
 
 			gui->label(fillString("Cam: %f, Zoom: %f", camPos.x, zoom));
