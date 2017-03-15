@@ -42,14 +42,55 @@ char* fillString(char* text, ...) {
 			bi += sLen;
 			getTStringX(sLen);
 		} else if(text[ti] == '%' && text[ti+1] == 'i') {
-			int v = va_arg(vl, int);
-			intToStr(valueBuffer, v);
-			int sLen = strLen(valueBuffer);
-			memCpy(buffer + bi, valueBuffer, sLen);
+			if(text[ti+2] == '6') {
+				// 64 bit signed integer.
 
-			ti += 2;
-			bi += sLen;
-			getTStringX(sLen);
+				assert(text[ti+3] == '4');
+
+				i64 v = va_arg(vl, i64);
+				intToStr(valueBuffer, v);
+				int sLen = strLen(valueBuffer);
+
+				if(text[ti+4] == '.') {
+					ti += 1;
+
+					int digitCount = intDigits(v);
+					int commaCount = digitCount/3;
+					if(digitCount%3 == 0) commaCount--;
+					for(int i = 0; i < commaCount; i++) {
+						strInsert(valueBuffer, sLen - (i+1)*3 - i, ',');
+						sLen++;
+					}
+				}
+
+				memCpy(buffer + bi, valueBuffer, sLen);
+				ti += 4;
+				bi += sLen;
+				getTStringX(sLen);
+			} else {
+				// 32 bit signed integer.
+				int v = va_arg(vl, int);
+				intToStr(valueBuffer, v);
+				int sLen = strLen(valueBuffer);
+
+				if(text[ti+2] == '.') {
+					ti += 1;
+
+					int digitCount = intDigits(v);
+					int commaCount = digitCount/3;
+					if(digitCount%3 == 0) commaCount--;
+					for(int i = 0; i < commaCount; i++) {
+						strInsert(valueBuffer, sLen - (i+1)*3 - i, ',');
+						sLen++;
+					}
+				}
+
+				memCpy(buffer + bi, valueBuffer, sLen);
+
+				ti += 2;
+				bi += sLen;
+				getTStringX(sLen);
+			}
 		} if(text[ti] == '%' && text[ti+1] == 's') {
 			char* str = va_arg(vl, char*);
 			int sLen = strLen(str);

@@ -109,18 +109,19 @@ Changing course for now:
  * Graph about relative timings.
   * Averages should only count when the timerblock actually gets hit.
  * Font bad outline is caused by clearcolor 0,0,0,0.
- + Add primitive drawing. (Lines for example.)
+ * Add primitive drawing. (Lines for example.)
  * Rounded corners.
  * Add some kind of timer for the debug processing to get a hint about timer collating expenses.
  * Look at font drawing.
+ * Add instant screen string debug push to debugstate. 
+ * Improve fillString.
+   * Add commas: 3,000,000, or spaces: 3 000 000
 
  - Clean up gui.
  - Using makros and defines to make templated vectors and hashtables and such.
+
  - Crashing once in a while at startup.
- - Improve fillString.
    - Add scaling: 3m -> 4000k -> 4000000
-   - Add commas: 3,000,000, or spaces: 3 000 000
- - Add instant screen string debug push to debugstate. 
  - Slot slider.
  - Clean up timeline.
 
@@ -201,17 +202,17 @@ Timer* globalTimer;
 
 // Internal.
 
-#include "rt_types.h"
-#include "rt_timer.h"
-#include "rt_misc.h"
-#include "rt_math.h"
-#include "rt_hotload.h"
-#include "rt_misc_win32.h"
-#include "rt_platformWin32.h"
+#include "rt_types.cpp"
+#include "rt_timer.cpp"
+#include "rt_misc.cpp"
+#include "rt_math.cpp"
+#include "rt_hotload.cpp"
+#include "rt_misc_win32.cpp"
+#include "rt_platformWin32.cpp"
 
-#include "memory.h"
-#include "openglDefines.h"
-#include "userSettings.h"
+#include "memory.cpp"
+#include "openglDefines.cpp"
+#include "userSettings.cpp"
 
 #include "rendering.cpp"
 #include "gui.cpp"
@@ -220,6 +221,7 @@ Timer* globalTimer;
 #include "voxel.cpp"
 
 #include "debug.cpp"
+
 
 
 
@@ -2335,6 +2337,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
+
 	if(input->keysPressed[KEYCODE_1]) { 
 		int t[] = {1,5};
 		threadQueueAdd(threadQueue, threadBench, &t);
@@ -2734,59 +2737,30 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 				if(!tInfo->initialised) continue;
 
-				int debugStringSize = 50;
-				char* buffer = 0;
-
 				gui->div(sectionWidths, arrayCount(sectionWidths)); 
 
-				buffer = fillString("%s", tInfo->file + 21);
-				gui->label(buffer,0);
+				// if(highlightedIndex == i) {
+				// 	Rect r = gui->getCurrentRegion();
+				// 	Rect line = rect(r.min, vec2(textSectionEnd,r.min.y + fontHeight));
+				// 	dcRect(line, highlightColor);
+				// }
 
-				if(highlightedIndex == i) {
-					Rect r = gui->getCurrentRegion();
-					Rect line = rect(r.min, vec2(textSectionEnd,r.min.y + fontHeight));
-					dcRect(line, highlightColor);
-				}
-
-				buffer = fillString("%s", tInfo->function);
-				Vec4 buttonColor = vec4(gui->colors.regionColor.rgb, 0.2f);
-				if(gui->button(buffer,0, 0, buttonColor)) {
+				gui->label(fillString("%s", tInfo->file + 21),0);
+				if(gui->button(fillString("%s", tInfo->function),0, 0, vec4(gui->colors.regionColor.rgb, 0.2f))) {
 					char* command = fillString("%s %s:%i", editor_executable_path, tInfo->file, tInfo->line);
 					shellExecuteNoWindow(command);
 				}
-
-				buffer = fillString("%s", tInfo->name);
-				gui->label(buffer,0);
-
-				debugStringSize = 30;
-				buffer = getTStringDebug(debugStringSize);
-				sprintfu64NumberDots(buffer, "c", debugStringSize, debugStringSize, timing->cycles);
-				gui->label(buffer,2);
-
-				debugStringSize = 30;
-				buffer = getTStringDebug(debugStringSize);
-				sprintfu64NumberDots(buffer, "", debugStringSize, debugStringSize, timing->hits);
-				gui->label(buffer,2);
-
-				debugStringSize = 30;
-				buffer = getTStringDebug(debugStringSize);
-				sprintfu64NumberDots(buffer, "c", debugStringSize, debugStringSize, timing->cyclesOverHits);
-				gui->label(buffer,2);
-
-				debugStringSize = 30;
-				buffer = getTStringDebug(debugStringSize);
-				sprintfu64NumberDots(buffer, "c", debugStringSize, debugStringSize, statistics[i].avg);
-				gui->label(buffer,2);
-
-				buffer = fillString("%.3f%%", ((float)timing->cycles/cyclesPerFrame)*100);
-				gui->label(buffer,2);
+				gui->label(fillString("%s", tInfo->name),0);
+				gui->label(fillString("%i64.c", timing->cycles),2);
+				gui->label(fillString("%i64.", timing->hits),2);
+				gui->label(fillString("%i64.c", timing->cyclesOverHits),2);
+				gui->label(fillString("%i64.c", (i64)statistics[i].avg),2); // Not a i64 but whatever.
+				gui->label(fillString("%.3f%%", ((float)timing->cycles/cyclesPerFrame)*100),2);
 
 				// Bar graphs.
-
 				gui->empty();
 				Rect r = gui->getCurrentRegion();
 				float rheight = gui->getDefaultHeight();
-
 				float fontBaseOffset = 4;
 
 				float xOffset = 0;
@@ -3100,11 +3074,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 								hRect = r;
 								hc = c;
 
-								char* numberFormatted = getTStringDebug(30);
-								sprintfu64NumberDots(numberFormatted, "c", 30, 30, slotSize);
-								char* text = fillString("%s %s (%s)", tInfo->function, tInfo->name, numberFormatted);
-
-								hText = text;
+								hText = fillString("%s %s (%i.c)", tInfo->function, tInfo->name, slotSize);
 								highlightedIndex = slot->timerIndex;
 								hSlot = slot;
 							} else {
@@ -3112,14 +3082,10 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 								gui->drawRect(r, vec4(g,g,g,1));
 
 								if(textRectVisible) {
-									char* numberFormatted = getTStringDebug(30);
-									sprintfu64NumberDots(numberFormatted, "c", 30, 30, slotSize);
-									char* text = fillString("%s %s (%s)", tInfo->function, tInfo->name, numberFormatted);
-
 									if(barLeft < bgRect.min.x) r.min.x = bgRect.min.x;
 									Rect textRect = rect(r.min+vec2(1,1), r.max-vec2(1,1));
 
-									gui->drawTextBox(textRect, text, c);
+									gui->drawTextBox(textRect, fillString("%s %s (%i.c)", tInfo->function, tInfo->name, slotSize), c);
 								}
 							}
 						}
@@ -3237,11 +3203,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 					y = mapRange(p, orthoBottom, orthoTop, rBottom, rTop);
 
 					dcLine2d(vec2(rectNumbers.min.x, y), vec2(rectNumbers.min.x + length, y), vec4(1,1,1,1)); 
-
-					float cycles = p;
-					char* s = getTStringDebug(30);
-					sprintfu64NumberDots(s, "c", 30, 30, cycles);
-					dcText(s, gui->font, vec2(rectNumbers.min.x + length + 2, y), vec4(1,1,1,1), vec2i(-1,0));
+					dcText(fillString("%i64.c",(i64)p), gui->font, vec2(rectNumbers.min.x + length + 2, y), vec4(1,1,1,1), vec2i(-1,0));
 				}
 
 				gui->scissorPop();

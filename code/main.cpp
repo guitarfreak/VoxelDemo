@@ -2,9 +2,9 @@
 #define NOMINMAX
 #include <windows.h>
 
-#include "rt_misc.h"
-#include "rt_hotload.h"
-#include "rt_misc_win32.h"
+#include "rt_misc.cpp"
+#include "rt_hotload.cpp"
+#include "rt_misc_win32.cpp"
 
 
 int CALLBACK WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR commandLine, int showCode) {

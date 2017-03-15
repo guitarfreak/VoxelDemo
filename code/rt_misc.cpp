@@ -1,6 +1,6 @@
 #pragma once 
 
-#include "rt_types.h"
+#include "rt_types.cpp"
 #include <stdio.h>
 
 #define arrayCount(array) (sizeof(array) / sizeof((array)[0]))
@@ -49,7 +49,7 @@ void memCpy(void* dest, void* source, int numOfBytes) {
 // Strings
 // 
 
-int strLen(char* str) {
+int strLen(char* str) {	
 	int len = 0;
 	while(str[len] != '\0') len++;
 
@@ -96,7 +96,42 @@ inline char * intToStr(char * buffer, int var) {
 	return buffer;
 };
 
-char * floatToStr(char * buffer, float f, int precision = 0)
+int intDigits(i64 n) {
+	int count = 0;
+	if(n == 0) return 1;
+
+	while(n != 0) {
+		n /= 10;
+		count++;
+	}
+
+	return count;
+}
+
+inline char * intToStr(char* buffer, i64 var) {
+	int digits = intDigits(var);
+	if(var < 0) digits++;
+	buffer[digits--] = '\0';
+
+	if(var < 0) {
+		buffer[0] = '-';
+		var *= -1;
+	}
+
+	if(var == 0) {
+		buffer[0] = '0';
+		return buffer;
+	}
+
+	while(var != 0) {
+		buffer[digits--] = (char)((var % 10) + '0');
+		var /= 10;
+	}
+
+	return buffer;
+};
+
+char* floatToStr(char * buffer, float f, int precision = 0)
 {
 	int stringSize = sprintf(buffer, "%1.7f", f); // TODO: Make more robust.
 	if (precision > 0) {
@@ -904,29 +939,3 @@ void updateStatistic(Statistic* stat, f64 value) {
 void endStatistic(Statistic* stat) {
 	stat->avg /= stat->count;
 }
-
-//
-
-void sprintfu64NumberDots(char* buffer, char* suffix, int size, int size2, u64 num) {
-	if(num < 1000) {
-		_snprintf_s(buffer, size, size2, "%I64u%s", num, suffix);
-	} else if(num < 1000000) {
-		_snprintf_s(buffer, size, size2, "%I64u,%0.3I64u%s", 
-		            (u64)(num/1000), 
-		            (u64)(num%1000), suffix);
-	} else if(num < 1000000000) {
-		_snprintf_s(buffer, size, size2, "%I64u,%0.3I64u,%0.3I64u%s", 
-		            (u64)(num/1000000) % 1000, 
-		            (u64)(num/1000) % 1000, 
-		            (u64)(num%1000), suffix);
-	} else {
-		_snprintf_s(buffer, size, size2, "%I64u,%0.3I64u,%0.3I64u,%0.3I64u%s", 
-		            (u64)(num/1000000000), 
-		            (u64)(num/1000000) % 1000, 
-		            (u64)(num/1000) % 1000, 
-		            (u64)(num%1000), suffix);
-	} 
-
-}
-
-
