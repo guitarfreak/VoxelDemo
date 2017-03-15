@@ -149,7 +149,9 @@ enum FrameBufferType {
 	FRAMEBUFFER_3dNoMsaa,
 	FRAMEBUFFER_Reflection,
 	FRAMEBUFFER_2d,
-	FRAMEBUFFER_Debug,
+
+	FRAMEBUFFER_DebugMsaa,
+	FRAMEBUFFER_DebugNoMsaa,
 
 	FRAMEBUFFER_SIZE,
 };

@@ -121,6 +121,7 @@ Changing course for now:
  - Add instant screen string debug push to debugstate.
  - Add some kind of timer for the debug processing to get a hint about timer collating expenses.
  - Rounded corners.
+ - Slot slider.
 
 //-------------------------------------
 //               BUGS
@@ -551,7 +552,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 			attachToFrameBuffer(FRAMEBUFFER_Reflection, FRAMEBUFFER_SLOT_DEPTH_STENCIL, GL_DEPTH24_STENCIL8, 0, 0);
 
 			attachToFrameBuffer(FRAMEBUFFER_2d, FRAMEBUFFER_SLOT_COLOR, GL_RGBA8, 0, 0);
-			attachToFrameBuffer(FRAMEBUFFER_Debug, FRAMEBUFFER_SLOT_COLOR, GL_RGBA8, 0, 0);
+
+			attachToFrameBuffer(FRAMEBUFFER_DebugMsaa, FRAMEBUFFER_SLOT_COLOR, GL_RGBA8, 0, 0, ad->msaaSamples);
+			attachToFrameBuffer(FRAMEBUFFER_DebugNoMsaa, FRAMEBUFFER_SLOT_COLOR, GL_RGBA8, 0, 0);
 
 			ad->updateFrameBuffers = true;
 		}
@@ -796,7 +799,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 		setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_3dNoMsaa, s.w, s.h);
 		setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_Reflection, reflectionRes.w, reflectionRes.h);
 		setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_2d, ws->currentRes.w, ws->currentRes.h);
-		setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_Debug, ws->currentRes.w, ws->currentRes.h);
+
+		setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_DebugMsaa, ws->currentRes.w, ws->currentRes.h);
+		setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_DebugNoMsaa, ws->currentRes.w, ws->currentRes.h);
 	}
 	
 
@@ -836,7 +841,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// Clear all the framebuffers and window backbuffer.
 	{
 
-
 		// for(int i = 0; i < arrayCount(gs->frameBuffers); i++) {
 		// 	FrameBuffer* fb = getFrameBuffer(i);
 		// 	bindFrameBuffer(i);
@@ -864,7 +868,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glClearColor(0,0,0,0);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
-		bindFrameBuffer(FRAMEBUFFER_Debug);
+		bindFrameBuffer(FRAMEBUFFER_DebugMsaa);
+		glClearColor(0,0,0,0);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+
+		bindFrameBuffer(FRAMEBUFFER_DebugNoMsaa);
 		glClearColor(0,0,0,0);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 	}
@@ -2266,27 +2274,31 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glViewport(0,0, ws->currentRes.x, ws->currentRes.y);
 		drawRect(rect(0, -ws->currentRes.h, ws->currentRes.w, 0), rect(0,1,1,0), vec4(1), 
 		         getFrameBuffer(FRAMEBUFFER_3dNoMsaa)->colorSlot[0]->id);
+		// executeCommandList(&ad->commandList2d);
+
+
+
+		glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
+		glBlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
+
+		bindFrameBuffer(FRAMEBUFFER_DebugMsaa);
 		executeCommandList(&ad->commandList2d);
-
-
-		bindFrameBuffer(FRAMEBUFFER_Debug);
-		glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-		glBlendEquationSeparate(GL_FUNC_ADD, GL_MAX);
-		// Skipping strings for now when reloading because hardcoded ones get a new memory address after changing the dll.
-		// executeCommandList(&ds->commandListDebug, false, reload);
-
-
-		bindFrameBuffer(FRAMEBUFFER_2d);
-		// glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-		// glBlendEquation(GL_FUNC_ADD);
-		drawRect(rect(0, -ws->currentRes.h, ws->currentRes.w, 0), rect(0,1,1,0), vec4(1,1,1,ds->guiAlpha), 
-		         getFrameBuffer(FRAMEBUFFER_Debug)->colorSlot[0]->id);
-
-
 		executeCommandList(&ds->commandListDebug, false, reload);
 
+		blitFrameBuffers(FRAMEBUFFER_DebugMsaa, FRAMEBUFFER_DebugNoMsaa, ws->currentRes, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 
-		int abc = 234;
+
+		glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+		glBlendEquation(GL_FUNC_ADD);
+
+		bindFrameBuffer(FRAMEBUFFER_2d);
+		drawRect(rect(0, -ws->currentRes.h, ws->currentRes.w, 0), rect(0,1,1,0), vec4(1,1,1,ds->guiAlpha), 
+		         getFrameBuffer(FRAMEBUFFER_DebugNoMsaa)->colorSlot[0]->id);
+
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		glBlendEquation(GL_FUNC_ADD);
+
+
 
 		#if USE_SRGB 
 			glEnable(GL_FRAMEBUFFER_SRGB);
