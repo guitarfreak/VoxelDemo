@@ -1051,6 +1051,15 @@ Vec2 testgetTextStartPos(char* text, Font* font, Vec2 startPos, Vec2i align = ve
 	return startPos;
 }
 
+Rect getTextLineRect(char* text, Font* font, Vec2 startPos, Vec2i align = vec2i(-1,1)) {
+	startPos = testgetTextStartPos(text, font, startPos, align, 0);
+
+	Vec2 textDim = getTextDim(text, font);
+	Rect r = rectULDim(startPos, textDim);
+
+	return r;
+}
+
 void drawText(char* text, Font* font, Vec2 startPos, Vec4 color, Vec2i align = vec2i(-1,1), int wrapWidth = 0) {
 	startPos = testgetTextStartPos(text, font, startPos, align, wrapWidth);
 	startPos = vec2(roundInt((int)startPos.x), roundInt((int)startPos.y));

@@ -36,24 +36,23 @@ struct DebugState {
 	int savedBufferIndex;
 	int savedBufferMax;
 	int savedBufferCount;
+	int lastBufferIndex;
 
 	GraphSlot graphSlots[16][8]; // threads, stackIndex
 	int graphSlotCount[16];
 
-	int lastBufferIndex;
-	int graphSortingIndex;
-
-	double camPos;
-	double zoom;
-	float graphSizeMod;
-	float graphOffset;
-
 	//
 
 	int mode;
-	float cHeight;
-	float cPos;
+	int graphSortingIndex;
+	
+	double timelineCamPos;
+	double timelineCamSize;
+
+	float lineGraphCamPos;
+	float lineGraphCamSize;
 	float lineGraphHeight;
+	int lineGraphHighlight;
 
 	//
 

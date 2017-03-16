@@ -2529,8 +2529,8 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		ds->lastCycleIndex = ds->cycleIndex;
 		ds->cycleIndex = mod(ds->cycleIndex-1, arrayCount(ds->timings));
 
-		ds->zoom = -1;
-		ds->camPos = -1;
+		ds->timelineCamSize = -1;
+		ds->timelineCamPos = -1;
 
 		ds->setPause = false;
 	}
@@ -2632,17 +2632,12 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 	assert(timer->bufferIndex < timer->bufferSize);
 
 	if(init) {
-		ds->cHeight = 700000;
-		// ds->cPos = ds->cHeight/2;
-		ds->cPos = 0;
+		ds->lineGraphCamSize = 700000;
+		ds->lineGraphCamPos = 0;
 		ds->mode = 0;
 		ds->lineGraphHeight = 30;
+		ds->lineGraphHighlight = 0;
 	}
-
-	if(init) {
-		ds->graphSizeMod = 1;
-	}
-
 
 	//
 	// Draw timing info.
@@ -2812,9 +2807,9 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			double cyclesSize = cyclesRight - cyclesLeft;
 
 			// Setup cam pos and zoom.
-			if(ds->camPos == -1 && ds->zoom == -1) {
-				ds->zoom = (recentSlot.cycles + recentSlot.size) - oldSlot.cycles;
-				ds->camPos = oldSlot.cycles + ds->zoom/2;
+			if(ds->timelineCamPos == -1 && ds->timelineCamSize == -1) {
+				ds->timelineCamSize = (recentSlot.cycles + recentSlot.size) - oldSlot.cycles;
+				ds->timelineCamPos = oldSlot.cycles + ds->timelineCamSize/2;
 			}
 
 			if(gui->input.mouseWheel) {
@@ -2826,25 +2821,25 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				if(input->keysDown[KEYCODE_SHIFT] && input->keysDown[KEYCODE_CTRL]) 
 					offset = wheel < 0 ? 1.4f : 1/1.4f;
 
-				double oldZoom = ds->zoom;
-				ds->zoom *= offset;
-				clampDouble(&ds->zoom, 1000, cyclesSize);
-				double diff = ds->zoom - oldZoom;
+				double oldZoom = ds->timelineCamSize;
+				ds->timelineCamSize *= offset;
+				clampDouble(&ds->timelineCamSize, 1000, cyclesSize);
+				double diff = ds->timelineCamSize - oldZoom;
 
 				float zoomOffset = mapRange(input->mousePos.x, bgRect.min.x, bgRect.max.x, -0.5f, 0.5f);
-				ds->camPos -= diff*zoomOffset;
+				ds->timelineCamPos -= diff*zoomOffset;
 			}
 
 
 			Vec2 dragDelta = vec2(0,0);
 			gui->drag(bgRect, &dragDelta, vec4(0,0,0,0));
 
-			ds->camPos -= dragDelta.x * (ds->zoom/graphWidth);
-			clampDouble(&ds->camPos, cyclesLeft + ds->zoom/2, cyclesRight - ds->zoom/2);
+			ds->timelineCamPos -= dragDelta.x * (ds->timelineCamSize/graphWidth);
+			clampDouble(&ds->timelineCamPos, cyclesLeft + ds->timelineCamSize/2, cyclesRight - ds->timelineCamSize/2);
 
 
-			double camPos = ds->camPos;
-			double zoom = ds->zoom;
+			double camPos = ds->timelineCamPos;
+			double zoom = ds->timelineCamSize;
 			double orthoLeft = camPos - zoom/2;
 			double orthoRight = camPos + zoom/2;
 
@@ -3053,11 +3048,11 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			gui->div(0.1f, 0); 
 
 			if(gui->button("Reset")) {
-				ds->zoom = (recentSlot.cycles + recentSlot.size) - oldSlot.cycles;
-				ds->camPos = oldSlot.cycles + ds->zoom/2;
+				ds->timelineCamSize = (recentSlot.cycles + recentSlot.size) - oldSlot.cycles;
+				ds->timelineCamPos = oldSlot.cycles + ds->timelineCamSize/2;
 			}
 
-			gui->label(fillString("Cam: %i64., Zoom: %i64.", (i64)ds->camPos, (i64)ds->zoom));
+			gui->label(fillString("Cam: %i64., Zoom: %i64.", (i64)ds->timelineCamPos, (i64)ds->timelineCamSize));
 		}
 		
 
@@ -3108,20 +3103,20 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				if(input->keysDown[KEYCODE_SHIFT] && input->keysDown[KEYCODE_CTRL]) 
 					offset = wheel < 0 ? 1.4f : 1/1.4f;
 
-				float heightDiff = ds->cHeight;
-				ds->cHeight *= offset;
-				ds->cHeight = clampMin(ds->cHeight, 0.00001f);
-				heightDiff -= ds->cHeight;
+				float heightDiff = ds->lineGraphCamSize;
+				ds->lineGraphCamSize *= offset;
+				ds->lineGraphCamSize = clampMin(ds->lineGraphCamSize, 0.00001f);
+				heightDiff -= ds->lineGraphCamSize;
 
 				float mouseOffset = mapRange(input->mousePosNegative.y, rBottom, rTop, -0.5f, 0.5f);
-				ds->cPos += heightDiff * mouseOffset;
+				ds->lineGraphCamPos += heightDiff * mouseOffset;
 			}
 
-			ds->cPos -= dragDelta.y * ((ds->cHeight)/(rTop - rBottom));
-			clampMin(&ds->cPos, ds->cHeight/2.05f);
+			ds->lineGraphCamPos -= dragDelta.y * ((ds->lineGraphCamSize)/(rTop - rBottom));
+			clampMin(&ds->lineGraphCamPos, ds->lineGraphCamSize/2.05f);
 
-			float orthoTop = ds->cPos + ds->cHeight/2;
-			float orthoBottom = ds->cPos - ds->cHeight/2;
+			float orthoTop = ds->lineGraphCamPos + ds->lineGraphCamSize/2;
+			float orthoBottom = ds->lineGraphCamPos - ds->lineGraphCamSize/2;
 
 			// Draw numbers.
 			{
@@ -3133,7 +3128,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				float div = 10;
 				float timelineSection = div;
 				float splitMod = (1/div)*0.2f;
-				while(timelineSection < ds->cHeight*splitMod*(ws->currentRes.h/(rTop-rBottom))) timelineSection *= div;
+				while(timelineSection < ds->lineGraphCamSize*splitMod*(ws->currentRes.h/(rTop-rBottom))) timelineSection *= div;
 
 				float start = roundMod(orthoBottom, timelineSection) - timelineSection;
 
@@ -3165,9 +3160,13 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				float yAvg = mapRange(stat->avg, orthoBottom, orthoTop, rBottom, rTop);
 				char* text = strLen(info->name) > 0 ? info->name : info->function;
 				float textWidth = getTextDim(text, gui->font, vec2(rectNames.max.x - 2, yAvg)).w;
-				gui->scissorPush(rectNames);
-				dcText(text, gui->font, vec2(rectNames.max.x - 2, yAvg), vec4(1,1,1,1), vec2i(1,-1));
-				gui->scissorPop();
+
+				Rect tr = getTextLineRect(text, gui->font, vec2(rectNames.max.x - 2, yAvg), vec2i(1,-1));
+				if(gui->buttonUndocked(text, tr, 2, gui->colors.panelColor)) ds->lineGraphHighlight = timerIndex;
+
+				// gui->scissorPush(rectNames);
+				// dcText(text, gui->font, vec2(rectNames.max.x - 2, yAvg), vec4(1,1,1,1), vec2i(1,-1));
+				// gui->scissorPop();
 
 				Rect rectNamesAndLines = rect(rectNames.min, rectLines.max);
 				gui->scissorPush(rectNamesAndLines);
@@ -3176,7 +3175,8 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 				gui->scissorPush(rectLines);
 
-				dcState(STATE_LINEWIDTH, 2);
+				if(timerIndex == ds->lineGraphHighlight) dcState(STATE_LINEWIDTH, 3);
+				else dcState(STATE_LINEWIDTH, 1);
 
 				bool firstEmpty = ds->timings[0][timerIndex].cyclesOverHits == 0;
 				Vec2 p = vec2(rectLines.min.x, 0);

@@ -732,6 +732,22 @@ struct Gui {
 		return active;
 	}
 
+	bool buttonUndocked(char* text, Rect region, int align = 1, Vec4 bgColor = vec4(0,0,0,0)) {
+		incrementId();
+
+		bool mouseOver = getMouseOver(input.mousePos, region);
+		bool active = setActive(mouseOver);
+		Vec4 colorAdd = getColorAdd(active, mouseOver);
+		// Vec4 finalColor = colors.regionColor + colorAdd;
+		Vec4 finalColor = (bgColor==vec4(0,0,0,0) ? colors.regionColor:bgColor) + colorAdd;
+
+		drawRect(region, finalColor);
+		drawText(text, align, region);
+
+		post();
+		return active;
+	}
+
 	bool switcher(char* text, bool* value) {
 		bool active = false;
 		if(button(text, (int)(*value) + 1)) {
