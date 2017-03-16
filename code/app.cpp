@@ -118,12 +118,13 @@ Changing course for now:
  * Improve fillString.
    * Add commas: 3,000,000, or spaces: 3 000 000
  * Clean up timeline.
+ * Draw text function that stops drawing when character outside of scissor rect.
 
  - Crashing once in a while at startup.
  - Add scaling: 3m -> 4000k -> 4000000
  - Clean up gui.
  - Using makros and defines to make templated vectors and hashtables and such.
- - Draw text function that stops drawing when character outside of scissor rect.
+ - Set timerinfos colors at start.
 
 //-------------------------------------
 //               BUGS
@@ -2273,7 +2274,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		bindFrameBuffer(FRAMEBUFFER_DebugMsaa);
 		executeCommandList(&ad->commandList2d);
 
-
 		double timeStamp = timerInit();
 			executeCommandList(&ds->commandListDebug, false, reload);
 		static double tempTime = 0;
@@ -2283,15 +2283,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			tempTime = 0;
 		}
 
-		// 	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_VERTS, verts, arrayCount(verts));
-		// 	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_PRIMITIVE_MODE, 1);
-		// 	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_COLOR, colorSRGB(vec4(0,0,1,1)).e);
-
-		// 	uint tex[1] = {getTexture(TEXTURE_WHITE)->id};
-		// 	glBindTextures(0,1,tex);
-
-		// 	glDrawArraysInstancedBaseInstance(GL_TRIANGLE_FAN, 0, arrayCount(verts), 1, 0);
-		// }
+		// drawTextLineCulled("sdfWT34t3w4tSEr", getFont(FONT_CALIBRI, 30), vec2(200,-200), 20, vec4(1,0,1,1));
 
 		blitFrameBuffers(FRAMEBUFFER_DebugMsaa, FRAMEBUFFER_DebugNoMsaa, ws->currentRes, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 
@@ -3374,7 +3366,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 							if(barLeft < bgRect.min.x) r.min.x = bgRect.min.x;
 							Rect textRect = rect(r.min+vec2(1,1), r.max-vec2(1,1));
 
-							gui->drawTextBox(textRect, fillString("%s %s (%i64.c)", tInfo->function, tInfo->name, slot->size), c);
+							gui->drawTextBox(textRect, fillString("%s %s (%i.c)", tInfo->function, tInfo->name, slot->size), c, 0, rectGetDim(textRect).w);
 						}
 					}
 

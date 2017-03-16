@@ -283,14 +283,17 @@ struct Gui {
 		scissorPop();
 	}
 
-	void drawText(char* text, int align, Rect region) {
+	void drawText(char* text, int align, Rect region, float cullWidth = -1) {
 		scissorPush(region);
 
 		Vec2 textPos = rectGetCen(region) + vec2(0,fontHeight*settings.fontOffset);
 		if(align == 0) textPos.x -= rectGetDim(region).w*0.5f;
 		else if(align == 2) textPos.x += rectGetDim(region).w*0.5f;
 
-		dcText(text, font, textPos, colors.textColor, vec2i(align-1, 0), 0, settings.textShadow, colors.shadowColor);		
+		if(cullWidth == -1) 
+			dcText(text, font, textPos, colors.textColor, vec2i(align-1, 0), 0, settings.textShadow, colors.shadowColor);		
+		else 
+			dcTextLine(text, font, textPos, colors.textColor, vec2i(align-1, 0), cullWidth, settings.textShadow, colors.shadowColor);		
 
 		scissorPop();
 	}
@@ -306,9 +309,9 @@ struct Gui {
 		if(scissor) scissorPop();
 	}
 
-	void drawTextBox(Rect region, char* text, Vec4 bgColor, int align = 0) {
+	void drawTextBox(Rect region, char* text, Vec4 bgColor, int align = 0, float cullWidth = -1) {
 		drawRect(region, bgColor, false);
-		drawText(text, align, region);
+		drawText(text, align, region, cullWidth);
 	}
 
 	void start(GuiInput guiInput, Font* font, Vec2i res, bool moveable = true, bool resizeable = true, bool clipToWindow = true) {

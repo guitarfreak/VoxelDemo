@@ -212,6 +212,7 @@ struct Draw_Command_Text {
 	Vec4 shadowColor;
 
 	int wrapWidth;
+	float cullWidth;
 };
 
 struct Draw_Command_Scissor {
@@ -316,6 +317,22 @@ void dcText(char* text, Font* font, Vec2 pos, Vec4 color, Vec2i align = vec2i(-1
 	command->shadow = shadow;
 	command->shadowColor = shadowColor;
 	command->wrapWidth = wrapWidth;
+	command->cullWidth = -1;
+}
+
+void dcTextLine(char* text, Font* font, Vec2 pos, Vec4 color, Vec2i align = vec2i(-1,1), int cullWidth = -1, int shadow = 0, Vec4 shadowColor = vec4(0,0,0,1), DrawCommandList* drawList = 0) {
+	PUSH_DRAW_COMMAND(Text, Text);
+
+	command->text = text;
+	command->font = font;
+	command->pos = pos;
+	command->color = color;
+	command->vAlign = align.x;
+	command->hAlign = align.y;
+	command->shadow = shadow;
+	command->shadowColor = shadowColor;
+	command->wrapWidth = 0;
+	command->cullWidth = cullWidth;
 }
 
 void dcScissor(Rect rect, DrawCommandList* drawList = 0) {
@@ -1048,6 +1065,22 @@ void drawText(char* text, Font* font, Vec2 startPos, Vec4 color, Vec2i align = v
 	}
 }
 
+void drawTextLineCulled(char* text, Font* font, Vec2 startPos, float width, Vec4 color, Vec2i align = vec2i(-1,1)) {
+	startPos = testgetTextStartPos(text, font, startPos, align, 0);
+	startPos = vec2(roundInt((int)startPos.x), roundInt((int)startPos.y));
+
+	TextSimInfo tsi = initTextSimInfo(startPos);
+	while(true) {
+		TextInfo ti;
+		if(!textSim(text, font, &tsi, &ti, startPos, 0)) break;
+		if(text[ti.index] == '\n') continue;
+
+		if(ti.pos.x > startPos.x + width) break;
+
+		drawRect(ti.r, color, ti.uv, font->tex.id);
+	}
+}
+
 Vec2 textIndexToPos(char* text, Font* font, Vec2 startPos, int index, Vec2i align = vec2i(-1,1), int wrapWidth = 0) {
 	startPos = testgetTextStartPos(text, font, startPos, align, wrapWidth);
 
@@ -1399,9 +1432,15 @@ void executeCommandList(DrawCommandList* list, bool print = false, bool skipStri
 
 				if(skipStrings) break;
 
-				if(dc.shadow != 0) 
-					drawText(dc.text, dc.font, dc.pos + vec2(dc.shadow,-dc.shadow), dc.shadowColor, vec2i(dc.vAlign, dc.hAlign), dc.wrapWidth);
-				drawText(dc.text, dc.font, dc.pos, dc.color, vec2i(dc.vAlign, dc.hAlign), dc.wrapWidth);
+				if(dc.cullWidth == -1) {
+					if(dc.shadow != 0) 
+						drawText(dc.text, dc.font, dc.pos + vec2(dc.shadow,-dc.shadow), dc.shadowColor, vec2i(dc.vAlign, dc.hAlign), dc.wrapWidth);
+					drawText(dc.text, dc.font, dc.pos, dc.color, vec2i(dc.vAlign, dc.hAlign), dc.wrapWidth);
+				} else {
+					if(dc.shadow != 0) 
+						drawTextLineCulled(dc.text, dc.font, dc.pos + vec2(dc.shadow,-dc.shadow), dc.cullWidth, dc.shadowColor, vec2i(dc.vAlign, dc.hAlign));
+					drawTextLineCulled(dc.text, dc.font, dc.pos, dc.cullWidth, dc.color, vec2i(dc.vAlign, dc.hAlign));
+				}
 
 			} break;
 
