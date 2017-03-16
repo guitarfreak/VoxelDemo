@@ -119,7 +119,7 @@ Changing course for now:
  * Add instant screen string debug push to debugstate. 
  * Improve fillString.
    * Add commas: 3,000,000, or spaces: 3 000 000
- * Clean up timeline.
+ * Clean up timeline.y
  * Draw text function that stops drawing when character outside of scissor rect.
  * Set timerinfos colors at start.
 
@@ -416,7 +416,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ds->timer->bufferSize = timerSlots;
 		ds->timer->timerBuffer = (TimerSlot*)getPMemoryDebug(sizeof(TimerSlot) * timerSlots);
 
-		ds->savedBufferMax = 10000;
+		ds->savedBufferMax = 20000;
 		ds->savedBufferIndex = 0;
 		ds->savedBufferCount = 0;
 		ds->savedBuffer = (GraphSlot*)getPMemoryDebug(sizeof(GraphSlot) * ds->savedBufferMax);
@@ -2497,6 +2497,15 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		for(int i = 0; i < timerCount; i++) {
 			TimerInfo* info = timer->timerInfos + i;
 
+			// Set colors.
+			float ss = i%(timerCount/2) / ((float)timerCount/2);
+			float h = i < timerCount/2 ? 0.1f : -0.1f;
+			Vec3 color = vec3(0,0,0);
+			hslToRgb(color.e, 360*ss, 0.5f, 0.5f+h);
+
+			vSet3(info->color, color.r, color.g, color.b);
+
+
 			if(!info->initialised || info->stringsSaved) continue;
 			char* s;
 			
@@ -2513,14 +2522,6 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			strCpy(info->name, s);
 
 			info->stringsSaved = true;
-
-			// Set colors.
-			float ss = i%(timerCount/2) / ((float)timerCount/2);
-			float h = i < timerCount/2 ? 0.1f : -0.1f;
-			Vec3 color = vec3(0,0,0);
-			hslToRgb(color.e, 360*ss, 0.5f, 0.5f+h);
-
-			vSet3(info->color, color.r, color.g, color.b);
 		}
 	}
 
@@ -2771,356 +2772,6 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			}
 		}
 
-
-		#if 0
-		// Timeline graph.
-		if(ds->mode == 2)
-		{
-			gui->empty();
-			Rect cyclesRect = gui->getCurrentRegion();
-			gui->heightPush(1.5f);
-			gui->empty();
-			Rect headerRect = gui->getCurrentRegion();
-			gui->heightPop();
-
-			float lineHeightOffset = 1.2;
-			float lineHeight = fontHeight * lineHeightOffset;
-			float heightP = 3*lineHeight +  2*lineHeight*(threadQueue->threadCount-1);
-
-			gui->heightPush(heightP);
-			gui->empty();
-
-			Rect bgRect = gui->getCurrentRegion();
-			Vec2 startPos = rectGetUL(bgRect);
-
-			Vec2 dragDelta = vec2(0,0);
-			gui->drag(bgRect, &dragDelta, vec4(0,0,0,0));
-
-			float graphWidth = rectGetDim(bgRect).w;
-			Vec2 camPosInit = vec2(graphWidth/2,0);
-			float zoomInit = 1.0001f; // To see the most right bar.
-
-			static Vec2 camPos = camPosInit;
-			static float zoom = zoomInit;
-
-			camPos.x -= dragDelta.x * ((graphWidth*zoom)/graphWidth);
-
-			gui->heightPop();
-
-			{
-				GraphSlot* graphTimerBuffer = ds->savedBuffer;
-				int graphTimerBufferIndex = ds->savedBufferIndex;
-				int graphTimerBufferMax = ds->savedBufferMax;
-				int graphTimerBufferCount = ds->savedBufferCount;
-
-				int firstBufferIndex = graphTimerBufferIndex;
-				int lastBufferIndex = mod(graphTimerBufferIndex - 1, graphTimerBufferIndex);
-				int count = 0;
-				GraphSlot lastSlot = graphTimerBuffer[lastBufferIndex];
-				GraphSlot firstSlot = graphTimerBuffer[firstBufferIndex];
-
-				float targetCycles = cyclesPerFrame * ds->graphSizeMod;
-				// float targetCycles = cyclesPerFrame;
-				float maxCycles = lastSlot.cycles + lastSlot.size - firstSlot.cycles;
-				clampMax(&targetCycles, maxCycles);
-
-				u64 baseCycleCount = lastSlot.cycles + lastSlot.size - targetCycles;
-
-				// Searching backwards until we find our cycle target.
-				for(int i = 0; i < graphTimerBufferCount; i++) {
-					int slotIndex = mod(lastBufferIndex-i, graphTimerBufferMax);
-					GraphSlot* slot = graphTimerBuffer + slotIndex;
-					if(slot->cycles < baseCycleCount) {
-						firstBufferIndex = mod(slotIndex+1, graphTimerBufferMax); // Get first slot that is inside our region.
-						firstSlot = graphTimerBuffer[firstBufferIndex];
-						break;
-					}
-					count++;
-				}
-
-				// u64 baseCycleCount = firstSlot.cycles;
-				u64 startCycleCount = 0;
-				u64 endCycleCount = cyclesPerFrame;
-				u64 furthestCycleCount = lastSlot.cycles + lastSlot.size - baseCycleCount;
-				float furthestRightSlot = mapRange(furthestCycleCount, startCycleCount, endCycleCount, 0, graphWidth);
-
-				bool extendedView = endCycleCount < furthestCycleCount;
-
-				float oldWidth = -1;
-				if(gui->input.mouseWheel) {
-					oldWidth = graphWidth*zoom;
-
-					float wheel = gui->input.mouseWheel;
-
-					float offset = wheel < 0 ? 1.1f : 0.9f;
-					if(!input->keysDown[KEYCODE_SHIFT] && input->keysDown[KEYCODE_CTRL]) 
-						offset = wheel < 0 ? 1.2f : 0.8f;
-					if(input->keysDown[KEYCODE_SHIFT] && input->keysDown[KEYCODE_CTRL]) 
-						offset = wheel < 0 ? 1.4f : 0.6f;
-
-					zoom *= offset;
-					zoom = clampMin(zoom, 0.00001f);
-				}
-
-				// zoom = clampMax(zoom, 4.0f);
-				if(extendedView) zoom = clampMax(zoom, furthestRightSlot / graphWidth);
-				else zoom = clampMax(zoom, 1);
-
-				if(gui->input.mouseWheel) {
-					float addedWidth = graphWidth*zoom - oldWidth;
-					float mZoomOffset = mapRange(input->mousePos.x, bgRect.min.x, bgRect.max.x, -1, 1);
-					camPos.x -= (addedWidth/2)*mZoomOffset;
-				}
-
-				float orthoMin = (graphWidth*zoom)/2 - (graphWidth*zoom)/2;
-				float orthoMax = -(graphWidth*zoom)/2 + furthestRightSlot + (graphWidth*zoom)/2;
-
-				camPos.x = clampMin(camPos.x, (graphWidth*zoom)/2);
-
-				if(!extendedView) {
-					camPos.x = clampMax(camPos.x, -(graphWidth*zoom)/2 + graphWidth);
-				} else {
-					camPos.x = clampMax(camPos.x, -(graphWidth*zoom)/2 + furthestRightSlot);
-				}
-
-				float orthoLeft = camPos.x - (graphWidth*zoom)/2;
-				float orthoRight = camPos.x + (graphWidth*zoom)/2;
-
-				// Header.
-				{
-					dcRect(cyclesRect, gui->colors.sectionColor);
-					Vec2 cyclesDim = rectGetDim(cyclesRect);
-
-					dcRect(headerRect, vec4(1,1,1,0.1f));
-					Vec2 headerDim = rectGetDim(headerRect);
-
-					float g = 0.7f;
-					float div = 4;
-					float cyclesInWidth = mapRange(cyclesPerFrame, startCycleCount, endCycleCount, 0, graphWidth);
-					float heightMod = 1.3f;
-					float heightSub = 0.10f;
-					
-					float orthoWidth = graphWidth*zoom;
-
-					float scaleToGraphwidth = (float)ws->currentRes.w/graphWidth;
-					float spreadWidthMod = 0.6f * scaleToGraphwidth;
-					
-					float zoomBarInterval = cyclesInWidth;
-
-					// Find the right zoom level by searching up and down.
-					while(zoomBarInterval/orthoWidth < spreadWidthMod) {
-						zoomBarInterval *= div;
-					}
-
-					while(zoomBarInterval/orthoWidth > spreadWidthMod) {
-						zoomBarInterval /= div;
-						heightMod -= heightSub;
-					}
-
-					heightMod = clampMax(heightMod, 1);
-					heightMod = clampMin(heightMod, 0.2f);
-
-					{
-						float viewAreaLeft = mapRange(orthoLeft, orthoMin, orthoMax, cyclesRect.min.x, cyclesRect.max.x);
-						float viewAreaRight = mapRange(orthoRight, orthoMin, orthoMax, cyclesRect.min.x, cyclesRect.max.x);
-
-						float viewSize = viewAreaRight - viewAreaLeft;
-						float viewMid = viewAreaRight + viewSize/2;
-						float viewMinSize = 2;
-						if(viewSize < viewMinSize) {
-							viewAreaLeft = viewMid - viewMinSize*0.5;
-							viewAreaRight = viewMid + viewMinSize*0.5;
-						}
-
-						dcRect(rect(viewAreaLeft, cyclesRect.min.y, viewAreaRight, cyclesRect.max.y), vec4(1,1,1,0.03f));
-					}
-
-					float pos = roundMod(orthoLeft, zoomBarInterval);
-					while(pos < orthoRight + zoomBarInterval) {
-						float p = mapRange(pos, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
-
-						float h = headerDim.h*heightMod;
-						dcRect(rectCenDim(vec2(p, headerRect.min.y + h/2), vec2(2,h)), vec4(g,g,g,1));
-
-						Vec2 textPos = vec2(p,cyclesRect.min.y + cyclesDim.h/2);
-						float percent = mapRange(pos, 0, graphWidth, 0, 100);
-
-						int percentInterval = mapRange(zoomBarInterval, 0, graphWidth, 0, 100);
-
-						char* s;
-						int percentInt = (int)percent;
-						if(percentInterval > 10) s = fillString("%i%%", percentInt);
-						else if(percentInterval > 1) s = fillString("%.1f%%", percent);
-						else if(percentInterval > 0.1) s = fillString("%.2f%%", percent);
-						else s = fillString("%.3f%%", percent);
-
-						float tw = getTextDim(s, gui->font).w;
-						if(valueBetween(bgRect.min.x, textPos.x - tw/2, textPos.x + tw/2)) textPos.x = bgRect.min.x + tw/2;
-						if(valueBetween(bgRect.max.x, textPos.x - tw/2, textPos.x + tw/2)) textPos.x = bgRect.max.x - tw/2;
-
-						dcText(s, gui->font, textPos, gui->colors.textColor, vec2i(0,0), 0, 1, gui->colors.shadowColor);
-
-						pos += zoomBarInterval;
-					}
-
-					pos = roundMod(orthoLeft, zoomBarInterval);
-					pos -= zoomBarInterval;
-					zoomBarInterval /= div;
-					heightMod *= 0.6f;
-					int index = 0;
-					while(pos < orthoRight + zoomBarInterval) {
-						if((index%(int)div) != 0) {
-							float p = mapRange(pos, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
-
-							float h = headerDim.h*heightMod;
-							dcRect(rectCenDim(vec2(p, headerRect.min.y + h/2), vec2(1,h)), vec4(g,g,g,1));
-						}
-
-						float pMid = mapRange(pos - zoomBarInterval/2, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
-						Vec2 textPos = vec2(pMid,headerRect.min.y + headerDim.h/3);
-
-						int cycles = mapRange(zoomBarInterval, 0, graphWidth, 0, endCycleCount);
-
-						char* s;
-						if(cycles < 1000) s = fillString("%ic", cycles);
-						else if(cycles < 1000000) s = fillString("%.1fkc", (float)cycles/1000);
-						else if(cycles < 1000000000) s = fillString("%.1fmc", (float)cycles/1000000);
-
-						// Font* smallerFont = getFont(gui->font->id, (int)gui->font->height*0.85f);
-						dcText(s, gui->font, textPos, gui->colors.textColor, vec2i(0,0), 0, gui->settings.textShadow, gui->colors.shadowColor);
-
-						pos += zoomBarInterval;
-						index++;
-					}
-				}
-
-				dcRect(bgRect, vec4(1,1,1,0.2f));
-
-				bool mouseHighlight = false;
-				Rect hRect;
-				Vec4 hc;
-				char* hText;
-				GraphSlot* hSlot;
-
-				startPos -= vec2(0, lineHeight);
-
-				int swapTimerIndex = 0;
-				for(int i = 0; i < timer->timerInfoCount; i++) {
-					if(!timer->timerInfos[i].initialised) continue;
-
-					if(strCompare(timer->timerInfos[i].name, "Swap")) {
-						swapTimerIndex = i;
-						break;
-					}
-				}
-				
-				for(int threadIndex = 0; threadIndex < threadQueue->threadCount; threadIndex++) {
-
-					// Horizontal lines to distinguish thread bars.
-					if(threadIndex > 0) {
-						Vec2 p = startPos + vec2(0,lineHeight);
-						float g = 0.8f;
-						dcRect(rect(p, vec2(bgRect.max.x, p.y+1)), vec4(g,g,g,1));
-					}
-
-					for(int i = 0; i < count; ++i) {
-						GraphSlot* slot = graphTimerBuffer + ((firstBufferIndex+i)%graphTimerBufferMax);
-						if(slot->threadIndex != threadIndex) continue;
-
-						Timings* t = timings + slot->timerIndex;
-						TimerInfo* tInfo = timer->timerInfos + slot->timerIndex;
-
-
-
-						u64 slotCycleStart = slot->cycles - baseCycleCount;
-						u64 slotCycleEnd = slotCycleStart + (u64)slot->size;
-						uint slotSize = slotCycleEnd - slotCycleStart;
-
-						// @Robustness: We cast u64 to float, still seems to work fine though.
-						float barLeft = mapRange(slotCycleStart, startCycleCount, endCycleCount, 0, graphWidth);
-						float barRight = mapRange(slotCycleEnd, startCycleCount, endCycleCount, 0, graphWidth);
-
-						barLeft = mapRange(barLeft, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
-						barRight = mapRange(barRight, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
-
-						// Draw vertical line at swap boundaries.
-						if(slot->timerIndex == swapTimerIndex) {
-							float g = 0.8f;
-							dcRect(rect(barRight, bgRect.min.y, barRight+1, bgRect.max.y), vec4(g,g,g,1));
-						}
-
-						// Skip nonvisible bars.
-						if(!(barRight < bgRect.min.x || barLeft > bgRect.max.x)) {
-							if(barRight - barLeft < 1) barRight = barLeft + 1;
-
-							bool textRectVisible = (barRight - barLeft) > 3;
-
-							float y = startPos.y+slot->stackIndex*-lineHeight;
-							Rect r = rect(vec2(barLeft,y), vec2(barRight, y + lineHeight));
-
-							float cOff = slot->timerIndex/(float)timer->timerInfoCount;
-							Vec4 c = vec4(1-cOff, 0, cOff, 1);
-
-							if(gui->getMouseOver(gui->input.mousePos, r)) {
-								mouseHighlight = true;
-								hRect = r;
-								hc = c;
-
-								hText = fillString("%s %s (%i.c)", tInfo->function, tInfo->name, slotSize);
-								highlightedIndex = slot->timerIndex;
-								hSlot = slot;
-							} else {
-								float g = 0.1f;
-								gui->drawRect(r, vec4(g,g,g,1));
-
-								if(textRectVisible) {
-									if(barLeft < bgRect.min.x) r.min.x = bgRect.min.x;
-									Rect textRect = rect(r.min+vec2(1,1), r.max-vec2(1,1));
-
-									gui->drawTextBox(textRect, fillString("%s %s (%i.c)", tInfo->function, tInfo->name, slotSize), c);
-								}
-							}
-						}
-
-					}
-
-					if(threadIndex == 0) startPos.y -= lineHeight*3;
-					else startPos.y -= lineHeight*2;
-
-				}
-
-				if(mouseHighlight) {
-					if(hRect.min.x < bgRect.min.x) hRect.min.x = bgRect.min.x;
-
-					float tw = getTextDim(hText, gui->font).w + 2;
-					if(tw > rectGetDim(hRect).w) hRect.max.x = hRect.min.x + tw;
-
-					float g = 0.8f;
-					gui->drawRect(hRect, vec4(g,g,g,1));
-
-					Rect textRect = rect(hRect.min+vec2(1,1), hRect.max-vec2(1,1));
-
-					gui->drawTextBox(textRect, hText, hc);
-				} else {
-					highlightedIndex = -1;
-				}
-
-			}
-
-			gui->div(0.1f, 0.3f, 0.3f, 0); 
-
-			if(gui->button("Reset")) {
-				camPos = vec2(graphWidth/2,0);
-				zoom = zoomInit; // To see the most right bar.
-			}
-
-			gui->slider(&ds->graphSizeMod, 1, 60);
-			gui->slider(&ds->graphSizeMod, 1, 60);
-
-			gui->label(fillString("Cam: %f, Zoom: %f", camPos.x, zoom));
-		}
-		#endif
-
 		// Timeline graph.
 		if(ds->mode == 2 && ds->noCollating)
 		{
@@ -3369,7 +3020,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 						float g = 0.1f;
 						gui->drawRect(r, vec4(g,g,g,1));
 
-						bool textRectVisible = (barRight - barLeft) > 3;
+						bool textRectVisible = (barRight - barLeft) > 1;
 						if(textRectVisible) {
 							if(barLeft < bgRect.min.x) r.min.x = bgRect.min.x;
 							Rect textRect = rect(r.min+vec2(1,1), r.max-vec2(1,1));
@@ -3432,7 +3083,10 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				timerInfoMaxStringSize = max(getTextDim(text, gui->font).w, timerInfoMaxStringSize);
 			}
 
+			// gui->div(0.2f, 0);
 			gui->slider(&ds->lineGraphHeight, 1, 60);
+			// gui->empty();
+
 			gui->heightPush(gui->getDefaultHeight() * ds->lineGraphHeight);
 			gui->div(vec3(timerInfoMaxStringSize + 2, 0, 120));
 			gui->empty(); Rect rectNames = gui->getCurrentRegion();
@@ -3476,8 +3130,10 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				float y = 0;
 				float length = 10;
 
-				float timelineSection = 10;
-				while(timelineSection < ds->cHeight*0.06f*(ws->currentRes.h/(rTop-rBottom))) timelineSection *= 10;
+				float div = 10;
+				float timelineSection = div;
+				float splitMod = (1/div)*0.2f;
+				while(timelineSection < ds->cHeight*splitMod*(ws->currentRes.h/(rTop-rBottom))) timelineSection *= div;
 
 				float start = roundMod(orthoBottom, timelineSection) - timelineSection;
 
@@ -3487,7 +3143,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 					y = mapRange(p, orthoBottom, orthoTop, rBottom, rTop);
 
 					dcLine2d(vec2(rectNumbers.min.x, y), vec2(rectNumbers.min.x + length, y), vec4(1,1,1,1)); 
-					dcText(fillString("%i64.c",(i64)p), gui->font, vec2(rectNumbers.min.x + length + 2, y), vec4(1,1,1,1), vec2i(-1,0));
+					dcText(fillString("%i64.c",(i64)p), gui->font, vec2(rectNumbers.min.x + length + 4, y), vec4(1,1,1,1), vec2i(-1,0));
 				}
 
 				gui->scissorPop();
@@ -3522,16 +3178,29 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 				dcState(STATE_LINEWIDTH, 2);
 
-				for(int i = 0; i < cycleCount-1; i++) {
+				bool firstEmpty = ds->timings[0][timerIndex].cyclesOverHits == 0;
+				Vec2 p = vec2(rectLines.min.x, 0);
+				if(firstEmpty) p.y = yAvg;
+				else p.y = mapRange(ds->timings[0][timerIndex].cyclesOverHits, orthoBottom, orthoTop, rBottom, rTop);
+				for(int i = 1; i < cycleCount; i++) {
 					Timings* t = &ds->timings[i][timerIndex];
-					Timings* t2 = &ds->timings[i+1][timerIndex];
+
+					// if(t->cyclesOverHits == 0) continue;
+
+					bool lastElementEmpty = false;
+					if(t->cyclesOverHits == 0) {
+						if(i != cycleCount-1) continue;
+						else lastElementEmpty = true;
+					}
 
 					float y = mapRange(t->cyclesOverHits, orthoBottom, orthoTop, rBottom, rTop);
-					float y2 = mapRange(t2->cyclesOverHits, orthoBottom, orthoTop, rBottom, rTop);
-
 					float xOff = rectGetDim(rectLines).w/(cycleCount-1);
+					Vec2 np = vec2(rectLines.min.x + xOff*i, y);
 
-					dcLine2d(vec2(rectLines.min.x + xOff*i, y), vec2(rectLines.min.x + xOff*(i+1), y2), color);
+					if(lastElementEmpty) np.y = yAvg;
+
+					dcLine2d(p, np, color);
+					p = np;
 				}
 
 				dcState(STATE_LINEWIDTH, 1);
@@ -3539,16 +3208,22 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				gui->scissorPop();
 			}
 
-			// Draw color rectangles.
-			float size = 20;
-			if(rectGetDim(rectLines).w >= size*2) {
-				for(int timerIndex = 0; timerIndex < timerCount; timerIndex++) {
-					TimerInfo* info = &timer->timerInfos[timerIndex];
-					if(!info->initialised) continue;
+			gui->empty();
+			Rect r = gui->getCurrentRegion();
+			Vec2 rc = rectGetCen(r);
+			float rw = rectGetDim(r).w;
 
-					Vec4 color = vec4(info->color[0], info->color[1], info->color[2], 1);
-					dcRect(rectCenDim(vec2(rectLines.min.x + size + ((rectGetDim(rectLines).w-(size*2))/(timerCount-1))*timerIndex, rectLines.max.y - size), vec2(size,size)), color);
-				}
+			// Draw color rectangles.
+			float width = (rw/timerCount)*0.75f;
+			float height = fontHeight*0.8f;
+			float sw = (rw-(timerCount*width))/(timerCount+1);
+
+			for(int i = 0; i < timerCount; i++) {
+				TimerInfo* info = &timer->timerInfos[i];
+
+				Vec4 color = vec4(info->color[0], info->color[1], info->color[2], 1);
+				Vec2 pos = vec2(r.min.x + sw+width/2 + i*(width+sw), rc.y);
+				dcRect(rectCenDim(pos, vec2(width, height)), color);
 			}
 
 		}
