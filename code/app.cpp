@@ -57,7 +57,7 @@ additionally:
 - top menu bar
 - Clean up the gui to make it more usable.
 - Make entities watchable and changeable in Gui.
-
+`
 
 Changing course for now:
  * Split up main app.cpp into mutliple files.
@@ -91,6 +91,7 @@ Changing course for now:
 
  - Sound perturbation. (Whatever that is.) 
 
+ - In executeCommandList: Remember state, and only switch if a change occured. (Like shaders, colors, linewidth, etc.)
 
  * Fix putting Timer_blocks somewhere.
  * Move statistics out of debug.cpp.
@@ -116,14 +117,13 @@ Changing course for now:
  * Add instant screen string debug push to debugstate. 
  * Improve fillString.
    * Add commas: 3,000,000, or spaces: 3 000 000
-
- - Clean up gui.
- - Using makros and defines to make templated vectors and hashtables and such.
+ * Clean up timeline.
 
  - Crashing once in a while at startup.
-   - Add scaling: 3m -> 4000k -> 4000000
- - Slot slider.
- - Clean up timeline.
+ - Add scaling: 3m -> 4000k -> 4000000
+ - Clean up gui.
+ - Using makros and defines to make templated vectors and hashtables and such.
+ - Draw text function that stops drawing when character outside of scissor rect.
 
 //-------------------------------------
 //               BUGS
@@ -221,7 +221,6 @@ Timer* globalTimer;
 #include "voxel.cpp"
 
 #include "debug.cpp"
-
 
 
 
@@ -417,7 +416,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ds->timer->bufferSize = timerSlots;
 		ds->timer->timerBuffer = (TimerSlot*)getPMemoryDebug(sizeof(TimerSlot) * timerSlots);
 
-		ds->savedBufferMax = 20000;
+		ds->savedBufferMax = 10000;
 		ds->savedBufferIndex = 0;
 		ds->savedBufferCount = 0;
 		ds->savedBuffer = (GraphSlot*)getPMemoryDebug(sizeof(GraphSlot) * ds->savedBufferMax);
@@ -2273,29 +2272,16 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		bindFrameBuffer(FRAMEBUFFER_DebugMsaa);
 		executeCommandList(&ad->commandList2d);
-		executeCommandList(&ds->commandListDebug, false, reload);
 
 
-
-		// {	
-		// 	Vec2 corner = vec2(100,-100);
-		// 	float round = 10;
-
-		// 	// Vec2 verts[] = {(int)dc.p0.x, (int)dc.p0.y, (int)dc.p1.x, (int)dc.p1.y};
-		// 	// Vec2 verts[] = { corner, corner + vec2(-round,0), corner + vec2(0, round)};
-
-		// 	const int steps = 3;
-		// 	Vec2 verts[steps + 1];
-		// 	verts[0] = corner;
-
-		// 	float start = M_PI_2*3;
-		// 	for(int i = 0; i < steps; i++) {
-		// 		float angle = start + i*(M_PI_2/(steps-1));
-		// 		Vec2 v = vec2(sin(angle), cos(angle));
-
-		// 		verts[i+1] = corner + v*round;
-		// 	}
-
+		double timeStamp = timerInit();
+			executeCommandList(&ds->commandListDebug, false, reload);
+		static double tempTime = 0;
+		tempTime += ds->dt;
+		if(tempTime >= 1) {
+			ds->debugRenderTime = timerUpdate(timeStamp);
+			tempTime = 0;
+		}
 
 		// 	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_VERTS, verts, arrayCount(verts));
 		// 	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_PRIMITIVE_MODE, 1);
@@ -2542,6 +2528,9 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		ds->lastCycleIndex = ds->cycleIndex;
 		ds->cycleIndex = mod(ds->cycleIndex-1, arrayCount(ds->timings));
 
+		ds->zoom = -1;
+		ds->camPos = -1;
+
 		ds->setPause = false;
 	}
 	if(ds->setPlay) {
@@ -2675,13 +2664,14 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		gui->label("App Statistics", 1, gui->colors.sectionColor, vec4(0,0,0,1));
 
 		float sectionWidth = 120;
-		float headerDivs[] = {sectionWidth,sectionWidth,sectionWidth,0,80};
+		float headerDivs[] = {sectionWidth,sectionWidth,sectionWidth,0,80,80};
 		gui->div(headerDivs, arrayCount(headerDivs));
 		if(gui->button("Data", (int)(ds->mode == 0) + 1)) ds->mode = 0;
 		if(gui->button("Line graph", (int)(ds->mode == 1) + 1)) ds->mode = 1;
 		if(gui->button("Timeline", (int)(ds->mode == 2) + 1)) ds->mode = 2;
 		gui->empty();
 		gui->label(fillString("%fms", ds->debugTime*1000), 1);
+		gui->label(fillString("%fms", ds->debugRenderTime*1000), 1);
 
 		gui->div(vec2(0.2f,0));
 		if(gui->switcher("Freeze", &ds->noCollating)) {
@@ -2758,6 +2748,8 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				gui->label(fillString("%.3f%%", ((float)timing->cycles/cyclesPerFrame)*100),2);
 
 				// Bar graphs.
+				dcState(STATE_LINEWIDTH, barWidth);
+
 				gui->empty();
 				Rect r = gui->getCurrentRegion();
 				float rheight = gui->getDefaultHeight();
@@ -2771,25 +2763,25 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 					float height = mapRangeClamp(coh, stat->min, stat->max, 1, rheight);
 					Vec2 rmin = r.min + vec2(xOffset, fontBaseOffset);
 					float colorOffset = mapRange(coh, stat->min, stat->max, 0, 1);
-					dcRect(rectMinDim(rmin, vec2(barWidth, height)), vec4(colorOffset,1-colorOffset,0,1));
+					// dcRect(rectMinDim(rmin, vec2(barWidth, height)), vec4(colorOffset,1-colorOffset,0,1));
+					dcLine2d(rmin, rmin+vec2(0,height), vec4(colorOffset,1-colorOffset,0,1));
 
 					xOffset += barWidth;
 				}
 			}
 		}
 
+
+		#if 0
 		// Timeline graph.
 		if(ds->mode == 2)
 		{
 			gui->empty();
 			Rect cyclesRect = gui->getCurrentRegion();
 			gui->heightPush(1.5f);
-			// gui->heightPush(4);
 			gui->empty();
 			Rect headerRect = gui->getCurrentRegion();
 			gui->heightPop();
-			// headerRect.max.y = cyclesRect.max.y;
-
 
 			float lineHeightOffset = 1.2;
 			float lineHeight = fontHeight * lineHeightOffset;
@@ -3127,7 +3119,299 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 			gui->label(fillString("Cam: %f, Zoom: %f", camPos.x, zoom));
 		}
+		#endif
+
+		// Timeline graph.
+		if(ds->mode == 2 && ds->noCollating)
+		{
+			float lineHeightOffset = 1.2;
+
+			gui->empty();
+			Rect cyclesRect = gui->getCurrentRegion();
+			gui->heightPush(1.5f);
+			gui->empty();
+			Rect headerRect = gui->getCurrentRegion();
+			gui->heightPop();
+
+			float lineHeight = fontHeight * lineHeightOffset;
+
+			gui->heightPush(3*lineHeight +  2*lineHeight*(threadQueue->threadCount-1));
+			gui->empty();
+			Rect bgRect = gui->getCurrentRegion();
+			gui->heightPop();
+
+			float graphWidth = rectGetDim(bgRect).w;
+
+			int swapTimerIndex = 0;
+			for(int i = 0; i < timer->timerInfoCount; i++) {
+				if(!timer->timerInfos[i].initialised) continue;
+
+				if(strCompare(timer->timerInfos[i].name, "Swap")) {
+					swapTimerIndex = i;
+					break;
+				}
+			}
+
+			int recentIndex = mod(ds->savedBufferIndex-1, ds->savedBufferMax);
+			int oldIndex = mod(ds->savedBufferIndex - ds->savedBufferCount, ds->savedBufferMax);
+			GraphSlot recentSlot = ds->savedBuffer[recentIndex];
+			GraphSlot oldSlot = ds->savedBuffer[oldIndex];
+			double cyclesLeft = oldSlot.cycles;
+			double cyclesRight = recentSlot.cycles + recentSlot.size;
+			double cyclesSize = cyclesRight - cyclesLeft;
+
+			// Setup cam pos and zoom.
+			if(ds->camPos == -1 && ds->zoom == -1) {
+				ds->zoom = (recentSlot.cycles + recentSlot.size) - oldSlot.cycles;
+				ds->camPos = oldSlot.cycles + ds->zoom/2;
+			}
+
+			if(gui->input.mouseWheel) {
+				float wheel = gui->input.mouseWheel;
+
+				float offset = wheel < 0 ? 1.1f : 1/1.1f;
+				if(!input->keysDown[KEYCODE_SHIFT] && input->keysDown[KEYCODE_CTRL]) 
+					offset = wheel < 0 ? 1.2f : 1/1.2f;
+				if(input->keysDown[KEYCODE_SHIFT] && input->keysDown[KEYCODE_CTRL]) 
+					offset = wheel < 0 ? 1.4f : 1/1.4f;
+
+				double oldZoom = ds->zoom;
+				ds->zoom *= offset;
+				clampDouble(&ds->zoom, 1000, cyclesSize);
+				double diff = ds->zoom - oldZoom;
+
+				float zoomOffset = mapRange(input->mousePos.x, bgRect.min.x, bgRect.max.x, -0.5f, 0.5f);
+				ds->camPos -= diff*zoomOffset;
+			}
+
+
+			Vec2 dragDelta = vec2(0,0);
+			gui->drag(bgRect, &dragDelta, vec4(0,0,0,0));
+
+			ds->camPos -= dragDelta.x * (ds->zoom/graphWidth);
+			clampDouble(&ds->camPos, cyclesLeft + ds->zoom/2, cyclesRight - ds->zoom/2);
+
+
+			double camPos = ds->camPos;
+			double zoom = ds->zoom;
+			double orthoLeft = camPos - zoom/2;
+			double orthoRight = camPos + zoom/2;
+
+
+			// Header.
+			{
+				dcRect(cyclesRect, gui->colors.sectionColor);
+				Vec2 cyclesDim = rectGetDim(cyclesRect);
+
+				dcRect(headerRect, vec4(1,1,1,0.1f));
+				Vec2 headerDim = rectGetDim(headerRect);
+
+				{
+					float viewAreaLeft = mapRangeDouble(orthoLeft, cyclesLeft, cyclesRight, cyclesRect.min.x, cyclesRect.max.x);
+					float viewAreaRight = mapRangeDouble(orthoRight, cyclesLeft, cyclesRight, cyclesRect.min.x, cyclesRect.max.x);
+
+					float viewSize = viewAreaRight - viewAreaLeft;
+					float viewMid = viewAreaRight + viewSize/2;
+					float viewMinSize = 2;
+					if(viewSize < viewMinSize) {
+						viewAreaLeft = viewMid - viewMinSize*0.5;
+						viewAreaRight = viewMid + viewMinSize*0.5;
+					}
+
+					dcRect(rect(viewAreaLeft, cyclesRect.min.y, viewAreaRight, cyclesRect.max.y), vec4(1,1,1,0.03f));
+				}
+
+				float g = 0.7f;
+				float heightMod = 0.0f;
+				double div = 4;
+				double divMod = (1/div) + 0.05f;
+
+				double timelineSection = div;
+				while(timelineSection < zoom*divMod*(ws->currentRes.h/(graphWidth))) {
+					timelineSection *= div;
+					heightMod += 0.1f;
+				}
+
+				clampMax(&heightMod, 1);
+
+				dcState(STATE_LINEWIDTH, 3);
+				double startPos = roundModDouble(orthoLeft, timelineSection) - timelineSection;
+				double pos = startPos;
+				while(pos < orthoRight + timelineSection) {
+					double p = mapRangeDouble(pos, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
+
+					// Big line.
+					{
+						float h = headerDim.h*heightMod;
+						dcLine2d(vec2(p,headerRect.min.y), vec2(p,headerRect.min.y + h), vec4(g,g,g,1));
+					}
+
+					// Text
+					{
+						Vec2 textPos = vec2(p,cyclesRect.min.y + cyclesDim.h/2);
+						float percent = mapRange(pos, cyclesLeft, cyclesRight, 0, 100);
+						int percentInterval = mapRangeDouble(timelineSection, 0, cyclesSize, 0, 100);
+
+						char* s;
+						if(percentInterval > 10) s = fillString("%i%%", (int)percent);
+						else if(percentInterval > 1) s = fillString("%.1f%%", percent);
+						else if(percentInterval > 0.1) s = fillString("%.2f%%", percent);
+						else s = fillString("%.3f%%", percent);
+
+						float tw = getTextDim(s, gui->font).w;
+						if(valueBetween(bgRect.min.x, textPos.x - tw/2, textPos.x + tw/2)) textPos.x = bgRect.min.x + tw/2;
+						if(valueBetween(bgRect.max.x, textPos.x - tw/2, textPos.x + tw/2)) textPos.x = bgRect.max.x - tw/2;
+
+						dcText(s, gui->font, textPos, gui->colors.textColor, vec2i(0,0), 0, 1, gui->colors.shadowColor);
+					}
+
+					pos += timelineSection;
+				}
+				dcState(STATE_LINEWIDTH, 1);
+
+				pos = startPos;
+				timelineSection /= div;
+				heightMod *= 0.6f;
+				int index = 0;
+				while(pos < orthoRight + timelineSection) {
+
+					// Small line.
+					if((index%(int)div) != 0) {
+						double p = mapRangeDouble(pos, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
+						float h = headerDim.h*heightMod;
+						dcLine2d(vec2(p,headerRect.min.y), vec2(p,headerRect.min.y + h), vec4(g,g,g,1));
+					}
+
+					// Cycle text.
+					{
+						float pMid = mapRangeDouble(pos - timelineSection/2, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
+						Vec2 textPos = vec2(pMid,headerRect.min.y + headerDim.h/3);
+
+						double cycles = timelineSection;
+						char* s;
+						if(cycles < 1000) s = fillString("%ic", (int)cycles);
+						else if(cycles < 1000000) s = fillString("%.1fkc", cycles/1000);
+						else if(cycles < 1000000000) s = fillString("%.1fmc", cycles/1000000);
+						else if(cycles < 1000000000000) s = fillString("%.1fbc", cycles/1000000000);
+						else s = fillString("INF");
+
+						dcText(s, gui->font, textPos, gui->colors.textColor, vec2i(0,0), 0, gui->settings.textShadow, gui->colors.shadowColor);
+					}
+
+					pos += timelineSection;
+					index++;
+
+				}
+			}
+
+			dcState(STATE_LINEWIDTH, 1);
+
+			bool mouseHighlight = false;
+			Rect hRect;
+			Vec4 hc;
+			char* hText;
+			GraphSlot* hSlot;
+
+			Vec2 startPos = rectGetUL(bgRect);
+			startPos -= vec2(0, lineHeight);
+
+			int firstBufferIndex = oldIndex;
+			int bufferCount = ds->savedBufferCount;
+			for(int threadIndex = 0; threadIndex < threadQueue->threadCount; threadIndex++) {
+
+				// Horizontal lines to distinguish thread bars.
+				if(threadIndex > 0) {
+					Vec2 p = startPos + vec2(0,lineHeight);
+					float g = 0.8f;
+					dcLine2d(p, vec2(bgRect.max.x, p.y), vec4(g,g,g,1));
+				}
+
+				for(int i = 0; i < bufferCount; ++i) {
+					GraphSlot* slot = ds->savedBuffer + ((firstBufferIndex+i)%ds->savedBufferMax);
+					if(slot->threadIndex != threadIndex) continue;
+
+					Timings* t = timings + slot->timerIndex;
+					TimerInfo* tInfo = timer->timerInfos + slot->timerIndex;
+
+					if(slot->cycles + slot->size < orthoLeft || slot->cycles > orthoRight) continue;
+
+
+					double barLeft = mapRangeDouble(slot->cycles, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
+					double barRight = mapRangeDouble(slot->cycles + slot->size, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
+
+					// Draw vertical line at swap boundaries.
+					if(slot->timerIndex == swapTimerIndex) {
+						float g = 0.8f;
+						dcLine2d(vec2(barRight, bgRect.min.y), vec2(barRight, bgRect.max.y), vec4(g,g,g,1));
+					}
+
+					// Bar min size is 1.
+					if(barRight - barLeft < 1) {
+						double mid = barLeft + (barRight - barLeft)/2;
+						barLeft = mid - 0.5f;
+						barRight = mid + 0.5f;
+					}
+
+					float y = startPos.y+slot->stackIndex*-lineHeight;
+					Rect r = rect(vec2(barLeft,y), vec2(barRight, y + lineHeight));
+
+					float cOff = slot->timerIndex/(float)timer->timerInfoCount;
+					Vec4 c = vec4(1-cOff, 0, cOff, 1);
+
+					if(gui->getMouseOver(gui->input.mousePos, r)) {
+						mouseHighlight = true;
+						hRect = r;
+						hc = c;
+
+						hText = fillString("%s %s (%i.c)", tInfo->function, tInfo->name, slot->size);
+						hSlot = slot;
+					} else {
+						float g = 0.1f;
+						gui->drawRect(r, vec4(g,g,g,1));
+
+						bool textRectVisible = (barRight - barLeft) > 3;
+						if(textRectVisible) {
+							if(barLeft < bgRect.min.x) r.min.x = bgRect.min.x;
+							Rect textRect = rect(r.min+vec2(1,1), r.max-vec2(1,1));
+
+							gui->drawTextBox(textRect, fillString("%s %s (%i64.c)", tInfo->function, tInfo->name, slot->size), c);
+						}
+					}
+
+				}
+
+				if(threadIndex == 0) startPos.y -= lineHeight*3;
+				else startPos.y -= lineHeight*2;
+
+			}
+
+			if(mouseHighlight) {
+				if(hRect.min.x < bgRect.min.x) hRect.min.x = bgRect.min.x;
+
+				float tw = getTextDim(hText, gui->font).w + 2;
+				if(tw > rectGetDim(hRect).w) hRect.max.x = hRect.min.x + tw;
+
+				float g = 0.8f;
+				gui->drawRect(hRect, vec4(g,g,g,1));
+
+				Rect textRect = rect(hRect.min+vec2(1,1), hRect.max-vec2(1,1));
+				gui->drawTextBox(textRect, hText, hc);
+			}
+
+			gui->div(0.1f, 0); 
+			gui->div(0.1f, 0); 
+
+			if(gui->button("Reset")) {
+				ds->zoom = (recentSlot.cycles + recentSlot.size) - oldSlot.cycles;
+				ds->camPos = oldSlot.cycles + ds->zoom/2;
+			}
+
+			gui->label(fillString("Cam: %i64., Zoom: %i64.", (i64)ds->camPos, (i64)ds->zoom));
+		}
 		
+
+
+
 		// Line graph.
 		if(ds->mode == 1)
 		{
@@ -3164,11 +3448,11 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 			float wheel = gui->input.mouseWheel;
 			if(wheel) {
-				float offset = wheel < 0 ? 1.1f : 0.9f;
+				float offset = wheel < 0 ? 1.1f : 1/1.1f;
 				if(!input->keysDown[KEYCODE_SHIFT] && input->keysDown[KEYCODE_CTRL]) 
-					offset = wheel < 0 ? 1.2f : 0.8f;
+					offset = wheel < 0 ? 1.2f : 1/1.2f;
 				if(input->keysDown[KEYCODE_SHIFT] && input->keysDown[KEYCODE_CTRL]) 
-					offset = wheel < 0 ? 1.4f : 0.6f;
+					offset = wheel < 0 ? 1.4f : 1/1.4f;
 
 				float heightDiff = ds->cHeight;
 				ds->cHeight *= offset;

@@ -100,7 +100,6 @@ inline float sameSign(float a, float b) {
 	return result;
 }
 
-
 // inline float clampMin(float min, float a) {
 inline float clampMin(float a, float min) {
 	return a < min ? min : a;
@@ -126,6 +125,33 @@ inline float clamp(float n, float min, float max) {
 inline void clamp(float* n, float min, float max) {
 	*n = clampMax(clampMin(*n, min), max);
 };
+
+
+inline double clampMinDouble(double a, double min) {
+	return a < min ? min : a;
+}
+
+inline void clampMinDouble(double* a, double min) {
+	if(*a < min) *a = min;
+}
+
+inline double clampMaxDouble(double a, double max) {
+	return a > max ? max : a;
+}
+
+inline void clampMaxDouble(double* a, double max) {
+	if(*a > max) *a = max;
+}
+
+inline double clampDouble(double n, double min, double max) {
+	double result = clampMaxDouble(clampMinDouble(n, min), max);
+	return result;
+};
+
+inline void clampDouble(double* n, double min, double max) {
+	*n = clampMaxDouble(clampMinDouble(*n, min), max);
+};
+
 
 inline float clampIntMin(int a, int min) {
 	return a < min ? min : a;
@@ -159,7 +185,7 @@ inline float mapRange(float value, float min, float max, float rangeMin, float r
 	return result;
 };
 
-inline double mapRangePrecise(double value, double min, double max, double rangeMin, double rangeMax) {
+inline double mapRangeDouble(double value, double min, double max, double rangeMin, double rangeMax) {
 	double off = min < 0 ? abs(min) : -abs(min);
 	double result = ((value+off)/((max+off)-(min+off))) * (rangeMax-rangeMin) + rangeMin;
 
@@ -211,7 +237,6 @@ inline bool valueBetween2(float v, float min, float max) {
 
 inline float roundFloat(float f, int x) {
 	return floor(f*x + 0.5) / x;
-	// 1.7*3 + 0.5 / 3
 };
 
 /** a roughly b */
@@ -252,8 +277,16 @@ inline float roundFloat(float i) {
 	return floor(i + 0.5f);
 }
 
+inline double roundDouble(double i) {
+	return floor(i + 0.5f);
+}
+
 inline float roundMod(float i, float val) {
 	return (roundFloat(i/val))*val;
+}
+
+inline double roundModDouble(double i, double val) {
+	return (roundDouble(i/val))*val;
 }
 
 inline int roundInt(float i) {

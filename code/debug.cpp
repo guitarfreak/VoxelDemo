@@ -12,6 +12,7 @@ struct DebugState {
 	f64 time;
 
 	f64 debugTime;
+	f64 debugRenderTime;
 
 	bool showMenu;
 	bool showStats;
@@ -42,8 +43,8 @@ struct DebugState {
 	int lastBufferIndex;
 	int graphSortingIndex;
 
-	// Vec2 camPos;
-	// float zoom;
+	double camPos;
+	double zoom;
 	float graphSizeMod;
 	float graphOffset;
 

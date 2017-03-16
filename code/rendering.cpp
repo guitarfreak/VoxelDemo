@@ -1296,16 +1296,16 @@ void executeCommandList(DrawCommandList* list, bool print = false, bool skipStri
 			case Draw_Command_Line2d_Type: {
 				dcGetStructAndIncrement(Line2d);
 
-				Vec2 verts[] = {dc.p0, dc.p1};
-				// Vec2 verts[] = {(int)dc.p0.x, (int)dc.p0.y, (int)dc.p1.x, (int)dc.p1.y};
+				// Vec2 verts[] = {dc.p0, dc.p1};
+				Vec2 verts[] = {roundInt(dc.p0.x)-0.5f, roundInt(dc.p0.y)-0.5f, roundInt(dc.p1.x)-0.5f, roundInt(dc.p1.y)-0.5f};
 				pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_VERTS, verts, 2);
-				pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_PRIMITIVE_MODE, 1);
 				pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_COLOR, colorSRGB(dc.color).e);
+				pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_PRIMITIVE_MODE, 1);
 
 				uint tex[1] = {getTexture(TEXTURE_WHITE)->id};
 				glBindTextures(0,1,tex);
 
-				glDrawArraysInstancedBaseInstance(GL_LINES, 0, 2, 1, 0);
+				glDrawArrays(GL_LINES, 0, 2);
 			} break;
 
 			case Draw_Command_Quad_Type: {
