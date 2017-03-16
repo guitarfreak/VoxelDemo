@@ -92,6 +92,8 @@ Changing course for now:
  - Sound perturbation. (Whatever that is.) 
 
  - In executeCommandList: Remember state, and only switch if a change occured. (Like shaders, colors, linewidth, etc.)
+ - Crashing once in a while at startup. (NOTE: Has not happened in quite a while.)
+ - Clean up gui.
 
  * Fix putting Timer_blocks somewhere.
  * Move statistics out of debug.cpp.
@@ -119,12 +121,9 @@ Changing course for now:
    * Add commas: 3,000,000, or spaces: 3 000 000
  * Clean up timeline.
  * Draw text function that stops drawing when character outside of scissor rect.
+ * Set timerinfos colors at start.
 
- - Crashing once in a while at startup.
- - Add scaling: 3m -> 4000k -> 4000000
- - Clean up gui.
  - Using makros and defines to make templated vectors and hashtables and such.
- - Set timerinfos colors at start.
 
 //-------------------------------------
 //               BUGS
@@ -2494,7 +2493,8 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 	// Save const strings from initialised timerinfos.
 	{
-		for(int i = 0; i < timer->timerInfoCount; i++) {
+		int timerCount = timer->timerInfoCount;
+		for(int i = 0; i < timerCount; i++) {
 			TimerInfo* info = timer->timerInfos + i;
 
 			if(!info->initialised || info->stringsSaved) continue;
@@ -2513,6 +2513,14 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			strCpy(info->name, s);
 
 			info->stringsSaved = true;
+
+			// Set colors.
+			float ss = i%(timerCount/2) / ((float)timerCount/2);
+			float h = i < timerCount/2 ? 0.1f : -0.1f;
+			Vec3 color = vec3(0,0,0);
+			hslToRgb(color.e, 360*ss, 0.5f, 0.5f+h);
+
+			vSet3(info->color, color.r, color.g, color.b);
 		}
 	}
 
@@ -3348,7 +3356,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 					Rect r = rect(vec2(barLeft,y), vec2(barRight, y + lineHeight));
 
 					float cOff = slot->timerIndex/(float)timer->timerInfoCount;
-					Vec4 c = vec4(1-cOff, 0, cOff, 1);
+					Vec4 c = vec4(tInfo->color[0], tInfo->color[1], tInfo->color[2], 1);
 
 					if(gui->getMouseOver(gui->input.mousePos, r)) {
 						mouseHighlight = true;
@@ -3496,11 +3504,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				float statMax = mapRange(stat->max, orthoBottom, orthoTop, rBottom, rTop);
 				if(statMax < rBottom || statMin > rTop) continue;
 
-
-				float s = timerIndex%(timerCount/2) / ((float)timerCount/2);
-				float h = timerIndex < timerCount/2 ? 0.1f : -0.1f;
-				Vec4 color = vec4(0,0,0,1);
-				hslToRgb(color.e, 360*s, 0.5f, 0.5f+h);
+				Vec4 color = vec4(info->color[0], info->color[1], info->color[2], 1);
 
 				float yAvg = mapRange(stat->avg, orthoBottom, orthoTop, rBottom, rTop);
 				char* text = strLen(info->name) > 0 ? info->name : info->function;
@@ -3539,11 +3543,10 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			float size = 20;
 			if(rectGetDim(rectLines).w >= size*2) {
 				for(int timerIndex = 0; timerIndex < timerCount; timerIndex++) {
-					float s = timerIndex%(timerCount/2) / ((float)timerCount/2);
-					float h = timerIndex < timerCount/2 ? 0.1f : -0.1f;
-					Vec4 color = vec4(0,0,0,1);
-					hslToRgb(color.e, 360*s, 0.5f, 0.5f+h);
+					TimerInfo* info = &timer->timerInfos[timerIndex];
+					if(!info->initialised) continue;
 
+					Vec4 color = vec4(info->color[0], info->color[1], info->color[2], 1);
 					dcRect(rectCenDim(vec2(rectLines.min.x + size + ((rectGetDim(rectLines).w-(size*2))/(timerCount-1))*timerIndex, rectLines.max.y - size), vec2(size,size)), color);
 				}
 			}

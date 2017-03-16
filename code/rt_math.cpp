@@ -984,6 +984,10 @@ union Vec3 {
 	};
 
 	struct {
+		float r, g, b;
+	};
+
+	struct {
 		Vec2 xy;
 		// float z;
 	};

@@ -18,6 +18,8 @@ struct TimerInfo {
 	char* name;
 	int line, line2;
 	uint type;
+
+	float color[3];
 };
 
 #define CYCLEBUFFERSIZE 120
