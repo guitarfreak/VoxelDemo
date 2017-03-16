@@ -3185,8 +3185,6 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				for(int i = 1; i < cycleCount; i++) {
 					Timings* t = &ds->timings[i][timerIndex];
 
-					// if(t->cyclesOverHits == 0) continue;
-
 					bool lastElementEmpty = false;
 					if(t->cyclesOverHits == 0) {
 						if(i != cycleCount-1) continue;
