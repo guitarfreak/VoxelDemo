@@ -113,6 +113,7 @@ Changing course for now:
  * Set timerinfos colors at start.
  * The Big Cleanup.
  * Fix up the input recording.
+ * Fix threadQueueComplete with threadBench.
 
  - In executeCommandList: Remember state, and only switch if a change occured. (Like shaders, colors, linewidth, etc.)
 
@@ -120,7 +121,6 @@ Changing course for now:
  - Sound perturbation. (Whatever that is.) 
  - Clean up gui.
  - Using makros and defines to make templated vectors and hashtables and such.
- - Fix threadQueueComplete with threadBench.
 
 //-------------------------------------
 //               BUGS
@@ -129,6 +129,9 @@ Changing course for now:
 * text looks wrong after srgb conversion
 * Water lags behind one frame when drawing. Noticeable when pushing lower FPS on higher view distances. 
 * Fonts look bad. (Whatever that means.)
+* hotload gets stuck sometimes, thread that won't complete
+* threadQueueComplete(ThreadQueue* queue) doesnt work
+* threadqueue do next work from main thread bug
 
 - look has to be negative to work in view projection matrix
 - distance jumping collision bug, possibly precision loss in distances
@@ -136,11 +139,8 @@ Changing course for now:
   which makes the game stutter, restart is required
 - game input gets stuck when buttons are pressed right at the start
 - sort key assert firing randomly
-- hotload gets stuck sometimes, thread that won't complete
 - draw line crashes
 - release build takes forever
-- threadQueueComplete(ThreadQueue* queue) doesnt work
-- threadqueue do next work from main thread bug
 - Crashing once in a while at startup. (NOTE: Has not happened in quite a while.)
 
 */
@@ -2325,7 +2325,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		threadQueueAdd(threadQueue, threadBench, &t);
 	}
 
-	if(input->keysPressed[KEYCODE_2]) { 
+	if(input->keysPressed[KEYCODE_2]) {
 		int t[] = {1,20};
 		threadQueueAdd(threadQueue, threadBench, &t);
 		threadQueueAdd(threadQueue, threadBench, &t);
@@ -2338,6 +2338,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 		threadQueueAdd(threadQueue, threadBench, &t);
 		threadQueueAdd(threadQueue, threadBench, &t);
 	}
+
+
+
+
+
 
 	// Swap window background buffer.
 	{
@@ -2393,12 +2398,18 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 	{
 		if(ds->playbackSwapMemory) {
 			threadQueueComplete(threadQueue);
-
 			ds->playbackSwapMemory = false;
 
-			for(int i = 0; i < pMemory->index + 1; i++) {
-				memCpy(globalMemory->pMemory->arrays[i].data, appMemory->extendibleMemoryArrays[1].arrays[i].data, pMemory->slotSize);
+
+
+			pMemory->index = ds->snapShotCount-1;
+			pMemory->arrays[pMemory->index].index = ds->snapShotMemoryIndex;
+
+			// ds->snapShotCount = pMemory->index+1;
+			for(int i = 0; i < ds->snapShotCount; i++) {
+				memCpy(pMemory->arrays[i].data, ds->snapShotMemory[i], pMemory->slotSize);
 			}
+
 		}
 	}
 
@@ -2429,11 +2440,16 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 				if(ds->recordingInput) {
 					if(threadQueueFinished(threadQueue)) {
-						for(int i = 0; i < pMemory->index+1; i++) {
-							if(debugMemory->index < i) getExtendibleMemoryArray(pMemory->slotSize, debugMemory);
 
-							memCpy(debugMemory->arrays[i].data, pMemory->arrays[i].data, pMemory->slotSize);
+						ds->snapShotCount = pMemory->index+1;
+						ds->snapShotMemoryIndex = pMemory->arrays[pMemory->index].index;
+						for(int i = 0; i < ds->snapShotCount; i++) {
+							if(ds->snapShotMemory[i] == 0) 
+								ds->snapShotMemory[i] = (char*)malloc(pMemory->slotSize);
+
+							memCpy(ds->snapShotMemory[i], pMemory->arrays[i].data, pMemory->slotSize);
 						}
+
 
 						ds->recordingInput = true;
 						ds->inputIndex = 0;
@@ -2449,11 +2465,13 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				if(gui->switcher(s, &ds->playbackInput)) {
 					if(ds->playbackInput) {
 						threadQueueComplete(threadQueue);
-
 						ds->playbackIndex = 0;
 
-						for(int i = 0; i < pMemory->index + 1; i++) {
-							memCpy(globalMemory->pMemory->arrays[i].data, appMemory->extendibleMemoryArrays[1].arrays[i].data, pMemory->slotSize);
+						pMemory->index = ds->snapShotCount-1;
+						pMemory->arrays[pMemory->index].index = ds->snapShotMemoryIndex;
+
+						for(int i = 0; i < ds->snapShotCount; i++) {
+							memCpy(pMemory->arrays[i].data, ds->snapShotMemory[i], pMemory->slotSize);
 						}
 					} else {
 						ds->playbackPause = false;
@@ -2621,7 +2639,6 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 	{
 
 		if(!ds->noCollating) {
-		// if(false) {
 			zeroMemory(timings, timer->timerInfoCount*sizeof(Timings));
 			zeroMemory(statistics, timer->timerInfoCount*sizeof(Statistic));
 
@@ -3458,26 +3475,5 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		tempTime = 0;
 	}
 }
-
-// void debugUpdatePlayback(DebugState* ds, AppMemory* appMemory) {
-// 	if(ds->playbackStart) {
-// 		ds->playbackStart = false;
-// 		ds->playbackInput = true;
-// 		ds->playbackIndex = 0;
-
-// 		ds->playbackSwapMemory = true;
-// 	}
-
-// 	if(ds->playbackSwapMemory) {
-// 		ds->playbackSwapMemory = false;
-
-// 		ExtendibleMemoryArray* debugMemory = &appMemory->extendibleMemoryArrays[1];
-// 		ExtendibleMemoryArray* pMemory = globalMemory->pMemory;
-
-// 		for(int i = 0; i < pMemory->index + 1; i++) {
-// 			memCpy(pMemory->arrays[i].data, debugMemory->arrays[i].data, pMemory->slotSize);
-// 		}
-// 	}
-// }
 
 #pragma optimize( "", on ) 

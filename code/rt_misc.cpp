@@ -640,6 +640,8 @@ inline int roundUp(int i, int size) {
 //
 
 struct MemoryArray {
+	bool initialized;
+
 	char * data;
 	int index;
 	int size;
@@ -656,7 +658,10 @@ void initMemoryArray(MemoryArray * memory, int slotSize, void* baseAddress = 0) 
 
     memory->index = 0;
     memory->size = slotSize;
+    memory->initialized = true;
 }
+
+
 
 MemoryArray* globalMemoryArray;
 
@@ -717,7 +722,13 @@ void* getExtendibleMemoryArray(int size, ExtendibleMemoryArray* memory = 0) {
 		memory->index++;
 		myAssert(memory->index < arrayCount(memory->arrays));
 		i64 baseOffset = (i64)memory->index*(i64)memory->slotSize;
-		initMemoryArray(&memory->arrays[memory->index], memory->slotSize, (char*)memory->startAddress + baseOffset);
+
+		MemoryArray* mArray = memory->arrays + memory->index;
+		if(!mArray->initialized)
+			initMemoryArray(&memory->arrays[memory->index], memory->slotSize, (char*)memory->startAddress + baseOffset);
+		else
+			mArray->index = 0;
+
 		currentArray = memory->arrays + memory->index;
 	}
 

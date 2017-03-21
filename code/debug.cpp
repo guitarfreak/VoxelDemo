@@ -66,11 +66,14 @@ struct DebugState {
 	bool recordingInput;
 	int inputIndex;
 
+	char* snapShotMemory[8];
+	int snapShotCount;
+	int snapShotMemoryIndex;
+
 	bool playbackInput;
 	int playbackIndex;
 	bool playbackSwapMemory;
 	bool playbackPause;
-
 	bool playbackBreak;
 	int playbackBreakIndex;
 

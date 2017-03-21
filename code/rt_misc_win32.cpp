@@ -44,12 +44,13 @@ int getThreadQueueId(ThreadQueue* queue) {
 bool doNextThreadJob(ThreadQueue* queue) {
     bool shouldSleep = false;
 
-    uint currentReadIndex = queue->readIndex;
-    uint newReadIndex = (currentReadIndex + 1) % arrayCount(queue->jobs);
+    volatile uint currentReadIndex = queue->readIndex;
+    volatile uint newReadIndex = (currentReadIndex + 1) % arrayCount(queue->jobs);
 
     if(currentReadIndex != queue->writeIndex) {
         LONG oldValue = InterlockedCompareExchange((LONG volatile*)&queue->readIndex, newReadIndex, currentReadIndex);
-        if(newReadIndex == queue->readIndex) {
+        // if(newReadIndex == queue->readIndex) {
+        if(oldValue == currentReadIndex) { // Holy Shit.
             ThreadJob job = queue->jobs[currentReadIndex];
             job.function(job.data);
             InterlockedIncrement((LONG volatile*)&queue->completionCount);
@@ -139,19 +140,18 @@ bool threadQueueFull(ThreadQueue* queue) {
 
 bool threadQueueFinished(ThreadQueue* queue) {
 	// bool result = queue->readIndex == queue->writeIndex;
-	// bool result = queue->completionCount == queue->completionGoal;
-	bool result = queue->completionCount >= queue->completionGoal;
+	bool result = queue->completionCount == queue->completionGoal;
+	// bool result = queue->completionCount >= queue->completionGoal;
 	return result;
 }
 
 void threadQueueComplete(ThreadQueue* queue) {
-    // while(queue->completionCount != queue->completionGoal) {
-    //     // doNextThreadJob(queue);
-    // }
-
     while(threadQueueFinished(queue) == false) {
         doNextThreadJob(queue);
     }
+
+    // if(queue->readIndex != queue->writeIndex) 
+    // 	printf("Threadqueue copmletion error.\n");
 
     InterlockedExchange(&queue->completionGoal, 0);
     InterlockedExchange(&queue->completionCount, 0);
