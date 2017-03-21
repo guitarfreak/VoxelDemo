@@ -463,7 +463,15 @@ struct Gui {
 
 	void incrementId() {currentId++;};
 
-	bool pre() {
+	bool rectOutside(Rect region) {
+		return !rectIntersection(region, getCurrentScissor());
+	}
+
+	Rect getPanelRect() {
+		return scissorStack[0];
+	}
+
+	bool pre(bool checkRectIntersection = false) {
 		incrementId();
 
 		if(columnMode) {
@@ -486,7 +494,10 @@ struct Gui {
 
 		if(scissorStack[scissorStackSize-1] == rect(0,0,0,0)) return false;
 		else if(currentDim.w <= 0) return false;
-		else return true;
+		else if(checkRectIntersection) {
+			if(rectIntersection(getCurrentRegion(), getCurrentScissor()) == false) return false;
+			else return true;
+		} else return true;
 	}
 
 
@@ -562,6 +573,8 @@ struct Gui {
 	void label(char* text, int align = 1, Vec4 bgColor = vec4(0,0,0,0), Vec4 shadowColor = vec4(0,0,0,0)) {
 		if(!pre()) return;
 
+		if(rectOutside(getCurrentRegion())) return;
+
 		if(bgColor != vec4(0,0,0,0)) drawRect(getCurrentRegion(), bgColor, false);
 		drawText(text, align, shadowColor);
 		post();
@@ -594,6 +607,17 @@ struct Gui {
 
 		float scrollValue = scrollStack[scrollStackIndexX][scrollStackIndexY[scrollStackIndexX]];
 		float diff = (scrollValue - scrollHeight - settings.offsets.y);
+
+		if(getMouseOver(input.mousePos, getPanelRect())) {
+			if(input.mouseWheel != 0) {
+				float scrollMod = fontHeight + settings.offsets.y;
+				if(input.shift && !input.ctrl) scrollMod *= 2;
+				if(input.shift && input.ctrl) scrollMod *= 4;
+				*scrollAmount = (*scrollAmount) + (scrollMod/diff)*input.mouseWheel*-1;
+				clamp(scrollAmount, 0, 1);
+			}
+		}
+
 		if(diff > 0) {
 			panelWidth -= settings.scrollBarWidth + settings.offsets.w;
 
@@ -716,8 +740,9 @@ struct Gui {
 		Rect region = getCurrentRegion();
 		bool mouseOver = getMouseOver(input.mousePos, region);
 		bool active = setActive(mouseOver);
-		Vec4 colorAdd = getColorAdd(active, mouseOver);
+		if(rectOutside(region)) return active;
 
+		Vec4 colorAdd = getColorAdd(active, mouseOver);
 		Vec4 finalColor = (bgColor==vec4(0,0,0,0) ? colors.regionColor:bgColor) + colorAdd;
 
 		if(switcher) {
@@ -820,6 +845,11 @@ struct Gui {
 		if(typeFloat) *(float*)value = calc;
 		else *(int*)value = calc;
 
+		if(rectOutside(region)) {
+			scissorPop();
+			return active;
+		}
+
 		// draw background
 		drawRect(region, colors.regionColor);
 
@@ -866,6 +896,8 @@ struct Gui {
 		bool mouseOver = getMouseOver(input.mousePos, region);
 		bool active = setActive(mouseOver, 2);
 		Vec4 colorAdd = getColorAdd(active, mouseOver, 2);
+
+		if(rectOutside(region)) return active;
 
 		if(!activeBefore && active) {
 			int textLength;

@@ -77,7 +77,7 @@ struct Entity {
 
 	bool playerOnGround;
 
-	void* data;
+	// void* data;
 };
 
 

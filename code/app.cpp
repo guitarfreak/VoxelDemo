@@ -2368,6 +2368,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, bool* isRunning, bool init, ThreadQueue* threadQueue) {
 	// @DebugStart.
 
+	#define PVEC3(v) v.x, v.y, v.z
+	#define PVEC2(v) v.x, v.y
+
 	globalMemory->debugMode = true;
 
 	i64 timeStamp = timerInit();
@@ -2400,16 +2403,12 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			threadQueueComplete(threadQueue);
 			ds->playbackSwapMemory = false;
 
-
-
 			pMemory->index = ds->snapShotCount-1;
 			pMemory->arrays[pMemory->index].index = ds->snapShotMemoryIndex;
 
-			// ds->snapShotCount = pMemory->index+1;
 			for(int i = 0; i < ds->snapShotCount; i++) {
 				memCpy(pMemory->arrays[i].data, ds->snapShotMemory[i], pMemory->slotSize);
 			}
-
 		}
 	}
 
@@ -2421,7 +2420,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		Gui* gui = ds->gui;
 		gui->start(ds->gInput, getFont(FONT_CALIBRI, fontSize), ws->currentRes);
 
-		static bool sectionGuiRecording = true;
+		static bool sectionGuiRecording = false;
 		if(gui->beginSection("Recording", &sectionGuiRecording)) {
 
 			bool noActiveThreads = threadQueueFinished(threadQueue);
@@ -2501,7 +2500,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 		} gui->endSection();
 
-		static bool sectionGuiSettings = false;
+		static bool sectionGuiSettings = initSections;
 		if(gui->beginSection("GuiSettings", &sectionGuiSettings)) {
 			guiSettings(gui);
 		} gui->endSection();
@@ -2516,6 +2515,49 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			gui->div(0,0,0); gui->label("FboRes", 0); gui->slider(&ad->fboRes.x, 150, ad->cur3dBufferRes.x); gui->slider(&ad->fboRes.y, 150, ad->cur3dBufferRes.y);
 			gui->div(0,0,0); gui->label("NFPlane", 0); gui->slider(&ad->nearPlane, 0.01, 2); gui->slider(&ad->farPlane, 1000, 5000);
 		} gui->endSection();
+
+		static bool sectionEntities = true;
+		if(gui->beginSection("Entities", &sectionEntities)) { 
+
+			EntityList* list = &ad->entityList;
+			for(int i = 0; i < list->size; i++) {
+				Entity* e = list->e + i;
+
+				if(e->init) {
+					gui->label(fillString("Id: %i", e->id), 0);
+					gui->startPos.x += 30;
+					gui->panelWidth -= 30;
+
+					gui->div(vec2(0,0)); gui->label("init", 0);           gui->label(fillString("%i", e->init), 2);
+					gui->div(vec2(0,0)); gui->label("type", 0);           gui->label(fillString("%i", e->type), 2);
+					gui->div(vec2(0,0)); gui->label("id", 0);             gui->label(fillString("%i", e->id), 2);
+					gui->div(vec2(0,0)); gui->label("name", 0);           gui->label(fillString("%s", e->name), 2);
+
+					gui->div(vec2(0,0)); gui->label("pos", 0);            gui->label(fillString("(%f, %f, %f)", PVEC3(e->pos)), 2);
+					gui->div(vec2(0,0)); gui->label("dir", 0);            gui->label(fillString("(%f, %f, %f)", PVEC3(e->dir)), 2);
+					gui->div(vec2(0,0)); gui->label("rot", 0);            gui->label(fillString("(%f, %f, %f)", PVEC3(e->rot)), 2);
+					gui->div(vec2(0,0)); gui->label("rotAngle", 0);       gui->label(fillString("%f", e->rotAngle), 2);
+					gui->div(vec2(0,0)); gui->label("dim", 0);            gui->label(fillString("(%f, %f, %f)", PVEC3(e->dim)), 2);
+					gui->div(vec2(0,0)); gui->label("camOff", 0);         gui->label(fillString("(%f, %f, %f)", PVEC3(e->camOff)), 2);
+					gui->div(vec2(0,0)); gui->label("vel", 0);            gui->label(fillString("(%f, %f, %f)", PVEC3(e->vel)), 2);
+					gui->div(vec2(0,0)); gui->label("acc", 0);            gui->label(fillString("(%f, %f, %f)", PVEC3(e->acc)), 2);
+
+					gui->div(vec2(0,0)); gui->label("movementType", 0);   gui->label(fillString("%i", e->movementType), 2);
+					gui->div(vec2(0,0)); gui->label("spatial", 0);        gui->label(fillString("%i", e->spatial), 2);
+					gui->div(vec2(0,0)); gui->label("deleted", 0);        gui->label(fillString("%i", e->deleted), 2);
+					gui->div(vec2(0,0)); gui->label("isMoving", 0);       gui->label(fillString("%i", e->isMoving), 2);
+					gui->div(vec2(0,0)); gui->label("isColliding", 0);    gui->label(fillString("%i", e->isColliding), 2);
+					gui->div(vec2(0,0)); gui->label("exploded", 0);       gui->label(fillString("%i", e->exploded), 2);
+					gui->div(vec2(0,0)); gui->label("playerOnGround", 0); gui->label(fillString("%i", e->playerOnGround), 2);
+
+					gui->startPos.x -= 30;
+					gui->panelWidth += 30;
+				}
+			}
+
+		} gui->endSection();
+
+		addDebugInfo(fillString("%i", ad->entityList.size));
 
 		static bool sectionWorld = initSections;
 		if(gui->beginSection("World", &sectionWorld)) { 
@@ -3250,12 +3292,10 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				char* text = strLen(info->name) > 0 ? info->name : info->function;
 				float textWidth = getTextDim(text, gui->font, vec2(rectNames.max.x - 2, yAvg)).w;
 
+				gui->scissorPush(rectNames);
 				Rect tr = getTextLineRect(text, gui->font, vec2(rectNames.max.x - 2, yAvg), vec2i(1,-1));
 				if(gui->buttonUndocked(text, tr, 2, gui->colors.panelColor)) ds->lineGraphHighlight = timerIndex;
-
-				// gui->scissorPush(rectNames);
-				// dcText(text, gui->font, vec2(rectNames.max.x - 2, yAvg), vec4(1,1,1,1), vec2i(1,-1));
-				// gui->scissorPop();
+				gui->scissorPop();
 
 				Rect rectNamesAndLines = rect(rectNames.min, rectLines.max);
 				gui->scissorPush(rectNamesAndLines);
@@ -3437,8 +3477,6 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			timer = 0;
 		}
 
-		#define PVEC3(v) v.x, v.y, v.z
-		#define PVEC2(v) v.x, v.y
 		dcText(fillString("Fps  : %i", fps), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
 		dcText(fillString("Pos  : (%f,%f,%f)", PVEC3(ad->activeCam.pos)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
 		dcText(fillString("Pos  : (%f,%f,%f)", PVEC3(ad->selectedBlock)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
@@ -3452,8 +3490,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		dcText(fillString("Quads: (%i)", 	   ad->voxelTriangleCount), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
 		dcText(fillString("BufferIndex: %i",    ds->timer->bufferIndex), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
 		dcText(fillString("LastBufferIndex: %i",ds->lastBufferIndex), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-		#undef PVEC3
-		#undef PVEC2
+
 
 		for(int i = 0; i < ds->infoStackCount; i++) {
 			dcText(fillString("%s", ds->infoStack[i]), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;

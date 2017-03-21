@@ -24,9 +24,7 @@ int CALLBACK WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR commandLi
     while(isRunning) {
 
     	bool reload = false;
-		if(threadQueueFinished(&threadQueue)) {
-			reload = updateDll(&hotloadDll);
-		}
+		if(threadQueueFinished(&threadQueue)) reload = updateDll(&hotloadDll);
      	platform_appMain = (appMainType*)getDllFunction(&hotloadDll, "appMain");
         platform_appMain(firstFrame, reload, &isRunning, wData, &threadQueue, &appMemory);
 
