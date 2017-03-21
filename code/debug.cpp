@@ -66,10 +66,13 @@ struct DebugState {
 	bool recordingInput;
 	int inputIndex;
 
-	bool playbackStart;
 	bool playbackInput;
 	int playbackIndex;
 	bool playbackSwapMemory;
+	bool playbackPause;
+
+	bool playbackBreak;
+	int playbackBreakIndex;
 
 	Console console;
 

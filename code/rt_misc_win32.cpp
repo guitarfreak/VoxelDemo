@@ -150,7 +150,7 @@ void threadQueueComplete(ThreadQueue* queue) {
     // }
 
     while(threadQueueFinished(queue) == false) {
-        // doNextThreadJob(queue);
+        doNextThreadJob(queue);
     }
 
     InterlockedExchange(&queue->completionGoal, 0);

@@ -57,7 +57,6 @@ additionally:
 - top menu bar
 - Clean up the gui to make it more usable.
 - Make entities watchable and changeable in Gui.
-`
 
 Changing course for now:
  * Split up main app.cpp into mutliple files.
@@ -85,16 +84,6 @@ Changing course for now:
  	* Fix result display lag by moving things.
 	* Multiline text editing.
 
- - The Big Cleanup.
-
- - 3d animation system. (Search Opengl vertex skinning.)
-
- - Sound perturbation. (Whatever that is.) 
-
- - In executeCommandList: Remember state, and only switch if a change occured. (Like shaders, colors, linewidth, etc.)
- - Crashing once in a while at startup. (NOTE: Has not happened in quite a while.)
- - Clean up gui.
-
  * Fix putting Timer_blocks somewhere.
  * Move statistics out of debug.cpp.
  * Stop text in graph when pressing key.
@@ -110,7 +99,7 @@ Changing course for now:
  * Threading in timerblocks not working.
    * Use thread id information that's already in the timerinfo.
  * Graph about relative timings.
-  * Averages should only count when the timerblock actually gets hit.
+   * Averages should only count when the timerblock actually gets hit.
  * Font bad outline is caused by clearcolor 0,0,0,0.
  * Add primitive drawing. (Lines for example.)
  * Rounded corners.
@@ -122,13 +111,25 @@ Changing course for now:
  * Clean up timeline.y
  * Draw text function that stops drawing when character outside of scissor rect.
  * Set timerinfos colors at start.
+ * The Big Cleanup.
+ * Fix up the input recording.
 
+ - In executeCommandList: Remember state, and only switch if a change occured. (Like shaders, colors, linewidth, etc.)
+
+ - 3d animation system. (Search Opengl vertex skinning.)
+ - Sound perturbation. (Whatever that is.) 
+ - Clean up gui.
  - Using makros and defines to make templated vectors and hashtables and such.
+ - Fix threadQueueComplete with threadBench.
 
 //-------------------------------------
 //               BUGS
 //-------------------------------------
 * window operations only work after first frame
+* text looks wrong after srgb conversion
+* Water lags behind one frame when drawing. Noticeable when pushing lower FPS on higher view distances. 
+* Fonts look bad. (Whatever that means.)
+
 - look has to be negative to work in view projection matrix
 - distance jumping collision bug, possibly precision loss in distances
 - gpu fucks up at some point making swapBuffers alternates between time steps 
@@ -136,15 +137,11 @@ Changing course for now:
 - game input gets stuck when buttons are pressed right at the start
 - sort key assert firing randomly
 - hotload gets stuck sometimes, thread that won't complete
-
 - draw line crashes
-- text looks wrong after srgb conversion
 - release build takes forever
 - threadQueueComplete(ThreadQueue* queue) doesnt work
 - threadqueue do next work from main thread bug
-
-- Water lags behind one frame when drawing. Noticeable when pushing lower FPS on higher view distances. 
-- Fonts look bad. (Whatever that means.)
+- Crashing once in a while at startup. (NOTE: Has not happened in quite a while.)
 
 */
 
@@ -322,7 +319,7 @@ void threadBench(void* data) {
 
 // void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, bool* isRunning, bool init);
 void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, bool* isRunning, bool init, ThreadQueue* threadQueue);
-void debugUpdatePlayback(DebugState* ds, AppMemory* appMemory);
+// void debugUpdatePlayback(DebugState* ds, AppMemory* appMemory);
 
 #pragma optimize( "", off )
 extern "C" APPMAINFUNCTION(appMain) {
@@ -435,8 +432,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		ds->input = getPStructDebug(Input);
 		// ds->showMenu = false;
-		ds->showMenu = false;
-		ds->showStats = true;
+		ds->showMenu = true;
+		ds->showStats = false;
 		ds->showConsole = false;
 		ds->showHud = true;
 		// ds->guiAlpha = 0.95f;
@@ -733,12 +730,20 @@ extern "C" APPMAINFUNCTION(appMain) {
 			}
 		}
 
-		if(ds->playbackInput) {
+		if(ds->playbackInput && !ds->playbackPause) {
 			ad->input = ds->recordedInput[ds->playbackIndex];
 			ds->playbackIndex = (ds->playbackIndex+1)%ds->inputIndex;
 			if(ds->playbackIndex == 0) ds->playbackSwapMemory = true;
 		}
 	} 
+
+	if(ds->playbackPause) goto endOfMainLabel;
+
+	if(ds->playbackBreak) {
+		if(ds->playbackBreakIndex == ds->playbackIndex) {
+			ds->playbackPause = true;
+		}
+	}
 
     if(input->keysPressed[KEYCODE_ESCAPE]) {
     	*isRunning = false;
@@ -896,7 +901,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 	TIMER_BLOCK_END(openglInit);
-
 
 
 	// @AppLoop.
@@ -2244,8 +2248,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 
-
-
+	endOfMainLabel:
 
 	// Render.
 	{
@@ -2350,7 +2353,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	debugMain(ds, appMemory, ad, reload, isRunning, init, threadQueue);
 
-	debugUpdatePlayback(ds, appMemory);
+	// debugUpdatePlayback(ds, appMemory);
 
 	// @AppEnd.
 }
@@ -2386,30 +2389,99 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 	if(input->keysPressed[KEYCODE_F7]) ds->showStats = !ds->showStats;
 	if(input->keysPressed[KEYCODE_F8]) ds->showHud = !ds->showHud;
 
+	// Recording update.
+	{
+		if(ds->playbackSwapMemory) {
+			threadQueueComplete(threadQueue);
+
+			ds->playbackSwapMemory = false;
+
+			for(int i = 0; i < pMemory->index + 1; i++) {
+				memCpy(globalMemory->pMemory->arrays[i].data, appMemory->extendibleMemoryArrays[1].arrays[i].data, pMemory->slotSize);
+			}
+		}
+	}
+
 	if(ds->showMenu) {
 		int fontSize = 20;
 
 		bool initSections = false;
 
 		Gui* gui = ds->gui;
-		// gui->start(gInput, getFont(FONT_CONSOLAS, fontSize), ws->currentRes);
 		gui->start(ds->gInput, getFont(FONT_CALIBRI, fontSize), ws->currentRes);
 
-		if(gui->switcher("Record", &ds->recordingInput)) {
-			if(ds->recordingInput) {
-				for(int i = 0; i < pMemory->index; i++) {
-					if(debugMemory->index < i) getExtendibleMemoryArray(pMemory->slotSize, debugMemory);
+		static bool sectionGuiRecording = true;
+		if(gui->beginSection("Recording", &sectionGuiRecording)) {
 
-					memCpy(debugMemory->arrays[i].data, pMemory->arrays[i].data, pMemory->slotSize);
+			bool noActiveThreads = threadQueueFinished(threadQueue);
+
+			gui->div(vec2(0,0));
+			gui->label("Active Threads:");
+			gui->label(fillString("%i", !noActiveThreads));
+
+			gui->div(vec2(0,0));
+			gui->label("Max Frames:");
+			gui->label(fillString("%i", ds->inputCapacity));
+
+			gui->div(vec2(0,0));
+			if(gui->switcher("Record", &ds->recordingInput)) {
+				if(ds->playbackInput || !noActiveThreads) ds->recordingInput = false;
+
+				if(ds->recordingInput) {
+					if(threadQueueFinished(threadQueue)) {
+						for(int i = 0; i < pMemory->index+1; i++) {
+							if(debugMemory->index < i) getExtendibleMemoryArray(pMemory->slotSize, debugMemory);
+
+							memCpy(debugMemory->arrays[i].data, pMemory->arrays[i].data, pMemory->slotSize);
+						}
+
+						ds->recordingInput = true;
+						ds->inputIndex = 0;
+					}
+				}
+			}
+			gui->label(fillString("%i", ds->inputIndex));
+
+
+			if(ds->inputIndex > 0 && !ds->recordingInput) {
+				char* s = ds->playbackInput ? "Stop Playback" : "Start Playback";
+
+				if(gui->switcher(s, &ds->playbackInput)) {
+					if(ds->playbackInput) {
+						threadQueueComplete(threadQueue);
+
+						ds->playbackIndex = 0;
+
+						for(int i = 0; i < pMemory->index + 1; i++) {
+							memCpy(globalMemory->pMemory->arrays[i].data, appMemory->extendibleMemoryArrays[1].arrays[i].data, pMemory->slotSize);
+						}
+					} else {
+						ds->playbackPause = false;
+						ds->playbackBreak = false;
+					}
 				}
 
-				ds->recordingInput = true;
-				ds->inputIndex = 0;
-			} else {
-				ds->recordingInput = false;
+				if(ds->playbackInput) {
+					gui->div(vec2(0,0));
+
+					gui->switcher("Pause/Resume", &ds->playbackPause);
+
+					int cap = ds->playbackIndex;
+					gui->slider(&ds->playbackIndex, 0, ds->inputIndex - 1);
+					ds->playbackIndex = cap;
+
+					gui->div(vec3(0.25f,0.25f,0));
+					if(gui->button("Step")) {
+						ds->playbackBreak = true;
+						ds->playbackPause = false;
+						ds->playbackBreakIndex = (ds->playbackIndex + 1)%ds->inputIndex;
+					}
+					gui->switcher("Break", &ds->playbackBreak);
+					gui->slider(&ds->playbackBreakIndex, 0, ds->inputIndex - 1);
+				}
 			}
-		}
-		if(gui->button("Playback")) ds->playbackStart = true;
+
+		} gui->endSection();
 
 		static bool sectionGuiSettings = false;
 		if(gui->beginSection("GuiSettings", &sectionGuiSettings)) {
@@ -3387,25 +3459,25 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 	}
 }
 
-void debugUpdatePlayback(DebugState* ds, AppMemory* appMemory) {
-	if(ds->playbackStart) {
-		ds->playbackStart = false;
-		ds->playbackInput = true;
-		ds->playbackIndex = 0;
+// void debugUpdatePlayback(DebugState* ds, AppMemory* appMemory) {
+// 	if(ds->playbackStart) {
+// 		ds->playbackStart = false;
+// 		ds->playbackInput = true;
+// 		ds->playbackIndex = 0;
 
-		ds->playbackSwapMemory = true;
-	}
+// 		ds->playbackSwapMemory = true;
+// 	}
 
-	if(ds->playbackSwapMemory) {
-		ds->playbackSwapMemory = false;
+// 	if(ds->playbackSwapMemory) {
+// 		ds->playbackSwapMemory = false;
 
-		ExtendibleMemoryArray* debugMemory = &appMemory->extendibleMemoryArrays[1];
-		ExtendibleMemoryArray* pMemory = globalMemory->pMemory;
+// 		ExtendibleMemoryArray* debugMemory = &appMemory->extendibleMemoryArrays[1];
+// 		ExtendibleMemoryArray* pMemory = globalMemory->pMemory;
 
-		for(int i = 0; i < pMemory->index; i++) {
-			memCpy(pMemory->arrays[i].data, debugMemory->arrays[i].data, pMemory->slotSize);
-		}
-	}
-}
+// 		for(int i = 0; i < pMemory->index + 1; i++) {
+// 			memCpy(pMemory->arrays[i].data, debugMemory->arrays[i].data, pMemory->slotSize);
+// 		}
+// 	}
+// }
 
 #pragma optimize( "", on ) 
