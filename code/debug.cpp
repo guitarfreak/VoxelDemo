@@ -1,4 +1,210 @@
 
+enum StructType {
+	STRUCTTYPE_INT = 0,
+	STRUCTTYPE_FLOAT,
+	STRUCTTYPE_CHAR,
+	STRUCTTYPE_BOOL,
+
+	STRUCTTYPE_VEC3,
+	STRUCTTYPE_ENTITY,
+
+	STRUCTTYPE_SIZE,
+};
+
+enum ArrayType {
+	ARRAYTYPE_CONSTANT, 
+	ARRAYTYPE_DYNAMIC, 
+	ARRAYTYPE_STRING, 
+
+	ARRAYTYPE_SIZE, 
+};
+
+struct ArrayInfo {
+	int type;
+	bool isOffset;
+
+	union {
+		int size;
+		int offset;
+	};
+};
+
+struct StructMemberInfo {
+	char* name;
+	int type;
+	int offset;
+	int arrayCount;
+	ArrayInfo arrays[2];
+};
+
+StructMemberInfo initMemberInfo(char* name, int type, int offset) {
+	StructMemberInfo info;
+	info.name = name;
+	info.type = type;
+	info.offset = offset;
+	info.arrayCount = 0;
+
+	return info;
+}
+
+StructMemberInfo initMemberInfo(char* name, int type, int offset, ArrayInfo aInfo1, ArrayInfo aInfo2 = {-1}) {
+	StructMemberInfo info = initMemberInfo(name, type, offset);
+	info.arrayCount = 1;
+	if(aInfo2.type != -1) info.arrayCount = 2;
+
+	info.arrays[0] = aInfo1;
+	info.arrays[1] = aInfo2;
+
+	return info;
+}
+
+StructMemberInfo vec3StructMemberInfos[] = {
+	initMemberInfo("x", STRUCTTYPE_FLOAT, offsetof(Vec3, x)),
+	initMemberInfo("y", STRUCTTYPE_FLOAT, offsetof(Vec3, y)),
+	initMemberInfo("z", STRUCTTYPE_FLOAT, offsetof(Vec3, z)),
+};
+
+StructMemberInfo entityStructMemberInfos[] = {
+	initMemberInfo("init", STRUCTTYPE_INT, offsetof(Entity, init)),
+	initMemberInfo("type", STRUCTTYPE_INT, offsetof(Entity, type)),
+	initMemberInfo("id", STRUCTTYPE_INT, offsetof(Entity, id)),
+	initMemberInfo("name", STRUCTTYPE_CHAR, offsetof(Entity, name), {ARRAYTYPE_CONSTANT, 0, memberSize(Entity, name)}),
+	initMemberInfo("pos", STRUCTTYPE_VEC3, offsetof(Entity, pos)),
+	initMemberInfo("dir", STRUCTTYPE_VEC3, offsetof(Entity, dir)),
+	initMemberInfo("rot", STRUCTTYPE_VEC3, offsetof(Entity, rot)),
+	initMemberInfo("rotAngle", STRUCTTYPE_FLOAT, offsetof(Entity, rotAngle)),
+	initMemberInfo("dim", STRUCTTYPE_VEC3, offsetof(Entity, dim)),
+	initMemberInfo("camOff", STRUCTTYPE_VEC3, offsetof(Entity, camOff)),
+	initMemberInfo("vel", STRUCTTYPE_VEC3, offsetof(Entity, vel)),
+	initMemberInfo("acc", STRUCTTYPE_VEC3, offsetof(Entity, acc)),
+	initMemberInfo("movementType", STRUCTTYPE_INT, offsetof(Entity, movementType)),
+	initMemberInfo("spatial", STRUCTTYPE_INT, offsetof(Entity, spatial)),
+	initMemberInfo("deleted", STRUCTTYPE_BOOL, offsetof(Entity, deleted)),
+	initMemberInfo("isMoving", STRUCTTYPE_BOOL, offsetof(Entity, isMoving)),
+	initMemberInfo("isColliding", STRUCTTYPE_BOOL, offsetof(Entity, isColliding)),
+	initMemberInfo("exploded", STRUCTTYPE_BOOL, offsetof(Entity, exploded)),
+	initMemberInfo("playerOnGround", STRUCTTYPE_BOOL, offsetof(Entity, playerOnGround)),
+};
+
+struct StructInfo {
+	int size;
+	int memberCount;
+	StructMemberInfo* list;
+};
+
+StructInfo structInfos[] = {
+	{ sizeof(int), 0 },
+	{ sizeof(float), 0 },
+	{ sizeof(char), 0 },
+	{ sizeof(bool), 0 },
+	{ sizeof(Vec3), arrayCount(vec3StructMemberInfos), vec3StructMemberInfos }, 
+	{ sizeof(Entity), arrayCount(entityStructMemberInfos), entityStructMemberInfos }, 
+};
+
+bool typeIsPrimitive(int type) {
+	return structInfos[type].memberCount == 0;
+}
+
+void printMember(int type, char* data) {
+	switch(type) {
+		case STRUCTTYPE_INT: printf("%i", *(int*)data); break;
+		case STRUCTTYPE_FLOAT: printf("%f", *(float*)data); break;
+		case STRUCTTYPE_CHAR: printf("%c", *data); break;
+		case STRUCTTYPE_BOOL: printf((*((bool*)data)) ? "true" : "false"); break;
+		default: break;
+	};
+}
+
+void printType(int structType, char* data, int depth = 0) {
+	StructInfo* info = structInfos + structType;
+
+	if(depth == 0) printf("{\n");
+
+	int arrayPrintLimit = 5;
+	int indent = 2;
+
+	if(typeIsPrimitive(structType)) {
+		printMember(structType, data);
+		printf(", ");
+		if(depth == 0) printf("\n");
+		return;
+	}
+
+	for(int i = 0; i < info->memberCount; i++) {
+		StructMemberInfo member = info->list[i];
+
+		bool isPrimitive = typeIsPrimitive(member.type);
+
+		if(depth == 0) printf("%*s", indent*(depth+1), "");
+
+		if(member.arrayCount == 0) {
+			if(!isPrimitive) printf("{ ");
+			printType(member.type, data + member.offset, depth + 1);
+			if(!isPrimitive) printf("}, ");
+			if(depth == 0) printf("\n");
+		} else {
+			ArrayInfo aInfo = member.arrays[0];
+
+			if(aInfo.type == ARRAYTYPE_STRING) {
+				printf("\"%s\"", *((char**)(data + member.offset)));
+			} else {
+				if(member.arrayCount == 1) {
+					int typeSize = structInfos[member.type].size;
+					int arraySize = aInfo.isOffset ? *(int*)(data + aInfo.offset) : aInfo.size;
+					char* arrayBase = (aInfo.type == ARRAYTYPE_CONSTANT) ? data + member.offset :*((char**)(data + member.offset));
+
+					printf("[ ");
+					int size = min(arraySize, arrayPrintLimit);
+					for(int i = 0; i < size; i++) {
+						char* value = arrayBase + (typeSize*i);
+						if(!isPrimitive) printf("{ ");
+						printType(member.type, value, depth + 1);
+						if(!isPrimitive) printf("}, ");
+					}
+					if(arraySize > arrayPrintLimit) printf("...");
+					printf("]");
+				} else {
+					int typeSize = structInfos[member.type].size;
+					int arraySize = aInfo.isOffset ? *(int*)(data + aInfo.offset) : aInfo.size;
+					char* arrayBase = (aInfo.type == ARRAYTYPE_CONSTANT) ? data + member.offset :*((char**)(data + member.offset));
+
+					ArrayInfo aInfo2 = member.arrays[1];
+					int arraySize2 = aInfo2.isOffset ? *(int*)(data + aInfo2.offset) : aInfo2.size;
+
+					printf("[ ");
+					for(int arrayIndex = 0; arrayIndex < arraySize; arrayIndex++) {
+						char* x;
+						if(aInfo2.type == ARRAYTYPE_CONSTANT) x = (arrayBase + (arrayIndex*arraySize2*typeSize));
+						else x = (arrayBase + (arrayIndex*sizeof(int*)));
+						char* arrayBase2 = (aInfo2.type == ARRAYTYPE_CONSTANT) ? x : *((char**)(x));
+
+						printf("[ ");
+						int size = min(arraySize2, arrayPrintLimit);
+						for(int i = 0; i < size; i++) {
+							char* value = arrayBase2 + (typeSize*i);
+							if(!isPrimitive) printf("{ ");
+							printType(member.type, value, depth + 1);
+							if(!isPrimitive) printf("}, ");
+						}
+						if(arraySize2 > arrayPrintLimit) printf("...");
+						printf("], ");
+					}
+					printf("]");
+
+				}
+
+			}
+
+			if(depth == 0) printf("\n");
+		}
+	}
+
+	if(depth == 0) printf("}\n");
+
+}
+
+
+
 #define DEBUG_NOTE_LENGTH 50
 #define DEBUG_NOTE_DURATION 3
 

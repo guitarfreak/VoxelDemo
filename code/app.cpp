@@ -121,6 +121,8 @@ Changing course for now:
  - Sound perturbation. (Whatever that is.) 
  - Clean up gui.
  - Using makros and defines to make templated vectors and hashtables and such.
+ - When switching between text editor and debugger, synchronize open files.
+ - Entity introspection in gui.
 
 //-------------------------------------
 //               BUGS
@@ -585,10 +587,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 		initEntity(&player, ET_Player, vec3(0,0,40), startDir, playerDim, vec3(0,0,camOff));
 		player.rot = vec3(M_2PI,0,0);
 		player.playerOnGround = false;
+		strCpy(player.name, "Player");
 		ad->player = addEntity(&ad->entityList, &player);
 
 		Entity freeCam;
 		initEntity(&freeCam, ET_Camera, vec3(35,35,32), startDir, vec3(0,0,0), vec3(0,0,0));
+		strCpy(freeCam.name, "Camera");
 		ad->cameraEntity = addEntity(&ad->entityList, &freeCam);
 
 		// Voxel.
@@ -2342,8 +2346,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
-
-
 	// Swap window background buffer.
 	{
 		TIMER_BLOCK_NAMED("Swap");
@@ -2519,41 +2521,92 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		static bool sectionEntities = true;
 		if(gui->beginSection("Entities", &sectionEntities)) { 
 
+			gui->button("sdf");
+
+			// EntityList* list = &ad->entityList;
+			// for(int i = 0; i < list->size; i++) {
+			// 	Entity* e = list->e + i;
+
+			// 	if(e->init) {
+			// 		gui->label(fillString("Id: %i", e->id), 0);
+			// 		gui->startPos.x += 30;
+			// 		gui->panelWidth -= 30;
+
+			// 		float tw = 150;
+
+			// 		gui->div(vec2(tw,0)); gui->label("init", 0);           gui->textBoxInt(&e->init);
+			// 		gui->div(vec2(tw,0)); gui->label("type", 0);           gui->textBoxInt(&e->type);
+			// 		gui->div(vec2(tw,0)); gui->label("id", 0);             gui->textBoxInt(&e->id);
+			// 		gui->div(vec2(tw,0)); gui->label("name", 0);           gui->textBoxChar(e->name);
+
+			// 		#define TEDIT_VEC3(name) gui->textBoxFloat(&name.x); gui->textBoxFloat(&name.y); gui->textBoxFloat(&name.z);
+
+			// 		gui->div(tw,0,0,0); gui->label("pos", 0);            TEDIT_VEC3(e->pos);
+			// 		gui->div(tw,0,0,0); gui->label("dir", 0);            TEDIT_VEC3(e->dir);
+			// 		gui->div(tw,0,0,0); gui->label("rot", 0);            TEDIT_VEC3(e->rot);
+			// 		gui->div(vec2(tw,0)); gui->label("rotAngle", 0);     gui->textBoxFloat(&e->rotAngle);
+			// 		gui->div(tw,0,0,0); gui->label("dim", 0);            TEDIT_VEC3(e->dim);
+			// 		gui->div(tw,0,0,0); gui->label("camOff", 0);         TEDIT_VEC3(e->camOff);
+			// 		gui->div(tw,0,0,0); gui->label("vel", 0);            TEDIT_VEC3(e->vel);
+			// 		gui->div(tw,0,0,0); gui->label("acc", 0);            TEDIT_VEC3(e->acc);
+
+			// 		gui->div(vec2(tw,0)); gui->label("movementType", 0);   gui->textBoxInt(&e->movementType);
+			// 		gui->div(vec2(tw,0)); gui->label("spatial", 0);        gui->textBoxInt(&e->spatial);
+
+			// 		gui->div(vec2(tw,0)); gui->label("deleted", 0);        gui->switcher("deleted", &e->deleted);
+			// 		gui->div(vec2(tw,0)); gui->label("isMoving", 0);       gui->switcher("isMoving", &e->isMoving);
+			// 		gui->div(vec2(tw,0)); gui->label("isColliding", 0);    gui->switcher("isColliding", &e->isColliding);
+			// 		gui->div(vec2(tw,0)); gui->label("exploded", 0);       gui->switcher("exploded", &e->exploded);
+			// 		gui->div(vec2(tw,0)); gui->label("playerOnGround", 0); gui->switcher("playerOnGround", &e->playerOnGround);
+
+			// 		gui->startPos.x -= 30;
+			// 		gui->panelWidth += 30;
+			// 	}
+			// }
+
+
+			// entityStructMemberInfos[];
+
 			EntityList* list = &ad->entityList;
 			for(int i = 0; i < list->size; i++) {
 				Entity* e = list->e + i;
 
 				if(e->init) {
-					gui->label(fillString("Id: %i", e->id), 0);
+					gui->label(fillString("Entity %i:", i), 0);
+					
 					gui->startPos.x += 30;
 					gui->panelWidth -= 30;
 
-					gui->div(vec2(0,0)); gui->label("init", 0);           gui->label(fillString("%i", e->init), 2);
-					gui->div(vec2(0,0)); gui->label("type", 0);           gui->label(fillString("%i", e->type), 2);
-					gui->div(vec2(0,0)); gui->label("id", 0);             gui->label(fillString("%i", e->id), 2);
-					gui->div(vec2(0,0)); gui->label("name", 0);           gui->label(fillString("%s", e->name), 2);
+					float tw = 150;
 
-					gui->div(vec2(0,0)); gui->label("pos", 0);            gui->label(fillString("(%f, %f, %f)", PVEC3(e->pos)), 2);
-					gui->div(vec2(0,0)); gui->label("dir", 0);            gui->label(fillString("(%f, %f, %f)", PVEC3(e->dir)), 2);
-					gui->div(vec2(0,0)); gui->label("rot", 0);            gui->label(fillString("(%f, %f, %f)", PVEC3(e->rot)), 2);
-					gui->div(vec2(0,0)); gui->label("rotAngle", 0);       gui->label(fillString("%f", e->rotAngle), 2);
-					gui->div(vec2(0,0)); gui->label("dim", 0);            gui->label(fillString("(%f, %f, %f)", PVEC3(e->dim)), 2);
-					gui->div(vec2(0,0)); gui->label("camOff", 0);         gui->label(fillString("(%f, %f, %f)", PVEC3(e->camOff)), 2);
-					gui->div(vec2(0,0)); gui->label("vel", 0);            gui->label(fillString("(%f, %f, %f)", PVEC3(e->vel)), 2);
-					gui->div(vec2(0,0)); gui->label("acc", 0);            gui->label(fillString("(%f, %f, %f)", PVEC3(e->acc)), 2);
+					char* data = (char*)e;
 
-					gui->div(vec2(0,0)); gui->label("movementType", 0);   gui->label(fillString("%i", e->movementType), 2);
-					gui->div(vec2(0,0)); gui->label("spatial", 0);        gui->label(fillString("%i", e->spatial), 2);
-					gui->div(vec2(0,0)); gui->label("deleted", 0);        gui->label(fillString("%i", e->deleted), 2);
-					gui->div(vec2(0,0)); gui->label("isMoving", 0);       gui->label(fillString("%i", e->isMoving), 2);
-					gui->div(vec2(0,0)); gui->label("isColliding", 0);    gui->label(fillString("%i", e->isColliding), 2);
-					gui->div(vec2(0,0)); gui->label("exploded", 0);       gui->label(fillString("%i", e->exploded), 2);
-					gui->div(vec2(0,0)); gui->label("playerOnGround", 0); gui->label(fillString("%i", e->playerOnGround), 2);
+					StructInfo* structInfo = structInfos + STRUCTTYPE_ENTITY;
+					for(int i = 0; i < structInfo->memberCount; i++) {
+						StructMemberInfo* memberInfo = structInfo->list + i;
+						gui->div(vec2(0,0));
+						gui->label(fillString("\"%s\"", memberInfo->name), 0);
+
+						if(typeIsPrimitive(memberInfo->type)) {
+							switch(memberInfo->type) {
+								case STRUCTTYPE_INT: gui->textBoxInt((int*)(data + memberInfo->offset)); break;
+								case STRUCTTYPE_FLOAT: gui->textBoxFloat((float*)(data + memberInfo->offset)); break;
+								case STRUCTTYPE_BOOL: gui->switcher("", (bool*)(data + memberInfo->offset)); break;
+								// case STRUCTTYPE_CHAR: gui->textBoxInt((int*)(data + memberInfo->offset));
+								default: gui->label("Unknown type.");
+							}
+							// gui->label("Yeah");
+						} else {
+							gui->label("Type not primitive.");
+						}
+
+					}
 
 					gui->startPos.x -= 30;
 					gui->panelWidth += 30;
 				}
 			}
+
 
 		} gui->endSection();
 
