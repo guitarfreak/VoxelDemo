@@ -222,8 +222,6 @@ void guiPrintIntrospection(Gui* gui, char* structBase, StructMemberInfo member, 
 	char* arrayBase = castTypeArray(data, aInfo);
 	int arraySize = getTypeArraySize(structBase, aInfo, arrayBase);
 
-	printf("[ ");
-	
 	if(arrayIndex == member.arrayCount-1) {
 		int size = min(arraySize, arrayPrintLimit);
 		bool isPrimitive = typeIsPrimitive(member.type);
@@ -250,8 +248,6 @@ void guiPrintIntrospection(Gui* gui, char* structBase, StructMemberInfo member, 
 			guiPrintIntrospection(gui, structBase, member, arrayBase + i*arrayOffset, arrayIndex+1, depth+1);
 		}
 	}
-
-	printf("], ");
 }
 
 void guiPrintIntrospection(Gui* gui, int structType, char* data, int depth) {
