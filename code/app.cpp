@@ -123,6 +123,7 @@ Changing course for now:
  - Using makros and defines to make templated vectors and hashtables and such.
  - When switching between text editor and debugger, synchronize open files.
  - Entity introspection in gui.
+ - Open devenv from within sublime.
 
 //-------------------------------------
 //               BUGS
@@ -2346,6 +2347,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 
+
 	// Swap window background buffer.
 	{
 		TIMER_BLOCK_NAMED("Swap");
@@ -2521,7 +2523,6 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		static bool sectionEntities = true;
 		if(gui->beginSection("Entities", &sectionEntities)) { 
 
-			gui->button("sdf");
 
 			// EntityList* list = &ad->entityList;
 			// for(int i = 0; i < list->size; i++) {
@@ -2564,46 +2565,16 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			// 	}
 			// }
 
-
 			// entityStructMemberInfos[];
+
+
 
 			EntityList* list = &ad->entityList;
 			for(int i = 0; i < list->size; i++) {
 				Entity* e = list->e + i;
 
 				if(e->init) {
-					gui->label(fillString("Entity %i:", i), 0);
-					
-					gui->startPos.x += 30;
-					gui->panelWidth -= 30;
-
-					float tw = 150;
-
-					char* data = (char*)e;
-
-					StructInfo* structInfo = structInfos + STRUCTTYPE_ENTITY;
-					for(int i = 0; i < structInfo->memberCount; i++) {
-						StructMemberInfo* memberInfo = structInfo->list + i;
-						gui->div(vec2(0,0));
-						gui->label(fillString("\"%s\"", memberInfo->name), 0);
-
-						if(typeIsPrimitive(memberInfo->type)) {
-							switch(memberInfo->type) {
-								case STRUCTTYPE_INT: gui->textBoxInt((int*)(data + memberInfo->offset)); break;
-								case STRUCTTYPE_FLOAT: gui->textBoxFloat((float*)(data + memberInfo->offset)); break;
-								case STRUCTTYPE_BOOL: gui->switcher("", (bool*)(data + memberInfo->offset)); break;
-								// case STRUCTTYPE_CHAR: gui->textBoxInt((int*)(data + memberInfo->offset));
-								default: gui->label("Unknown type.");
-							}
-							// gui->label("Yeah");
-						} else {
-							gui->label("Type not primitive.");
-						}
-
-					}
-
-					gui->startPos.x -= 30;
-					gui->panelWidth += 30;
+					guiPrintIntrospection(gui, STRUCTTYPE_ENTITY, (char*)e);
 				}
 			}
 

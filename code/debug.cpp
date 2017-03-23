@@ -14,14 +14,13 @@ enum StructType {
 enum ArrayType {
 	ARRAYTYPE_CONSTANT, 
 	ARRAYTYPE_DYNAMIC, 
-	ARRAYTYPE_STRING, 
 
 	ARRAYTYPE_SIZE, 
 };
 
 struct ArrayInfo {
 	int type;
-	bool isOffset;
+	int sizeMode;
 
 	union {
 		int size;
@@ -68,7 +67,7 @@ StructMemberInfo entityStructMemberInfos[] = {
 	initMemberInfo("init", STRUCTTYPE_INT, offsetof(Entity, init)),
 	initMemberInfo("type", STRUCTTYPE_INT, offsetof(Entity, type)),
 	initMemberInfo("id", STRUCTTYPE_INT, offsetof(Entity, id)),
-	initMemberInfo("name", STRUCTTYPE_CHAR, offsetof(Entity, name), {ARRAYTYPE_CONSTANT, 0, memberSize(Entity, name)}),
+	initMemberInfo("name", STRUCTTYPE_CHAR, offsetof(Entity, name), {ARRAYTYPE_CONSTANT, 2, memberSize(Entity, name)}),
 	initMemberInfo("pos", STRUCTTYPE_VEC3, offsetof(Entity, pos)),
 	initMemberInfo("dir", STRUCTTYPE_VEC3, offsetof(Entity, dir)),
 	initMemberInfo("rot", STRUCTTYPE_VEC3, offsetof(Entity, rot)),
@@ -87,44 +86,97 @@ StructMemberInfo entityStructMemberInfos[] = {
 };
 
 struct StructInfo {
+	char* name;
 	int size;
 	int memberCount;
 	StructMemberInfo* list;
 };
 
 StructInfo structInfos[] = {
-	{ sizeof(int), 0 },
-	{ sizeof(float), 0 },
-	{ sizeof(char), 0 },
-	{ sizeof(bool), 0 },
-	{ sizeof(Vec3), arrayCount(vec3StructMemberInfos), vec3StructMemberInfos }, 
-	{ sizeof(Entity), arrayCount(entityStructMemberInfos), entityStructMemberInfos }, 
+	{ "int", sizeof(int), 0 },
+	{ "float", sizeof(float), 0 },
+	{ "char", sizeof(char), 0 },
+	{ "bool", sizeof(bool), 0 },
+	{ "Vec3", sizeof(Vec3), arrayCount(vec3StructMemberInfos), vec3StructMemberInfos }, 
+	{ "Entity", sizeof(Entity), arrayCount(entityStructMemberInfos), entityStructMemberInfos }, 
 };
 
 bool typeIsPrimitive(int type) {
 	return structInfos[type].memberCount == 0;
 }
 
-void printMember(int type, char* data) {
-	switch(type) {
-		case STRUCTTYPE_INT: printf("%i", *(int*)data); break;
-		case STRUCTTYPE_FLOAT: printf("%f", *(float*)data); break;
-		case STRUCTTYPE_CHAR: printf("%c", *data); break;
-		case STRUCTTYPE_BOOL: printf((*((bool*)data)) ? "true" : "false"); break;
-		default: break;
-	};
+char* castTypeArray(char* base, ArrayInfo aInfo) {
+	char* arrayBase = (aInfo.type == ARRAYTYPE_CONSTANT) ? base :*((char**)(base));
+	return arrayBase;
 }
 
-void printType(int structType, char* data, int depth = 0) {
+int getTypeArraySize(char* structBase, ArrayInfo aInfo, char* arrayBase = 0) {
+	int arraySize;
+	if(aInfo.sizeMode == 0) arraySize = aInfo.size;
+	else if(aInfo.sizeMode == 1) arraySize = *(int*)(structBase + aInfo.offset);
+	else arraySize = strLen(arrayBase);
+
+	return arraySize;
+}
+
+void printType(int structType, char* data, int depth = 0);
+void printTypeArray(char* structBase, StructMemberInfo member, char* data, int arrayIndex, int depth) {
+	int arrayPrintLimit = 5;
+
+	bool isPrimitive = typeIsPrimitive(member.type);
+	ArrayInfo aInfo = member.arrays[arrayIndex];
+	int typeSize = structInfos[member.type].size;
+
+	char* arrayBase = castTypeArray(data, aInfo);
+	int arraySize = getTypeArraySize(structBase, aInfo, arrayBase);
+
+	printf("[ ");
+	
+	if(arrayIndex == member.arrayCount-1) {
+		int size = min(arraySize, arrayPrintLimit);
+		bool isPrimitive = typeIsPrimitive(member.type);
+
+		for(int i = 0; i < size; i++) {
+			char* value = arrayBase + (typeSize*i);
+			if(!isPrimitive) printf("{ ");
+			printType(member.type, value, depth + 1);
+			if(!isPrimitive) printf("}, ");
+		}
+		if(arraySize > arrayPrintLimit) printf("... ");
+	} else {
+		ArrayInfo aInfo2 = member.arrays[arrayIndex+1];
+
+		int arrayOffset;
+		if(aInfo.type == ARRAYTYPE_CONSTANT && aInfo2.type == ARRAYTYPE_CONSTANT) {
+			int arraySize2 = getTypeArraySize(data, aInfo2);
+			arrayOffset = arraySize2*typeSize;
+		} else arrayOffset = sizeof(int*); // Pointers have the same size, so any will suffice.
+
+		for(int i = 0; i < arraySize; i++) {
+			printTypeArray(structBase, member, arrayBase + i*arrayOffset, arrayIndex+1, depth+1);
+		}
+	}
+
+	printf("], ");
+}
+
+void printType(int structType, char* data, int depth) {
+	int arrayPrintLimit = 5;
+	int indent = 2;
+
 	StructInfo* info = structInfos + structType;
 
 	if(depth == 0) printf("{\n");
 
-	int arrayPrintLimit = 5;
-	int indent = 2;
-
 	if(typeIsPrimitive(structType)) {
-		printMember(structType, data);
+		switch(structType) {
+			case STRUCTTYPE_INT: printf("%i", *(int*)data); break;
+			case STRUCTTYPE_FLOAT: printf("%f", *(float*)data); break;
+			case STRUCTTYPE_CHAR: printf("%c", *data); break;
+			case STRUCTTYPE_BOOL: printf((*((bool*)data)) ? "true" : "false"); break;
+			default: break;
+		};
+
 		printf(", ");
 		if(depth == 0) printf("\n");
 		return;
@@ -144,62 +196,106 @@ void printType(int structType, char* data, int depth = 0) {
 			if(depth == 0) printf("\n");
 		} else {
 			ArrayInfo aInfo = member.arrays[0];
-
-			if(aInfo.type == ARRAYTYPE_STRING) {
-				printf("\"%s\"", *((char**)(data + member.offset)));
-			} else {
-				if(member.arrayCount == 1) {
-					int typeSize = structInfos[member.type].size;
-					int arraySize = aInfo.isOffset ? *(int*)(data + aInfo.offset) : aInfo.size;
-					char* arrayBase = (aInfo.type == ARRAYTYPE_CONSTANT) ? data + member.offset :*((char**)(data + member.offset));
-
-					printf("[ ");
-					int size = min(arraySize, arrayPrintLimit);
-					for(int i = 0; i < size; i++) {
-						char* value = arrayBase + (typeSize*i);
-						if(!isPrimitive) printf("{ ");
-						printType(member.type, value, depth + 1);
-						if(!isPrimitive) printf("}, ");
-					}
-					if(arraySize > arrayPrintLimit) printf("...");
-					printf("]");
-				} else {
-					int typeSize = structInfos[member.type].size;
-					int arraySize = aInfo.isOffset ? *(int*)(data + aInfo.offset) : aInfo.size;
-					char* arrayBase = (aInfo.type == ARRAYTYPE_CONSTANT) ? data + member.offset :*((char**)(data + member.offset));
-
-					ArrayInfo aInfo2 = member.arrays[1];
-					int arraySize2 = aInfo2.isOffset ? *(int*)(data + aInfo2.offset) : aInfo2.size;
-
-					printf("[ ");
-					for(int arrayIndex = 0; arrayIndex < arraySize; arrayIndex++) {
-						char* x;
-						if(aInfo2.type == ARRAYTYPE_CONSTANT) x = (arrayBase + (arrayIndex*arraySize2*typeSize));
-						else x = (arrayBase + (arrayIndex*sizeof(int*)));
-						char* arrayBase2 = (aInfo2.type == ARRAYTYPE_CONSTANT) ? x : *((char**)(x));
-
-						printf("[ ");
-						int size = min(arraySize2, arrayPrintLimit);
-						for(int i = 0; i < size; i++) {
-							char* value = arrayBase2 + (typeSize*i);
-							if(!isPrimitive) printf("{ ");
-							printType(member.type, value, depth + 1);
-							if(!isPrimitive) printf("}, ");
-						}
-						if(arraySize2 > arrayPrintLimit) printf("...");
-						printf("], ");
-					}
-					printf("]");
-
-				}
-
-			}
+			printTypeArray(data, member, data + member.offset, 0, depth + 1);
 
 			if(depth == 0) printf("\n");
 		}
+
 	}
 
 	if(depth == 0) printf("}\n");
+
+}
+
+
+
+
+
+void guiPrintIntrospection(Gui* gui, int structType, char* data, int depth = 0);
+void guiPrintIntrospection(Gui* gui, char* structBase, StructMemberInfo member, char* data, int arrayIndex, int depth) {
+	int arrayPrintLimit = 5;
+
+	bool isPrimitive = typeIsPrimitive(member.type);
+	ArrayInfo aInfo = member.arrays[arrayIndex];
+	int typeSize = structInfos[member.type].size;
+
+	char* arrayBase = castTypeArray(data, aInfo);
+	int arraySize = getTypeArraySize(structBase, aInfo, arrayBase);
+
+	printf("[ ");
+	
+	if(arrayIndex == member.arrayCount-1) {
+		int size = min(arraySize, arrayPrintLimit);
+		bool isPrimitive = typeIsPrimitive(member.type);
+
+		if(aInfo.sizeMode == 2) {
+			gui->label(data);
+		} else {
+			for(int i = 0; i < size; i++) {
+				char* value = arrayBase + (typeSize*i);
+				printType(member.type, value, depth + 1);
+			}
+			if(arraySize > arrayPrintLimit) printf("... ");
+		}
+	} else {
+		ArrayInfo aInfo2 = member.arrays[arrayIndex+1];
+
+		int arrayOffset;
+		if(aInfo.type == ARRAYTYPE_CONSTANT && aInfo2.type == ARRAYTYPE_CONSTANT) {
+			int arraySize2 = getTypeArraySize(data, aInfo2);
+			arrayOffset = arraySize2*typeSize;
+		} else arrayOffset = sizeof(int*); // Pointers have the same size, so any will suffice.
+
+		for(int i = 0; i < arraySize; i++) {
+			guiPrintIntrospection(gui, structBase, member, arrayBase + i*arrayOffset, arrayIndex+1, depth+1);
+		}
+	}
+
+	printf("], ");
+}
+
+void guiPrintIntrospection(Gui* gui, int structType, char* data, int depth) {
+	int arrayPrintLimit = 5;
+	int indent = 2;
+
+	StructInfo* info = structInfos + structType;
+
+	if(typeIsPrimitive(structType) == false) gui->label(fillString("%s", info->name), 0);
+
+	gui->startPos.x += 30;
+	gui->panelWidth -= 30;
+
+	if(typeIsPrimitive(structType)) {
+		switch(structType) {
+			case STRUCTTYPE_INT: gui->label(fillString("%i", *(int*)data)); break;
+			case STRUCTTYPE_FLOAT: gui->label(fillString("%f", *(float*)data)); break;
+			case STRUCTTYPE_CHAR: gui->label(fillString("%c", *data)); break;
+			case STRUCTTYPE_BOOL: gui->label(fillString("%b", *(bool*)data)); break;
+			default: break;
+		};
+	} else {
+
+		for(int i = 0; i < info->memberCount; i++) {
+			StructMemberInfo member = info->list[i];
+
+			bool isPrimitive = typeIsPrimitive(member.type);
+			if(isPrimitive) {
+				gui->div(vec2(0,0));
+				gui->label(fillString("%s", member.name), 0);
+			}
+
+			if(member.arrayCount == 0) {
+				guiPrintIntrospection(gui, member.type, data + member.offset, depth + 1);
+			} else {
+				ArrayInfo aInfo = member.arrays[0];
+				guiPrintIntrospection(gui, data, member, data + member.offset, 0, depth + 1);
+			}
+
+		}
+	}
+
+	gui->startPos.x -= 30;
+	gui->panelWidth += 30;
 
 }
 

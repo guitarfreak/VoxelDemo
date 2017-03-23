@@ -91,7 +91,7 @@ char* fillString(char* text, ...) {
 				bi += sLen;
 				getTStringX(sLen);
 			}
-		} if(text[ti] == '%' && text[ti+1] == 's') {
+		} else if(text[ti] == '%' && text[ti+1] == 's') {
 			char* str = va_arg(vl, char*);
 			int sLen = strLen(str);
 			memCpy(buffer + bi, str, sLen);
@@ -99,7 +99,16 @@ char* fillString(char* text, ...) {
 			ti += 2;
 			bi += sLen;
 			getTStringX(sLen);
-		} if(text[ti] == '%' && text[ti+1] == '%') {
+		} else if(text[ti] == '%' && text[ti+1] == 'b') {
+			bool str = va_arg(vl, bool);
+			char* s = str == 1 ? "true" : "false";
+			int sLen = strLen(s);
+			memCpy(buffer + bi, s, sLen);
+
+			ti += 2;
+			bi += sLen;
+			getTStringX(sLen);
+		} else if(text[ti] == '%' && text[ti+1] == '%') {
 			buffer[bi++] = '%';
 			ti += 2;
 			getTStringX(1);
