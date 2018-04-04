@@ -1076,14 +1076,13 @@ const SerializeData settingData[] = {
 	{"Layout", offsetof(Gui, cornerPos), memberSize(Gui, cornerPos) + memberSize(Gui, panelStartDim)}, 
 };
 
-const char* settingFile = "C:\\Projects\\Hmm\\data\\guiSettings.txt";
 const int settingSlotSize = settingData[0].size + settingData[1].size + settingData[2].size;
 const int settingSlots = 4;
 const int settingFileSize = settingSlotSize*settingSlots;
 
 bool guiCreateSettingsFile() {
-	if(!fileExists((char*)settingFile)) {
-		createFileAndOverwrite((char*)settingFile, settingFileSize);
+	if(!fileExists(GUI_SETTINGS_FILE)) {
+		createFileAndOverwrite(GUI_SETTINGS_FILE, settingFileSize);
 		return true;
 	}
 
@@ -1091,11 +1090,11 @@ bool guiCreateSettingsFile() {
 }
 
 void guiSave(Gui* gui, int element, int slot) {
-	saveData(gui, settingData[element], (char*)settingFile, settingSlotSize*slot);
+	saveData(gui, settingData[element], GUI_SETTINGS_FILE, settingSlotSize*slot);
 }
 
 void guiLoad(Gui* gui, int element, int slot) {
-	loadData(gui, settingData[element], (char*)settingFile, settingSlotSize*slot);
+	loadData(gui, settingData[element], GUI_SETTINGS_FILE, settingSlotSize*slot);
 }
 
 void guiSaveAll(Gui* gui, int slot) {

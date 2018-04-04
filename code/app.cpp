@@ -329,7 +329,12 @@ void threadBench(void* data) {
 void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, bool* isRunning, bool init, ThreadQueue* threadQueue);
 // void debugUpdatePlayback(DebugState* ds, AppMemory* appMemory);
 
+#ifdef FULL_OPTIMIZE
+#pragma optimize( "", on )
+#else 
 #pragma optimize( "", off )
+#endif
+
 extern "C" APPMAINFUNCTION(appMain) {
 
 	if(init) {
@@ -437,8 +442,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ds->gui2->init(rectCenDim(vec2(1300,1), vec2(300, ws->currentRes.h)), 3);
 
 		ds->input = getPStructDebug(Input);
-		// ds->showMenu = false;
-		ds->showMenu = true;
+		ds->showMenu = false;
 		ds->showStats = false;
 		ds->showConsole = false;
 		ds->showHud = true;

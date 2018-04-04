@@ -111,7 +111,7 @@ goto packShippingFolderEnd
 		del ".\%BUILD_FOLDER%\*.obj"
 	:nodelete
 
-	xcopy ".\libs\freetype 2.9\lib\%PLATFORM%\*.dll" ".\%BUILD_FOLDER%" /Q
+	rem xcopy ".\libs\freetype 2.9\lib\%PLATFORM%\*.dll" ".\%BUILD_FOLDER%" /Q
 
 	xcopy ".\README.txt" ".\%BUILD_FOLDER%" /Q
 	xcopy ".\Licenses.txt" ".\%BUILD_FOLDER%" /Q

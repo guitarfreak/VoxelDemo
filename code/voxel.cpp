@@ -1,6 +1,6 @@
 extern ThreadQueue* globalThreadQueue;
 
-const char* minecraftTextureFolderPath = "..\\data\\Textures\\Minecraft\\";
+const char* minecraftTextureFolderPath = DATA_FOLDER("Textures\\Minecraft\\");
 
 
 // #define VIEW_DISTANCE 4096 // 64
@@ -104,22 +104,22 @@ enum BlockTextures {
 };
 
 const char* textureFilePaths[BX_Size] = {
-	"..\\data\\Textures\\Minecraft\\none.png",
-	"..\\data\\Textures\\Minecraft\\water.png",
-	"..\\data\\Textures\\Minecraft\\sand.png",
-	"..\\data\\Textures\\Minecraft\\grass_top.png",
-	"..\\data\\Textures\\Minecraft\\grass_side.png",
-	"..\\data\\Textures\\Minecraft\\grass_bottom.png",
-	"..\\data\\Textures\\Minecraft\\stone.png",
-	"..\\data\\Textures\\Minecraft\\snow.png",
-	"..\\data\\Textures\\Minecraft\\tree_log_top.png",
-	"..\\data\\Textures\\Minecraft\\tree_log_side.png",
-	"..\\data\\Textures\\Minecraft\\leaves.png",
-	"..\\data\\Textures\\Minecraft\\glass.png",
-	"..\\data\\Textures\\Minecraft\\glowstone.png",
-	"..\\data\\Textures\\Minecraft\\pumpkin_top.png",
-	"..\\data\\Textures\\Minecraft\\pumpkin_side.png",
-	"..\\data\\Textures\\Minecraft\\pumpkin_bottom.png",
+	DATA_FOLDER("Textures\\Minecraft\\none.png"),
+	DATA_FOLDER("Textures\\Minecraft\\water.png"),
+	DATA_FOLDER("Textures\\Minecraft\\sand.png"),
+	DATA_FOLDER("Textures\\Minecraft\\grass_top.png"),
+	DATA_FOLDER("Textures\\Minecraft\\grass_side.png"),
+	DATA_FOLDER("Textures\\Minecraft\\grass_bottom.png"),
+	DATA_FOLDER("Textures\\Minecraft\\stone.png"),
+	DATA_FOLDER("Textures\\Minecraft\\snow.png"),
+	DATA_FOLDER("Textures\\Minecraft\\tree_log_top.png"),
+	DATA_FOLDER("Textures\\Minecraft\\tree_log_side.png"),
+	DATA_FOLDER("Textures\\Minecraft\\leaves.png"),
+	DATA_FOLDER("Textures\\Minecraft\\glass.png"),
+	DATA_FOLDER("Textures\\Minecraft\\glowstone.png"),
+	DATA_FOLDER("Textures\\Minecraft\\pumpkin_top.png"),
+	DATA_FOLDER("Textures\\Minecraft\\pumpkin_side.png"),
+	DATA_FOLDER("Textures\\Minecraft\\pumpkin_bottom.png"),
 };
 
 enum BlockTextures2 {
@@ -130,8 +130,8 @@ enum BlockTextures2 {
 };
 
 const char* textureFilePaths2[BX2_Size] = {
-	"..\\data\\Textures\\Minecraft\\none.png",
-	"..\\data\\Textures\\Minecraft\\leaves.png",
+	DATA_FOLDER("Textures\\Minecraft\\none.png"),
+	DATA_FOLDER("Textures\\Minecraft\\leaves.png"),
 };
 
 

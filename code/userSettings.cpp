@@ -8,13 +8,20 @@ const int INTERNAL_TEXTURE_FORMAT = USE_SRGB ? GL_SRGB8_ALPHA8 : GL_RGBA8;
 
 #define App_Session_File ".\\session.tmp"
 
+#ifdef SHIPPING_MODE
+#define DATA_FOLDER(str) ".\\data\\" str
+#else 
+#define DATA_FOLDER(str) "..\\data\\" str
+#endif
+
+#define GUI_SETTINGS_FILE DATA_FOLDER("guiSettings.txt")
 
 //
 
 const char* watchFolders[] = {
-	"..\\data\\Textures\\Misc\\", 
-	"..\\data\\Textures\\Skyboxes\\", 
-	"..\\data\\Textures\\Minecraft\\"
+	DATA_FOLDER("Textures\\Misc\\"),
+	DATA_FOLDER("Textures\\Skyboxes\\"),
+	DATA_FOLDER("Textures\\Minecraft\\"),
 };
 
 struct AppSessionSettings {
@@ -47,10 +54,10 @@ enum TextureId {
 };
 
 char* texturePaths[] = {
-	"..\\data\\Textures\\Misc\\white.png",
-	"..\\data\\Textures\\Misc\\rect.png",
-	"..\\data\\Textures\\Misc\\circle.png",
-	"..\\data\\Textures\\Misc\\test.png",
+	DATA_FOLDER("Textures\\Misc\\white.png"),
+	DATA_FOLDER("Textures\\Misc\\rect.png"),
+	DATA_FOLDER("Textures\\Misc\\circle.png"),
+	DATA_FOLDER("Textures\\Misc\\test.png"),
 };
 
 //
@@ -70,7 +77,7 @@ char* cubeMapPaths[] = {
 	// "..\\data\\Textures\\Skyboxes\\sb2.png", 
 	// "..\\data\\Textures\\Skyboxes\\sb3.jpg", 
 	// "..\\data\\Textures\\Skyboxes\\sb4.png", 
-	"..\\data\\Textures\\Skyboxes\\xoGVD3X.jpg",
+	DATA_FOLDER("Textures\\Skyboxes\\xoGVD3X.jpg"),
 };
 
 //
@@ -86,11 +93,11 @@ enum FontId {
 
 char* fontPaths[] = {
 	// "..\\data\\Fonts\\LiberationMono-Bold.ttf",
-	"..\\data\\Fonts\\LiberationMono-Regular.ttf",
-	"..\\data\\Fonts\\SourceSansPro-Regular.ttf",
-	"..\\data\\Fonts\\consola.ttf",
-	"..\\data\\Fonts\\arial.ttf",
-	"..\\data\\Fonts\\calibri.ttf",
+	DATA_FOLDER("Fonts\\LiberationMono-Regular.ttf"),
+	DATA_FOLDER("Fonts\\SourceSansPro-Regular.ttf"),
+	DATA_FOLDER("Fonts\\consola.ttf"),
+	DATA_FOLDER("Fonts\\arial.ttf"),
+	DATA_FOLDER("Fonts\\calibri.ttf"),
 };
 
 //
