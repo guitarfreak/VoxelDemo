@@ -500,6 +500,14 @@ int fileSize(char* fileName) {
 	return size;
 }
 
+inline int fileSize(FILE* file) {
+	fseek(file, 0, SEEK_END);
+	int size = ftell(file);
+	fseek(file, 0, SEEK_SET);
+
+	return size;
+}
+
 bool fileExists(char* fileName) {
 	bool result = false;
 	FILE* file = fopen(fileName, "rb");
@@ -587,6 +595,20 @@ int writeBufferSectionToFile(char* buffer, char* fileName, int offsetInBytes, in
 
 void writeStringToFile(String str, char* fileName) {
 	writeBufferToFile(str.data, fileName, str.size);
+}
+
+void writeDataToFile(char* data, int size, char* fileName) {
+	FILE* file = fopen(fileName, "wb");
+	fwrite(data, size, 1, file);
+	fclose(file);
+}
+
+void readDataFile(char* data, char* fileName) {
+	FILE* file = fopen(fileName, "rb");
+
+	int size = fileSize(file);
+	fread(data, size, 1, file);
+	fclose(file);
 }
 
 //

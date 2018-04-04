@@ -124,6 +124,7 @@ Changing course for now:
  - When switching between text editor and debugger, synchronize open files.
  - Entity introspection in gui.
  - Open devenv from within sublime.
+ - Shadow mapping, start with cloud texture projection.
 
 //-------------------------------------
 //               BUGS
@@ -157,7 +158,7 @@ Changing course for now:
 
 // Intrinsics.
 
-#include <iacaMarks.h>
+// #include <iacaMarks.h>
 #include <xmmintrin.h>
 #include <emmintrin.h>
 
@@ -244,8 +245,10 @@ struct AppData {
 
 	// 
 
+	bool captureMouseKeepCenter;
 	bool captureMouse;
 	bool fpsMode;
+	bool fpsModeFixed;
 
 	Camera activeCam;
 
@@ -260,6 +263,8 @@ struct AppData {
 	float farPlane;
 
 	// Game.
+
+	float mouseSensitivity;
 
 	EntityList entityList;
 	Entity* player;
@@ -374,8 +379,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 	GraphicsState* gs = &ad->graphicsState;
 
 	Input* input = &ad->input;
-	SystemData* systemData = &ad->systemData;
-	HWND windowHandle = systemData->windowHandle;
+	SystemData* sd = &ad->systemData;
+	HWND windowHandle = sd->windowHandle;
 	WindowSettings* ws = &ad->wSettings;
 
 	globalThreadQueue = threadQueue;
@@ -396,8 +401,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// Init.
 
 	if(init) {
-
-		// @AppInit.
 
 		//
 		// DebugState.
@@ -455,20 +458,23 @@ extern "C" APPMAINFUNCTION(appMain) {
 		getPMemory(sizeof(AppData));
 		*ad = {};
 		
-		initSystem(systemData, ws, windowsData, vec2i(1920, 1080), true, true, true);
-		windowHandle = systemData->windowHandle;
+		// int windowStyle = WS_OVERLAPPEDWINDOW & ~WS_SYSMENU;
+		int windowStyle = WS_OVERLAPPEDWINDOW;
+		initSystem(sd, ws, windowsData, vec2i(1920*0.85f, 1080*0.85f), windowStyle, 1);
+
+		windowHandle = sd->windowHandle;
 
 		loadFunctions();
 		wglSwapIntervalEXT(1);
 
 		initInput(&ad->input);
-
+		sd->input = &ad->input;
 
 		//
 		// Init Folder Handles.
 		//
 
-		initWatchFolders(systemData->folderHandles, ds->assets, &ds->assetCount);
+		initWatchFolders(sd->folderHandles, ds->assets, &ds->assetCount);
 
 		//
 		// Setup Textures.
@@ -566,7 +572,38 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 
 		//
-		// AppSetup.
+		//
+		//
+
+		// Setup app temp settings.
+		AppSessionSettings appSessionSettings = {};
+		{
+			// @AppSessionDefaults
+			if(!fileExists(App_Session_File)) {
+				AppSessionSettings at = {};
+
+				Rect r = ws->monitors[0].workRect;
+				Vec2 center = vec2(rectCenX(r), (r.top - r.bottom)/2);
+				Vec2 dim = vec2(rectW(r), -rectH(r));
+				at.windowRect = rectCenDim(center, dim*0.85f);
+
+				appWriteSessionSettings(App_Session_File, &at);
+			}
+
+			// @AppSessionLoad
+			{
+				AppSessionSettings at = {};
+				appReadSessionSettings(App_Session_File, &at);
+
+				Recti r = rectiRound(at.windowRect);
+				MoveWindow(windowHandle, r.left, r.top, r.right-r.left, r.bottom-r.top, true);
+
+				appSessionSettings = at;
+			}
+		}
+
+		//
+		// @AppInit.
 		//
 
 		// Entity.
@@ -595,6 +632,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		initEntity(&freeCam, ET_Camera, vec3(35,35,32), startDir, vec3(0,0,0), vec3(0,0,0));
 		strCpy(freeCam.name, "Camera");
 		ad->cameraEntity = addEntity(&ad->entityList, &freeCam);
+
+		ad->mouseSensitivity = 0.1f;
 
 		// Voxel.
 
@@ -675,7 +714,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	if(reload) {
 		loadFunctions();
-		SetWindowLongPtr(systemData->windowHandle, GWLP_WNDPROC, (LONG_PTR)mainWindowCallBack);
+		SetWindowLongPtr(sd->windowHandle, GWLP_WNDPROC, (LONG_PTR)mainWindowCallBack);
+	    SetWindowLongPtr(sd->windowHandle, GWLP_USERDATA, (LONG_PTR)sd);
+
+	    DeleteFiber(sd->messageFiber);
+	    sd->messageFiber = CreateFiber(0, (PFIBER_START_ROUTINE)updateInput, sd);
+
+		gs->screenRes = ws->currentRes;
 
 		if(HOTRELOAD_SHADERS) {
 			loadShaders();
@@ -706,18 +751,26 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// Hotload changed files.
 
-	reloadChangedFiles(systemData->folderHandles, ds->assets, ds->assetCount);
+	reloadChangedFiles(sd->folderHandles, ds->assets, ds->assetCount);
 
 	// Update input.
 	{
 		TIMER_BLOCK_NAMED("Input");
-		updateInput(ds->input, isRunning, windowHandle);
 
-		ad->input = *ds->input;
+		inputPrepare(input);
+		SwitchToFiber(sd->messageFiber);
+
+		if(ad->input.closeWindow) *isRunning = false;
+
+		// ad->input = *ds->input;
+		*ds->input = ad->input;
+
 		if(ds->console.isActive) {
 			memSet(ad->input.keysPressed, 0, sizeof(ad->input.keysPressed));
 			memSet(ad->input.keysDown, 0, sizeof(ad->input.keysDown));
 		}
+
+		if(mouseInClientArea(windowHandle)) updateCursor(ws);
 
 		ad->dt = ds->dt;
 		ad->time = ds->time;
@@ -754,31 +807,29 @@ extern "C" APPMAINFUNCTION(appMain) {
     	*isRunning = false;
     }
 
-	if(input->keysPressed[KEYCODE_F1]) {
-		int mode;
-		if(ws->fullscreen) mode = WINDOW_MODE_WINDOWED;
-		else mode = WINDOW_MODE_FULLBORDERLESS;
-		setWindowMode(windowHandle, ws, mode);
-	}
+    if(input->keysPressed[KEYCODE_F11] && !sd->maximized) {
+    	if(ws->fullscreen) setWindowMode(windowHandle, ws, WINDOW_MODE_WINDOWED);
+    	else setWindowMode(windowHandle, ws, WINDOW_MODE_FULLBORDERLESS);
+    }
 
-	if(input->keysPressed[KEYCODE_F2]) {
-		static bool switchMonitor = false;
+	// if(input->keysPressed[KEYCODE_F2]) {
+	// 	static bool switchMonitor = false;
 
-		setWindowMode(windowHandle, ws, WINDOW_MODE_WINDOWED);
+	// 	setWindowMode(windowHandle, ws, WINDOW_MODE_WINDOWED);
 
-		if(!switchMonitor) setWindowProperties(windowHandle, 1, 1, 1920, 0);
-		else setWindowProperties(windowHandle, 1920, 1080, -1920, 0);
-		switchMonitor = !switchMonitor;
+	// 	if(!switchMonitor) setWindowProperties(windowHandle, 1, 1, 1920, 0);
+	// 	else setWindowProperties(windowHandle, 1920, 1080, -1920, 0);
+	// 	switchMonitor = !switchMonitor;
 
-		setWindowMode(windowHandle, ws, WINDOW_MODE_FULLBORDERLESS);
-	}
+	// 	setWindowMode(windowHandle, ws, WINDOW_MODE_FULLBORDERLESS);
+	// }
 
-
-	if(windowSizeChanged(windowHandle, ws)) {
+	if(input->resize) {
 		if(!windowIsMinimized(windowHandle)) {
 			updateResolution(windowHandle, ws);
 			ad->updateFrameBuffers = true;
 		}
+		input->resize = false;
 	}
 
 	if(ad->updateFrameBuffers) {
@@ -910,12 +961,52 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// @AppLoop.
 
-	if(input->keysPressed[KEYCODE_F3]) {
-		ad->captureMouse = !ad->captureMouse;
+	// Mouse capture.
+	{
+		if(!ad->captureMouse) {
+			if(input->keysPressed[KEYCODE_F3] || 
+			   (input->mouseButtonPressed[1]) && !ad->fpsModeFixed) {
+				if(input->keysPressed[KEYCODE_F3]) ad->fpsModeFixed = true;
+
+				input->mouseButtonPressed[1] = false;
+
+				ad->captureMouse = true;
+
+				if(input->keysPressed[KEYCODE_F3]) ad->captureMouseKeepCenter = true;
+				else ad->captureMouseKeepCenter = false;
+
+				GetCursorPos(&ws->lastMousePosition);
+			}
+		} else {
+			if(input->keysPressed[KEYCODE_F3] || 
+			   (input->mouseButtonReleased[1] && !ad->fpsModeFixed)) {
+				if(input->keysPressed[KEYCODE_F3]) ad->fpsModeFixed = false;
+
+				ad->captureMouse = false;
+
+				SetCursorPos(ws->lastMousePosition.x, ws->lastMousePosition.y);
+			}
+		}
 	}
 
 	ad->fpsMode = ad->captureMouse && windowHasFocus(windowHandle);
-	captureMouse(windowHandle, ad->fpsMode);
+	if(ad->fpsMode) {
+		if(ad->captureMouseKeepCenter) {
+			int w,h;
+			Vec2i wPos;
+			getWindowProperties(windowHandle, &w, &h, 0, 0, &wPos.x, &wPos.y);
+
+			SetCursorPos(wPos.x + w/2, wPos.y + h/2);
+			input->lastMousePos = getMousePos(windowHandle,false);
+		} else {
+			SetCursorPos(ws->lastMousePosition.x, ws->lastMousePosition.y);
+			input->lastMousePos = getMousePos(windowHandle,false);
+		}
+
+		while(ShowCursor(false) >= 0) {};
+	} else {
+		while(ShowCursor(true) < 0) {};
+	}
 
 	Entity* player = ad->player;
 	Entity* camera = ad->cameraEntity;
@@ -1007,9 +1098,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 				float speed = 30;
 
 				if((!ad->fpsMode && input->mouseButtonDown[1]) || ad->fpsMode) {
-					float turnRate = ad->dt*0.3f;
-					e->rot.y += turnRate * input->mouseDeltaY;
-					e->rot.x += turnRate * input->mouseDeltaX;
+					float turnRate = ad->dt*ad->mouseSensitivity;
+					e->rot.y -= turnRate * input->mouseDelta.y;
+					e->rot.x -= turnRate * input->mouseDelta.x;
 
 					float margin = 0.00001f;
 					clamp(&e->rot.y, -M_PI+margin, M_PI-margin);
@@ -1203,9 +1294,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 				if(input->keysDown[KEYCODE_T]) speed = 1000;
 
 				if((!ad->fpsMode && input->mouseButtonDown[1]) || ad->fpsMode) {
-					float turnRate = ad->dt*0.3f;
-					e->rot.y += turnRate * input->mouseDeltaY;
-					e->rot.x += turnRate * input->mouseDeltaX;
+					float turnRate = ad->dt*ad->mouseSensitivity;
+					e->rot.y -= turnRate * input->mouseDelta.y;
+					e->rot.x -= turnRate * input->mouseDelta.x;
 
 					float margin = 0.00001f;
 					clamp(&e->rot.y, -M_PI+margin, M_PI-margin);
@@ -2252,6 +2343,157 @@ extern "C" APPMAINFUNCTION(appMain) {
 		#endif 
 	}
 
+	// This is a test. 
+	if(true)
+	{
+		// bindShader(SHADER_QUAD);
+
+		// drawRect(rectCenDim(0,0,100000,100000), vec4(0.2f,0.2f,0.2f,1));
+
+		// bindShader(SHADER_CUBE);
+
+
+		globalCommandList = &ad->commandList3d;
+		Vec3 p = vec3(10,10,90);
+		Vec3 look = vec3(0,1,0);
+		Vec3 up = vec3(0,0,1);
+		Vec3 right = vec3(1,0,0);
+
+		Vec3 baseLook = vec3(0,1,0);
+		Vec3 baseUp = vec3(0,0,1);
+		Vec3 baseRight = vec3(1,0,0);
+
+		static Vec3 rot = vec3(0,0,0);
+		// static Quat q = {};
+
+		float speed = 0.05f;
+
+		if(input->keysDown[KEYCODE_RIGHT]) rot.x -= speed; 
+		if(input->keysDown[KEYCODE_LEFT]) rot.x += speed; 
+		if(input->keysDown[KEYCODE_UP]) rot.y -= speed; 
+		if(input->keysDown[KEYCODE_DOWN]) rot.y += speed; 
+		if(input->keysDown[KEYCODE_U]) rot.z -= speed; 
+		if(input->keysDown[KEYCODE_I]) rot.z += speed; 
+
+
+		// Quat q = quat(rot.x, baseOrientation.dir) * quat(rot.y, baseOrientation.up) * quat(rot.z, baseOrientation.right);
+		// Quat q = quat(rot.x, vec3(1,0,0)) * quat(rot.y, vec3(0,1,0)) * quat(rot.z, vec3(0,0,1));
+		// Vec3 rotAngle = normVec3(vec3(1,0.6f,0.4f));
+		// Vec3 rotAngle = normVec3(vec3(1,-0.2f,-1));
+
+		// Vec3 rotAngle = normVec3(vec3(0.5f,0.4f,-0.2f));
+		// Vec3 rotAngle = normVec3(vec3(0.7f,-0.4f,-0.2f));
+
+
+		// Quat q = quat(rot.x, rotAngle);
+
+		
+		// Mat4 m = quatRotationMatrix(quat(rot.x, rotAngle));
+		// right = (m * vec4(right,0)).xyz;
+
+		// rotateVec3(&right, rot.x, rotAngle);
+		// right = (quat(rot.x, rotAngle)*quat(0, right.x, right.y, right.z)).xyz;
+
+		look = normVec3((quat(rot.x, vec3(1,0,0)) * quat(rot.y, vec3(0,0,1)) * quat(rot.z, vec3(0,1,0))) * look);
+		up = normVec3((quat(rot.x, vec3(1,0,0)) * quat(rot.y, vec3(0,0,1)) * quat(rot.z, vec3(0,1,0))) * up);
+		right = normVec3((quat(rot.x, vec3(1,0,0)) * quat(rot.y, vec3(0,0,1)) * quat(rot.z, vec3(0,1,0))) * right);
+
+		// rotateVec3(&look, rot.x, rotAngle);
+		// rotateVec3(&up, rot.x, rotAngle);
+		// rotateVec3(&right, rot.x, rotAngle);
+
+
+
+		// void rotateVec3(Vec3* v, float a, Vec3 axis) {
+		// rotateVec3(&look, rot.x, rotAngle);
+		// rotateVec3(&right, rot.x, rotAngle);
+
+
+
+		// Quat r = q*quat(0, v.x, v.y, v.z);
+		// right = normVec3((quat(rot.x, rotAngle)*quat(0, right.x, right.y, right.z)).xyz);
+
+		// Vec3 operator*(Quat q, Vec3 v) {
+		// 	Quat r = q*quat(0, v.x, v.y, v.z);
+		// 	return r.xyz;
+		// }
+
+
+		// look = normVec3(q*baseLook);
+		// up = normVec3(q*baseUp);
+		// right = normVec3(q*baseRight);
+
+		// right = normVec3(cross(look, up));
+
+
+
+
+// Vec3 rotateVec3(Vec3 v, float a, Vec3 axis) {
+		// rotateVec3(&look, rot.x, vec3(1,0,0));
+		// rotateVec3(&look, rot.y, vec3(0,1,0));
+		// rotateVec3(&look, rot.z, vec3(0,0,1));
+
+		// rotateVec3(&up, rot.x, vec3(1,0,0));
+		// rotateVec3(&up, rot.y, vec3(0,1,0));
+		// rotateVec3(&up, rot.z, vec3(0,0,1));
+
+
+
+		// right = normVec3(cross(look, up));
+
+
+
+		// Vec3 gUp = vec3(0,0,1);
+
+		// rotateVec3(&look, rot.x, gUp);
+		// rotateVec3(&look, rot.y, normVec3(cross(gUp, look)));
+		// up = normVec3(cross(look, normVec3(cross(gUp, look))));
+		// look = look;
+
+		// rotateVec3(&up, rot.z, look);
+
+		// right = normVec3(cross(gUp, look));
+
+
+
+
+		// Vec3 gUp = vec3(0,0,1);
+		// rotateVec3(&look, rot.x, gUp);
+		// rotateVec3(&up, rot.z, look);
+
+		// look = baseLook;
+		// rotateVec3(&look, rot.x, up);
+		// // up = normVec3(cross(look, normVec3(cross(gUp, look))));
+		// // look = look;
+		// // rotateVec3(&up, rot.z, look);
+		// right = normVec3(cross(up, look));
+
+
+
+
+
+
+		// addDebugInfo(fillString("%f,%f,%f");
+
+
+
+
+		float length = 10;
+
+		dcState(STATE_LINEWIDTH, 10);
+		dcLine(p, p+look*length, vec4(0,1,0,1));
+		dcLine(p, p+up*length,   vec4(0,0,1,1));
+		dcLine(p, p+right*length,vec4(1,0,0,1));
+
+		// dcLine(p, p+rotAngle*length,vec4(1,1,1,1));
+
+
+// void dcCube(Vec3 trans, Vec3 scale, Vec4 color, float degrees = 0, Vec3 rot = vec3(0,0,0), DrawCommandList* drawList = 0) {
+		// dcCube(p, vec3(2,2,2), vec4(1,0,0,1), 1, rot);
+
+
+	}
+
 
 	endOfMainLabel:
 
@@ -2351,8 +2593,17 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// Swap window background buffer.
 	{
 		TIMER_BLOCK_NAMED("Swap");
-		swapBuffers(&ad->systemData);
+		if(sd->vsyncTempTurnOff) {
+			wglSwapIntervalEXT(0);
+		}
+
+		swapBuffers(sd);
 		glFinish();
+
+		if(sd->vsyncTempTurnOff) {
+			wglSwapIntervalEXT(1);
+			sd->vsyncTempTurnOff = false;
+		}
 
 		if(init) {
 			showWindow(windowHandle);
@@ -2363,6 +2614,17 @@ extern "C" APPMAINFUNCTION(appMain) {
 	debugMain(ds, appMemory, ad, reload, isRunning, init, threadQueue);
 
 	// debugUpdatePlayback(ds, appMemory);
+
+	// @AppSessionWrite
+	if(*isRunning == false) {
+		Rect windowRect = getWindowWindowRect(sd->windowHandle);
+		if(ws->fullscreen) windowRect = ws->previousWindowRect;
+
+		AppSessionSettings at = {};
+
+		at.windowRect = windowRect;
+		saveAppSettings(at);
+	}
 
 	// @AppEnd.
 }
@@ -2941,7 +3203,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			Rect bgRect = gui->getCurrentRegion();
 			gui->heightPop();
 
-			float graphWidth = rectGetDim(bgRect).w;
+			float graphWidth = rectDim(bgRect).w;
 
 			int swapTimerIndex = 0;
 			for(int i = 0; i < timer->timerInfoCount; i++) {
@@ -3002,10 +3264,10 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			// Header.
 			{
 				dcRect(cyclesRect, gui->colors.sectionColor);
-				Vec2 cyclesDim = rectGetDim(cyclesRect);
+				Vec2 cyclesDim = rectDim(cyclesRect);
 
 				dcRect(headerRect, vec4(1,1,1,0.1f));
-				Vec2 headerDim = rectGetDim(headerRect);
+				Vec2 headerDim = rectDim(headerRect);
 
 				{
 					float viewAreaLeft = mapRangeDouble(orthoLeft, cyclesLeft, cyclesRight, cyclesRect.min.x, cyclesRect.max.x);
@@ -3113,7 +3375,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			char* hText;
 			GraphSlot* hSlot;
 
-			Vec2 startPos = rectGetUL(bgRect);
+			Vec2 startPos = rectTL(bgRect);
 			startPos -= vec2(0, lineHeight);
 
 			int firstBufferIndex = oldIndex;
@@ -3175,7 +3437,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 							if(barLeft < bgRect.min.x) r.min.x = bgRect.min.x;
 							Rect textRect = rect(r.min+vec2(1,1), r.max-vec2(1,1));
 
-							gui->drawTextBox(textRect, fillString("%s %s (%i.c)", tInfo->function, tInfo->name, slot->size), c, 0, rectGetDim(textRect).w);
+							gui->drawTextBox(textRect, fillString("%s %s (%i.c)", tInfo->function, tInfo->name, slot->size), c, 0, rectDim(textRect).w);
 						}
 					}
 
@@ -3190,7 +3452,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 				if(hRect.min.x < bgRect.min.x) hRect.min.x = bgRect.min.x;
 
 				float tw = getTextDim(hText, gui->font).w + 2;
-				if(tw > rectGetDim(hRect).w) hRect.max.x = hRect.min.x + tw;
+				if(tw > rectDim(hRect).w) hRect.max.x = hRect.min.x + tw;
 
 				float g = 0.8f;
 				gui->drawRect(hRect, vec4(g,g,g,1));
@@ -3345,7 +3607,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 					}
 
 					float y = mapRange(t->cyclesOverHits, orthoBottom, orthoTop, rBottom, rTop);
-					float xOff = rectGetDim(rectLines).w/(cycleCount-1);
+					float xOff = rectDim(rectLines).w/(cycleCount-1);
 					Vec2 np = vec2(rectLines.min.x + xOff*i, y);
 
 					if(lastElementEmpty) np.y = yAvg;
@@ -3361,8 +3623,8 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 			gui->empty();
 			Rect r = gui->getCurrentRegion();
-			Vec2 rc = rectGetCen(r);
-			float rw = rectGetDim(r).w;
+			Vec2 rc = rectCen(r);
+			float rw = rectDim(r).w;
 
 			// Draw color rectangles.
 			float width = (rw/timerCount)*0.75f;

@@ -80,11 +80,20 @@ struct Input {
 	bool firstFrame;
 	Vec2 mousePos;
 	Vec2 mousePosNegative;
-	int mouseDeltaX, mouseDeltaY;
+	Vec2 mousePosScreen;
+	Vec2 mousePosNegativeScreen;
+
+	Vec2 mousePosWindow;
+
+	Vec2 mouseDelta;
 	int mouseWheel;
 	bool mouseButtonPressed[8];
 	bool mouseButtonDown[8];
 	bool mouseButtonReleased[8];
+	bool doubleClick;
+	Vec2 doubleClickPos;
+
+	Vec2 lastMousePos;
 
 	bool keysDown[KEYCODE_COUNT];
 	bool keysPressed[KEYCODE_COUNT];
@@ -94,6 +103,11 @@ struct Input {
 	bool mShift, mCtrl, mAlt;
 
 	bool anyKey;
+
+	bool closeWindow;
+	bool maximizeWindow;
+	bool minimizeWindow;
+	bool resize;
 };
 
 
@@ -221,13 +235,47 @@ struct SystemData {
 	
 	// 1. Misc, 2. CubeMaps, 3. Minecraft
 	HANDLE folderHandles[3]; 
+
+	//
+
+	Input* input;
+	void* mainFiber;
+	void* messageFiber;
+
+	int coreCount;
+	int fontHeight;
+
+	bool maximized;
+	bool killedFocus;
+	bool setFocus;
+	bool windowIsFocused;
+
+	bool vsyncTempTurnOff;
 };
 
 void systemDataInit(SystemData* sd, HINSTANCE instance) {
 	sd->instance = instance;
 }
 
+bool mouseInClientArea(HWND windowHandle) {
+	POINT point;    
+	GetCursorPos(&point);
+	ScreenToClient(windowHandle, &point);
+
+	Vec2i mp = vec2i(point.x, point.y);
+
+	RECT cr; 
+	GetClientRect(windowHandle, &cr);
+	bool result = (mp.x >= cr.left && mp.x < cr.right && 
+				   mp.y >= cr.top  && mp.y < cr.bottom);
+
+	return result;
+}
+
 LRESULT CALLBACK mainWindowCallBack(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
+
+	SystemData* sd = (SystemData*)GetWindowLongPtrA(window, GWLP_USERDATA);
+
     switch(message) {
         case WM_DESTROY: {
             PostMessage(window, message, wParam, lParam);
@@ -241,6 +289,65 @@ LRESULT CALLBACK mainWindowCallBack(HWND window, UINT message, WPARAM wParam, LP
             PostMessage(window, message, wParam, lParam);
         } break;
 
+        // #ifdef ENABLE_CUSTOM_WINDOW_FRAME
+        // case WM_NCACTIVATE: {
+        // 	sd->vsyncTempTurnOff = true;
+        // 	SwitchToFiber(sd->mainFiber);
+        // } break;
+        // #endif
+
+        case WM_SIZE: {
+        	if(wParam == SIZE_MAXIMIZED) sd->maximized = true;
+        	else if(wParam == SIZE_RESTORED) sd->maximized = false;
+
+        	// sd->vsyncTempTurnOff = true;
+        	sd->input->resize = true;
+        } break;
+
+        // case WM_NCPAINT: {
+	       //  HDC hdc;
+	       //  hdc = GetDCEx(window, (HRGN)wParam, DCX_WINDOW|DCX_INTERSECTRGN);
+	       //  // Paint into this DC 
+	       //  ReleaseDC(window, hdc);
+
+	       //  // sd->vsyncTempTurnOff = true;
+	       //  // SwitchToFiber(sd->mainFiber);
+
+        // 	return 0;
+        // } break;
+
+        case WM_PAINT: {
+        	PAINTSTRUCT ps;
+        	HDC hdc = BeginPaint(window, &ps); 
+        	EndPaint(window, &ps);
+
+        	sd->vsyncTempTurnOff = true;
+        	SwitchToFiber(sd->mainFiber);
+
+        	return 0;
+        } break;
+
+        case WM_SETFOCUS: {
+        	sd->setFocus = true;
+        	sd->windowIsFocused = true;
+        	sd->vsyncTempTurnOff = true;
+        	SwitchToFiber(sd->mainFiber);
+        } break;
+
+        case WM_KILLFOCUS: {
+		    // PostMessage(window, message, wParam, lParam);
+		    sd->killedFocus = true;
+        	sd->windowIsFocused = false;
+
+        	sd->vsyncTempTurnOff = true;
+        	SwitchToFiber(sd->mainFiber);
+        } break;
+
+        case WM_TIMER: {
+        	sd->vsyncTempTurnOff = true;
+        	SwitchToFiber(sd->mainFiber);
+        } break;
+
         default: {
             return DefWindowProc(window, message, wParam, lParam);
         } break;
@@ -249,98 +356,342 @@ LRESULT CALLBACK mainWindowCallBack(HWND window, UINT message, WPARAM wParam, LP
     return 1;
 }
 
+struct MonitorData {
+	Rect fullRect;
+	Rect workRect;
+	HMONITOR handle;
+};
+
 struct WindowSettings {
 	Vec2i res;
 	Vec2i fullRes;
 	bool fullscreen;
 	uint style;
 	WINDOWPLACEMENT g_wpPrev;
+	Rect previousWindowRect;
+
+	MonitorData monitors[3];
+	int monitorCount;
+	Vec2i biggestMonitorSize;
+	int refreshRate;
 
 	Vec2i currentRes;
 	float aspectRatio;
+
+	bool dontUpdateCursor;
+	bool customCursor;
+	POINT lastMousePosition;
 };
 
-void initSystem(SystemData* systemData, WindowSettings* ws, WindowsData wData, Vec2i res, bool resizable, bool maximizable, bool visible) {
+void updateCursor(WindowSettings* ws) {
+	if(!ws->customCursor) {
+		SetCursor(LoadCursor(0, IDC_ARROW));
+	}
+	ws->customCursor = false;
+}
+
+void setCursor(WindowSettings* ws, LPCSTR type) {
+	SetCursor(LoadCursor(0, type));
+	ws->customCursor = true;
+}
+
+void showWindow(HWND windowHandle) {
+    ShowWindow(windowHandle, SW_SHOW);
+}
+
+BOOL CALLBACK monitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData) {
+
+	MONITORINFO mi = { sizeof(MONITORINFO) };
+	GetMonitorInfo(hMonitor, &mi);
+
+	WindowSettings* ws = (WindowSettings*)(dwData);
+	MonitorData* md = ws->monitors + ws->monitorCount;
+	md->fullRect = rect(mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right, mi.rcMonitor.bottom);
+	md->workRect = rect(mi.rcWork.left, mi.rcWork.top, mi.rcWork.right, mi.rcWork.bottom);
+	md->handle = hMonitor;
+	ws->monitorCount++;
+
+	return true;
+}
+
+Vec2 getMousePos(HWND windowHandle, bool yInverted = true) {
+	POINT point;    
+	GetCursorPos(&point);
+	ScreenToClient(windowHandle, &point);
+	Vec2 mousePos = vec2(0,0);
+	mousePos.x = point.x;
+	mousePos.y = point.y;
+	if(yInverted) mousePos.y = -mousePos.y;
+
+	return mousePos;
+}
+
+Vec2 getMousePosS(bool yInverted = true) {
+	POINT point;    
+	GetCursorPos(&point);
+	Vec2 mousePos = vec2(0,0);
+	mousePos.x = point.x;
+	mousePos.y = point.y;
+	if(yInverted) mousePos.y = -mousePos.y;
+
+	return mousePos;
+}
+
+void inputPrepare(Input* input) {
+	input->anyKey = false;
+    input->mouseWheel = 0;
+    for(int i = 0; i < arrayCount(input->mouseButtonPressed); i++) input->mouseButtonPressed[i] = 0;
+    for(int i = 0; i < arrayCount(input->mouseButtonReleased); i++) input->mouseButtonReleased[i] = 0;
+    for(int i = 0; i < arrayCount(input->keysPressed); i++) input->keysPressed[i] = 0;
+    input->mShift = 0;
+    input->mCtrl = 0;
+    input->mAlt = 0;
+    input->inputCharacterCount = 0;
+    input->mouseDelta = vec2(0,0);
+
+    input->doubleClick = false;
+
+    input->closeWindow = false;
+	input->maximizeWindow = false;
+	input->minimizeWindow = false;
+}
+
+void CALLBACK updateInput(SystemData* sd) {
+	for(;;) {
+
+		Input* input = sd->input;
+		HWND windowHandle = sd->windowHandle;
+
+		SetTimer(windowHandle, 1, 1, 0);
+
+	    bool mouseInClient = mouseInClientArea(windowHandle);
+
+	    MSG message;
+	    while(PeekMessage(&message, windowHandle, 0, 0, PM_REMOVE)) {
+	        switch(message.message) {
+		        case WM_LBUTTONDBLCLK: {
+		        	input->doubleClick = true;
+					input->doubleClickPos = getMousePos(windowHandle, true);
+		        } break;
+
+	            case WM_KEYDOWN:
+	            case WM_KEYUP: {
+	                uint vk = uint(message.wParam);
+
+	                bool keyDown = (message.message == WM_KEYDOWN);
+	                int keycode = vkToKeycode(vk);
+	                input->keysDown[keycode] = keyDown;
+	                input->keysPressed[keycode] = keyDown;
+	                input->mShift = ((GetKeyState(VK_SHIFT) & 0x80) != 0);
+	                input->mCtrl = ((GetKeyState(VK_CONTROL) & 0x80) != 0);
+	                input->mAlt = ((GetKeyState(VK_MENU) & 0x80) != 0);
+
+	                if(keyDown) {
+	                	input->anyKey = true;
+	                }
+
+	                TranslateMessage(&message); 
+	                DispatchMessage(&message); 
+	            } break;
+
+	            case WM_CHAR: {
+	                // input->inputCharacters[input->inputCharacterCount] = (char)uint(message.wParam);
+	            	uint charIndex = uint(message.wParam);
+	            	if(charIndex < ' ' || charIndex > '~') break;
+	            	char c = (char)charIndex;
+	                input->inputCharacters[input->inputCharacterCount] = c;
+	                input->inputCharacterCount++;
+	            } break;
+
+	            case WM_INPUT: {
+	            	RAWINPUT inputBuffer;
+	            	UINT rawInputSize = sizeof(inputBuffer);
+	            	GetRawInputData((HRAWINPUT)(message.lParam), RID_INPUT, &inputBuffer, &rawInputSize, sizeof(RAWINPUTHEADER));
+	            	RAWINPUT* raw = (RAWINPUT*)(&inputBuffer);
+	            	
+	            	if (raw->header.dwType == RIM_TYPEMOUSE && raw->data.mouse.usFlags == MOUSE_MOVE_RELATIVE) {
+
+	            	    input->mouseDelta += vec2(raw->data.mouse.lLastX, raw->data.mouse.lLastY);
+
+	            	    USHORT buttonFlags = raw->data.mouse.usButtonFlags;
+
+	            	    if(mouseInClient) {
+							if(buttonFlags & RI_MOUSE_LEFT_BUTTON_DOWN) {
+								// SetCapture(windowHandle);
+								input->mouseButtonPressed[0] = true; 
+								input->mouseButtonDown[0] = true; 
+							} else if(buttonFlags & RI_MOUSE_RIGHT_BUTTON_DOWN) {
+								// SetCapture(windowHandle);
+								input->mouseButtonPressed[1] = true; 
+								input->mouseButtonDown[1] = true; 
+							} else if(buttonFlags & RI_MOUSE_MIDDLE_BUTTON_DOWN) {
+								// SetCapture(windowHandle);
+								input->mouseButtonPressed[2] = true; 
+								input->mouseButtonDown[2] = true; 
+							} else if(buttonFlags & RI_MOUSE_WHEEL) {
+								input->mouseWheel += ((SHORT)raw->data.mouse.usButtonData) / WHEEL_DELTA;
+							}
+	            	    }
+
+	            	    if(buttonFlags & RI_MOUSE_LEFT_BUTTON_UP) {
+	            	    	// ReleaseCapture();
+	            	    	input->mouseButtonDown[0] = false; 
+	            	    	input->mouseButtonReleased[0] = true; 
+	            	    } else if(buttonFlags & RI_MOUSE_RIGHT_BUTTON_UP) {
+	            	    	// ReleaseCapture();
+	            	    	input->mouseButtonDown[1] = false; 
+	            	    	input->mouseButtonReleased[1] = true; 
+	            	    } else if(buttonFlags & RI_MOUSE_MIDDLE_BUTTON_UP) {
+	            	    	// ReleaseCapture();
+	            	    	input->mouseButtonDown[2] = false; 
+	            	    	input->mouseButtonReleased[2] = true; 
+	            	    }
+
+	            	} break;
+
+	            	TranslateMessage(&message);
+	            	DispatchMessage(&message);
+	            } break;
+
+	            case WM_DESTROY: 
+	            case WM_CLOSE: 
+	            case WM_QUIT: 
+	            	input->closeWindow = true;
+	            	break;
+
+	            default: {
+	                TranslateMessage(&message); 
+	                DispatchMessage(&message); 
+	            } break;
+	        }
+	    }
+
+	    if(!sd->windowIsFocused) {
+	    	for(int i = 0; i < arrayCount(input->mouseButtonPressed); i++) input->mouseButtonPressed[i] = 0;
+	    	for(int i = 0; i < arrayCount(input->mouseButtonReleased); i++) input->mouseButtonReleased[i] = 0;
+	    	input->mouseWheel = 0;
+	    }
+	    sd->setFocus = false;
+
+	    // In case we clear because of focus.
+	    bool closeWindowTemp = input->closeWindow;
+
+	    if(sd->killedFocus) {
+	    	for(int i = 0; i < KEYCODE_COUNT; i++) {
+	    		input->keysDown[i] = false;
+	    	}
+	    	*input = {};
+
+	    	for(int i = 0; i < arrayCount(input->mouseButtonReleased); i++) {
+		    	input->mouseButtonReleased[i] = true;
+	    	}
+
+	    	sd->killedFocus = false;
+	    }
+
+	    input->closeWindow = closeWindowTemp;
+
+	    input->mousePos = getMousePos(windowHandle, false);
+	    input->mousePosNegative = getMousePos(windowHandle, true);
+
+	    input->mousePosScreen = getMousePosS(false);
+	    input->mousePosNegativeScreen = getMousePosS(true);
+
+	    input->lastMousePos = input->mousePos;
+
+	    input->firstFrame = false;
+
+	    SwitchToFiber(sd->mainFiber);
+	}
+}
+
+
+#include <Mmsystem.h>
+
+int getSystemFontHeight(HWND windowHandle);
+void initSystem(SystemData* systemData, WindowSettings* ws, WindowsData wData, Vec2i res, int style, int , int monitor = 0) {
 	systemData->windowsData = wData;
+
+	EnumDisplayMonitors(0, 0, monitorEnumProc, ((LPARAM)ws));
+
+	DEVMODE devMode;
+	EnumDisplaySettings(NULL, ENUM_CURRENT_SETTINGS, &devMode);
+	ws->refreshRate = devMode.dmDisplayFrequency;
+
 
 	ws->currentRes = res;
 	ws->fullscreen = false;
-	ws->fullRes.x = GetSystemMetrics(SM_CXSCREEN);
-	ws->fullRes.y = GetSystemMetrics(SM_CYSCREEN);
 	ws->aspectRatio = (float)res.w / (float)res.h;
 
-	ws->style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-	if(resizable) ws->style |= WS_THICKFRAME;
-	if(maximizable) ws->style |= WS_MAXIMIZEBOX;
-	// if(visible) ws->style |= WS_VISIBLE;
-
-
+	ws->style = style;
 
 	RECT cr = {0, 0, res.w, res.h};
 	AdjustWindowRectEx(&cr, ws->style, 0, 0);
 
 	int ww = cr.right - cr.left;
 	int wh = cr.bottom - cr.top;
-	int wx = ws->fullRes.x/2 - ww/2;
-	int wy = ws->fullRes.y/2 - wh/2;
+	int wx, wy;
+	{
+		MonitorData* md = ws->monitors + monitor;
+		wx = rectCen(md->workRect).x - res.w/2;
+		wy = rectCen(md->workRect).y - res.h/2;
+	}
 	ws->res = vec2i(ww, wh);
 
-
-
     WNDCLASS windowClass = {};
-    windowClass.style = CS_OWNDC|CS_HREDRAW|CS_VREDRAW;
-    // windowClass.style = CS_OWNDC;
+    windowClass.style = CS_OWNDC|CS_HREDRAW|CS_VREDRAW|CS_DBLCLKS;
+     
     windowClass.lpfnWndProc = mainWindowCallBack;
     windowClass.hInstance = systemData->instance;
     windowClass.lpszClassName = "App";
-    windowClass.hCursor = LoadCursor(0, IDC_ARROW);
-    // windowClass.hbrBackground = CreateSolidBrush(RGB(30,30,30));
 
     if(!RegisterClass(&windowClass)) {
         DWORD errorCode = GetLastError();
         int dummy = 2;   
     }
 
+    // systemData->windowClass = windowClass;
     systemData->windowHandle = CreateWindowEx(0, windowClass.lpszClassName, "", ws->style, wx,wy,ww,wh, 0, 0, systemData->instance, 0);
 
-    if(!systemData->windowHandle) {
+    HWND windowHandle = systemData->windowHandle;
+    if(!windowHandle) {
         DWORD errorCode = GetLastError();
     }
 
-	SetFocus(systemData->windowHandle);
+    SetWindowLongPtr(windowHandle, GWLP_USERDATA, (LONG_PTR)systemData);
 
     PIXELFORMATDESCRIPTOR pixelFormatDescriptor =
     {
         +    sizeof(PIXELFORMATDESCRIPTOR),
         1,
-        PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER,    //Flags
+        /*PFD_SUPPORT_COMPOSITION |*/ PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER,    //Flags
         PFD_TYPE_RGBA,            //The kind of framebuffer. RGBA or palette.
-        32,                        //Colordepth of the framebuffer.
+        24,                        //Colordepth of the framebuffer.
         0, 0, 0, 0, 0, 0,
         0, //8
         0,
         0,
         0, 0, 0, 0,
         24,                        //Number of bits for the depthbuffer
+        // 32,                        //Number of bits for the depthbuffer
         // 0,                        //Number of bits for the depthbuffer
-        8,                        //Number of bits for the stencilbuffer
-        // 0,                        //Number of bits for the stencilbuffer
+        // 8,                        //Number of bits for the stencilbuffer
+        0,                        //Number of bits for the stencilbuffer
         0,                        //Number of Aux buffers in the framebuffer.
         PFD_MAIN_PLANE,
         0,
         0, 0, 0
     };    
     
-    HDC deviceContext = GetDC(systemData->windowHandle);
+    HDC deviceContext = GetDC(windowHandle);
     systemData->deviceContext = deviceContext;
     int pixelFormat;
     pixelFormat = ChoosePixelFormat(deviceContext, &pixelFormatDescriptor);
-    SetPixelFormat(deviceContext, pixelFormat, &pixelFormatDescriptor);
-
+	SetPixelFormat(deviceContext, pixelFormat, &pixelFormatDescriptor);
+	
     HGLRC openglContext = wglCreateContext(systemData->deviceContext);
     bool result = wglMakeCurrent(systemData->deviceContext, openglContext);
     if(!result) { printf("Could not set Opengl Context.\n"); }
-
 
     #ifndef HID_USAGE_PAGE_GENERIC
     #define HID_USAGE_PAGE_GENERIC         ((USHORT) 0x01)
@@ -352,148 +703,46 @@ void initSystem(SystemData* systemData, WindowSettings* ws, WindowsData wData, V
     RAWINPUTDEVICE Rid[1];
     Rid[0].usUsagePage = HID_USAGE_PAGE_GENERIC; 
     Rid[0].usUsage = HID_USAGE_GENERIC_MOUSE; 
+    Rid[0].hwndTarget = windowHandle;
     Rid[0].dwFlags = RIDEV_INPUTSINK;   
-    Rid[0].hwndTarget = systemData->windowHandle;
+    // Rid[0].dwFlags = 0;   
     bool r = RegisterRawInputDevices(Rid, 1, sizeof(Rid[0]));
+    assert(r);
 
-    printf("%Opengl Version: %s\n", (char*)glGetString(GL_VERSION));
-}
+    systemData->mainFiber = ConvertThreadToFiber(0);
+    systemData->messageFiber = CreateFiber(0, (PFIBER_START_ROUTINE)updateInput, systemData);
 
-void showWindow(HWND windowHandle) {
-    ShowWindow(windowHandle, SW_SHOW);
-}
+    SYSTEM_INFO sysinfo;
+    GetSystemInfo(&sysinfo);
+    systemData->coreCount = sysinfo.dwNumberOfProcessors;
 
-void updateInput(Input* input, bool* isRunning, HWND windowHandle) {
-	input->anyKey = false;
+    // Set icon.
+    {
+    	char* rs = MAKEINTRESOURCE(1);
 
-    input->mouseWheel = 0;
-    for(int i = 0; i < arrayCount(input->mouseButtonPressed); i++) input->mouseButtonPressed[i] = 0;
-    for(int i = 0; i < arrayCount(input->mouseButtonReleased); i++) input->mouseButtonReleased[i] = 0;
-    for(int i = 0; i < arrayCount(input->keysPressed); i++) input->keysPressed[i] = 0;
-    input->mShift = 0;
-    input->mCtrl = 0;
-    input->mAlt = 0;
-    input->inputCharacterCount = 0;
+    	HANDLE hbicon = LoadImage(GetModuleHandle(0), rs, IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), 0);
+    	if(hbicon) SendMessage(windowHandle, WM_SETICON, ICON_BIG, (LPARAM)hbicon);
 
-    input->mouseDeltaX = 0;
-    input->mouseDeltaY = 0;
-
-    MSG message;
-    while(PeekMessage(&message, 0, 0, 0, PM_REMOVE)) {
-        switch(message.message) {
-            case WM_MOUSEWHEEL: {
-                short wheelDelta = HIWORD(message.wParam);
-                if (wheelDelta > 0) input->mouseWheel = 1;
-                if (wheelDelta < 0) input->mouseWheel = -1;
-            } break;
-
-            case WM_LBUTTONDOWN: { 
-            	SetCapture(windowHandle);
-            	input->mouseButtonPressed[0] = true; 
-				input->mouseButtonDown[0] = true; 
-			} break;
-            case WM_RBUTTONDOWN: { 
-            	SetCapture(windowHandle);
-            	input->mouseButtonPressed[1] = true; 
-				input->mouseButtonDown[1] = true; 
-			} break;
-            case WM_MBUTTONDOWN: { 
-            	SetCapture(windowHandle);
-            	input->mouseButtonPressed[2] = true; 
-				input->mouseButtonDown[2] = true; 
-			} break;
-
-	        case WM_LBUTTONUP: { 
-            	ReleaseCapture();
-				input->mouseButtonDown[0] = false; 
-				input->mouseButtonReleased[0] = true;
-			} break;
-	        case WM_RBUTTONUP: { 
-            	ReleaseCapture();
-				input->mouseButtonDown[1] = false; 
-				input->mouseButtonReleased[1] = true;
-			} break;
-	        case WM_MBUTTONUP: { 
-            	ReleaseCapture();
-				input->mouseButtonDown[2] = false; 
-				input->mouseButtonReleased[2] = true;
-			} break;
-
-            case WM_KEYDOWN:
-            case WM_KEYUP: {
-                uint vk = uint(message.wParam);
-
-                bool keyDown = (message.message == WM_KEYDOWN);
-                int keycode = vkToKeycode(vk);
-                input->keysDown[keycode] = keyDown;
-                input->keysPressed[keycode] = keyDown;
-                input->mShift = ((GetKeyState(VK_SHIFT) & 0x80) != 0);
-                input->mCtrl = ((GetKeyState(VK_CONTROL) & 0x80) != 0);
-                input->mAlt = ((GetKeyState(VK_MENU) & 0x80) != 0);
-
-                if(keyDown) {
-                	input->anyKey = true;
-
-                    TranslateMessage(&message); 
-                }
-            } break;
-
-            case WM_CHAR: {
-                // input->inputCharacters[input->inputCharacterCount] = (char)uint(message.wParam);
-            	uint charIndex = uint(message.wParam);
-            	if(charIndex < ' ' || charIndex > '~') break;
-            	char c = (char)charIndex;
-                input->inputCharacters[input->inputCharacterCount] = c;
-                input->inputCharacterCount++;
-            } break;
-
-            case WM_INPUT: {
-            	RAWINPUT inputBuffer;
-            	UINT rawInputSize = sizeof(inputBuffer);
-            	GetRawInputData((HRAWINPUT)(message.lParam), RID_INPUT, &inputBuffer, &rawInputSize, sizeof(RAWINPUTHEADER));
-            	RAWINPUT* raw = (RAWINPUT*)(&inputBuffer);
-            	
-            	if (raw->header.dwType == RIM_TYPEMOUSE) {
-            	    int xPosRelative = raw->data.mouse.lLastX;
-            	    int yPosRelative = raw->data.mouse.lLastY;
-
-            	    input->mouseDeltaX = -xPosRelative;
-            	    input->mouseDeltaY = -yPosRelative;
-            	} break;
-            } break;
-
-            // case WM_SIZE: {
-            // } break;
-
-            case WM_DESTROY: {
-                *isRunning = false;
-            } break;
-
-            case WM_CLOSE: {
-                *isRunning = false;
-            } break;
-
-            case WM_QUIT: {
-                *isRunning = false;
-            } break;
-
-            default: {
-                TranslateMessage(&message); 
-                DispatchMessage(&message); 
-            } break;
-        }
+    	HANDLE hsicon = LoadImage(GetModuleHandle(0), rs, IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), 0);
+    	if(hsicon) SendMessage(windowHandle, WM_SETICON, ICON_SMALL, (LPARAM)hsicon);
     }
 
-    POINT point;    
-    GetCursorPos(&point);
-    ScreenToClient(windowHandle, &point);
-    input->mousePos.x = point.x;
-    input->mousePos.y = point.y;
+    // Set minimal sleep timer resolution.
+    {
+    	TIMECAPS timecaps;
+    	timeGetDevCaps(&timecaps, sizeof(TIMECAPS));
+    	int error = timeBeginPeriod(timecaps.wPeriodMin);
+    	if(error != TIMERR_NOERROR) printf("Timer error.\n");
+    }
 
-    input->mousePosNegative = vec2(input->mousePos.x, -input->mousePos.y);
-
-    input->firstFrame = false;
+	systemData->fontHeight = getSystemFontHeight(windowHandle);
+	
+	SetFocus(windowHandle);
+	systemData->windowIsFocused = true;
 }
+
+
+
 
 // MetaPlatformFunction();
 // const char* getClipboard(MemoryBlock* memory) {
@@ -522,6 +771,14 @@ void setClipboard(char* text) {
     EmptyClipboard();
     SetClipboardData(CF_TEXT, clipHandle);
     CloseClipboard();
+}
+
+Rect getWindowWindowRect(HWND windowHandle) {
+	RECT r; 
+	GetWindowRect(windowHandle, &r);
+	Rect windowRect = rect(r.left, r.bottom, r.right, r.top);
+	
+	return windowRect;
 }
 
 void getWindowProperties(HWND windowHandle, int* viewWidth, int* viewHeight, int* width, int* height, int* x, int* y) {
@@ -592,6 +849,8 @@ void updateResolution(HWND windowHandle, WindowSettings* ws) {
 
 void setWindowMode(HWND hwnd, WindowSettings* wSettings, int mode) {
 	if(mode == WINDOW_MODE_FULLBORDERLESS && !wSettings->fullscreen) {
+		wSettings->previousWindowRect = getWindowWindowRect(hwnd);
+		
 		wSettings->g_wpPrev = {};
 
 		DWORD dwStyle = getWindowStyle(hwnd);
@@ -613,12 +872,14 @@ void setWindowMode(HWND hwnd, WindowSettings* wSettings, int mode) {
 		}
 
 		wSettings->fullscreen = true;
+
 	} else if(mode == WINDOW_MODE_WINDOWED && wSettings->fullscreen) {
 		setWindowStyle(hwnd, wSettings->style);
 		SetWindowPlacement(hwnd, &wSettings->g_wpPrev);
-		SetWindowPos(hwnd, NULL, 0,0, wSettings->res.w, wSettings->res.h, SWP_NOZORDER | SWP_NOMOVE | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
 
 		wSettings->fullscreen = false;
+
+		InvalidateRect(NULL, NULL, FALSE);
 	}
 }
 
@@ -650,6 +911,15 @@ bool windowSizeChanged(HWND windowHandle, WindowSettings* ws) {
 
 	bool result = cr != ws->currentRes;
 	return result;
+}
+
+int getSystemFontHeight(HWND windowHandle) {
+	HDC dc = GetDC(windowHandle);
+
+	TEXTMETRIC textMetric;
+	GetTextMetrics(dc, &textMetric);
+
+	return textMetric.tmHeight;
 }
 
 // MetaPlatformFunction();
@@ -724,312 +994,3 @@ void shellExecuteNoWindow(char* command) {
 void sleep(int milliseconds) {
     Sleep(milliseconds);
 }
-
-#define REQUEST_DEBUG_OUTPUT 0
-
-// MetaPlatformFunction();
-void sendHttpRequest(void* data) {
-    HttpRequest* request = (HttpRequest*)data;
-
-    char tempLink[128];
-    strCpy(tempLink, request->link);
-
-    char host[128];
-    char hostAndPort[128];
-    char hirarchy[128];
-    int port = -1;
-
-    int findStart = strFind(tempLink, "://");
-    if(findStart != -1) strCpy(tempLink, tempLink+findStart+3);
-
-    int hasContent = strFind(tempLink, '/');
-    if(hasContent != -1) {
-        copySubstring(hostAndPort, tempLink, 0, strFind(tempLink, '/')-1);
-        copySubstring(hirarchy, tempLink, strFind(tempLink, '/'), strLen(tempLink));
-    } else {
-        strCpy(hostAndPort, tempLink);  
-        hirarchy[0] = '\\';
-    }           
-
-    int portSign = strFind(hostAndPort,':');
-    if(portSign != -1) {
-        copySubstring(host, hostAndPort, 0, portSign-1);
-        port = strToInt(hostAndPort+portSign+1);
-    } else {
-        strCpy(host, hostAndPort);
-    }
-
-    char httpRequest[512]; httpRequest[0] = '\0';
-    if(request->type == REQUEST_TYPE_GET) strAppend(httpRequest, "GET ");
-    if(request->type == REQUEST_TYPE_POST) strAppend(httpRequest, "POST ");
-    strAppend(httpRequest, hirarchy);
-    strAppend(httpRequest, " HTTP/1.1\r\n");
-    strAppend(httpRequest, "Host: ");
-    strAppend(httpRequest, hostAndPort);
-    strAppend(httpRequest, "\r\n");
-    strAppend(httpRequest, "Accept: */*\r\n");
-    strAppend(httpRequest, "Accept-Encoding: */*\r\n");
-    strAppend(httpRequest, "Accept-Language: */*\r\n");
-    strAppend(httpRequest, "Connection: keep-alive\r\n");
-    strAppend(httpRequest, "Range: bytes 0-\r\n");
-    if(request->type == REQUEST_TYPE_POST) {
-        char b[16];
-        int contentLength = strLen(request->additionalBodyContent);
-        intToStr(b, contentLength);
-
-        strAppend(httpRequest, "Content-Length: ");
-        strAppend(httpRequest, b);
-        strAppend(httpRequest, "\r\n");
-    }
-    strAppend(httpRequest, "\r\n");
-    if(request->type == REQUEST_TYPE_POST) {
-        strAppend(httpRequest, request->additionalBodyContent);
-        // strAppend(httpRequest, "\r\n");
-    }
-
-    WSADATA wsaData;
-    if (WSAStartup(MAKEWORD(2,2), &wsaData) != 0) {
-        printf("WSAStartup failed.\n");
-    }
-
-    struct addrinfo hints;
-    ZeroMemory(&hints, sizeof(hints));
-    hints.ai_family = AF_INET;
-    hints.ai_protocol = IPPROTO_TCP;
-    hints.ai_socktype = SOCK_STREAM;
-
-    struct addrinfo* targetAdressInfo = 0;
-    DWORD getAddrRes = getaddrinfo(host, 0, &hints, &targetAdressInfo);
-    if (getAddrRes != 0 || targetAdressInfo == 0) {
-        printf("Could not resolve the Host Name");
-        WSACleanup();
-    }
-
-    SOCKADDR_IN sockAddr;
-    sockAddr.sin_addr = ((struct sockaddr_in*) targetAdressInfo->ai_addr)->sin_addr;
-    sockAddr.sin_family = AF_INET;
-    if(port == -1) sockAddr.sin_port = htons(80);
-    else sockAddr.sin_port = htons(port);
-
-    freeaddrinfo(targetAdressInfo);
-
-    SOCKET webSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (webSocket == INVALID_SOCKET) {
-        printf("Creation of the Socket Failed");
-        WSACleanup();
-    }
-
-    timeval timeOut;
-    // timeOut.tv_sec = 10;
-    // timeOut.tv_usec = 0;
-    // if(setsockopt(webSocket, SOL_SOCKET, SO_SNDTIMEO, (char*)(&timeOut), sizeof(timeOut))) {
-    //  printf("Could not set socket settings.\n");
-    // }
-    timeOut.tv_sec = 500;
-    timeOut.tv_usec = 0;
-    if(setsockopt(webSocket, SOL_SOCKET, SO_RCVTIMEO, (char*)(&timeOut), sizeof(timeOut))) {
-        printf("Could not set socket settings.\n");
-    }
-
-    if(REQUEST_DEBUG_OUTPUT) printf("Connecting...\n");
-    if(connect(webSocket, (SOCKADDR*)&sockAddr, sizeof(sockAddr)) != 0) {
-        printf("Could not connect\n");
-        closesocket(webSocket);
-        WSACleanup();
-    }
-    if(REQUEST_DEBUG_OUTPUT) printf("Connected\n\n");
-
-    int sentBytes = send(webSocket, httpRequest, strlen(httpRequest),0);
-    if (sentBytes < strlen(httpRequest) || sentBytes == SOCKET_ERROR) {
-        printf("Could not send the request to the Server\n");
-        closesocket(webSocket);
-        WSACleanup();
-    }
-    if(REQUEST_DEBUG_OUTPUT) {
-        printf("HTTP REQUEST: \n");
-        printf("%s", httpRequest);
-        if(request->type == REQUEST_TYPE_POST) printf("\n\n", httpRequest);
-    }
-
-    // char message[20000];
-    char message[8000];
-    int messageTotalSize = arrayCount(message);
-    ZeroMemory(message, messageTotalSize);
-
-
-
-    bool storeInFile = false;
-    bool storeInBuffer = false;
-
-
-    FILE *dataFile;
-    if(request->contentFile) {
-        storeInFile = true;
-
-        dataFile = fopen(request->contentFile, "wb");
-        fclose(dataFile);
-        dataFile = fopen(request->contentFile, "a+b");
-        if(!dataFile) printf("Cant open data file\n");
-    }
-
-    char* contentBuffer = request->contentBuffer;
-    if(contentBuffer) {
-        storeInBuffer = true;
-    }
-
-    int totalBytesReceived = 0;
-    int totalContentBytesReceived = 0;
-    bool parseHeader = true;
-
-    char header[4048];
-    int headerSize = 0;
-    int headerContentLength;
-
-    int chunkCurrentSize = 0;
-    int chunkTotalSize = 0;
-
-    int receivedCode;
-    do {
-        receivedCode = recv(webSocket, message, messageTotalSize, 0);
-        
-        if(receivedCode > 0) {
-            int messageSize = receivedCode;
-            totalBytesReceived += messageSize;
-
-            char* buffer = message;
-            int bufferSize = messageSize;
-
-            if(parseHeader) {
-                headerSize = strFindRight(message, "\r\n\r\n");
-                strCpy(header, message, headerSize);
-
-                char b[16];
-                int infoPos = strFindRight(header, "Content-Length: ", headerSize);
-                if(infoPos != -1) {
-                    strCpy(b, header+infoPos, strFind(header+infoPos, "\r\n"));
-                    headerContentLength = strToInt(b);
-                    if(headerContentLength == 0) headerContentLength = -1;
-                } else {
-                    headerContentLength = -1;
-                }
-
-                parseHeader = false;
-                
-                totalBytesReceived -= headerSize;
-                buffer += headerSize;
-                bufferSize -= headerSize;
-
-                if(REQUEST_DEBUG_OUTPUT) printf("HTTP RESPONSE: \n%s", header);
-            }
-
-            float progress = 0;
-            if(headerContentLength != -1) {
-                progress = ((float)totalBytesReceived/headerContentLength) * 100;
-                if(REQUEST_DEBUG_OUTPUT) printf("Receiving... Size/Bytes: %i Progress: %.3f\n", receivedCode, progress);
-
-                if(storeInFile) fwrite(buffer, 1, bufferSize, dataFile);
-                if(storeInBuffer) memCpy(contentBuffer+totalContentBytesReceived, buffer, bufferSize);
-                totalContentBytesReceived += bufferSize;
-
-                if(totalBytesReceived == headerContentLength) {
-                    if(REQUEST_DEBUG_OUTPUT) printf("File download successfull.\n");
-                    break;
-                }
-            } else {
-                bool streamEnd = false;
-
-                while(bufferSize > 0) {
-                    if(chunkCurrentSize < chunkTotalSize) {
-                        int chunkSizeRemaining = chunkTotalSize - chunkCurrentSize;
-                        if(chunkSizeRemaining <= bufferSize) {
-                            // load in remaining and begin new chunk
-                            if(storeInFile) fwrite(buffer, 1, chunkSizeRemaining, dataFile);
-                            if(storeInBuffer) memCpy(contentBuffer+totalContentBytesReceived, buffer, chunkSizeRemaining);
-                            totalContentBytesReceived += chunkSizeRemaining;
-
-                            chunkCurrentSize = 0;
-                            chunkTotalSize = 0;
-
-                            buffer += chunkSizeRemaining + 2; //\r\n at end 
-                            bufferSize -= chunkSizeRemaining + 2; //\r\n at end
-                        } else {
-                            // load in difference
-                            int chunkSizeAvailable = bufferSize;
-                            if(storeInFile) fwrite(buffer, 1, chunkSizeAvailable, dataFile);
-                            if(storeInBuffer) memCpy(contentBuffer+totalContentBytesReceived, buffer, chunkSizeAvailable);
-                            totalContentBytesReceived += chunkSizeAvailable;
-                            
-                            chunkCurrentSize += chunkSizeAvailable;
-                            break;
-                        }
-                    } else {
-                        // load next chunk
-                        if(chunkCurrentSize == 0) {
-                            char b[16];
-                            int chunkInfoPos = strFind(buffer, "\r\n");
-                            strCpy(b, buffer, chunkInfoPos);
-                            int chunkSize = strHexToInt(b);
-                            int chunkInfoSize = strLen(b) + 2;
-
-                            // printf("aaa: %i %*.*s %i\n", chunkInfoPos, 4,4,b, chunkSize);
-
-                            buffer += chunkInfoSize;
-                            bufferSize -= chunkInfoSize;
-
-                            chunkCurrentSize = 0;
-                            chunkTotalSize = chunkSize;
-
-                            // close stream if no more chunks available
-                            if(chunkTotalSize == 0) {
-                                streamEnd = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                if(REQUEST_DEBUG_OUTPUT) printf("Loading webpage: %i bytes\n", messageSize);
-
-                if(streamEnd) {
-                    if(REQUEST_DEBUG_OUTPUT) printf("Webpage successfully loaded.\n");
-                    break;
-                }
-            }
-
-            request->size = totalContentBytesReceived;
-            request->progress = progress;
-            if(request->stopProcess) {
-                break;
-            }
-
-        } else if(receivedCode == 0) {
-            if(REQUEST_DEBUG_OUTPUT) printf("Connection closed.\n");
-        } else {
-            int error = WSAGetLastError();
-            if(error == 10060) printf("Timeout Receiving.\n");
-            else printf("Connection error has ocurred: %i\n", error);
-        }
-    } while (receivedCode > 0);
-
-    if(REQUEST_DEBUG_OUTPUT) {
-        printf("Total Bytes: %i Content Bytes: %i\n", totalBytesReceived, totalContentBytesReceived);
-        printf("\n");
-    }
-
-    if(storeInFile) fclose(dataFile);
-
-    if(request->headerResponseFile) {
-        FILE *file = fopen(request->headerResponseFile, "w");
-        fwrite(header, 1, headerSize, file);
-        fclose(file);
-    }
-
-    closesocket(webSocket);
-    WSACleanup();
-
-    request->size = totalContentBytesReceived;
-    request->finished = true;
-}
-
-
-

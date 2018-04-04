@@ -6,6 +6,8 @@ const int INTERNAL_TEXTURE_FORMAT = USE_SRGB ? GL_SRGB8_ALPHA8 : GL_RGBA8;
 
 #define HOTRELOAD_SHADERS 1
 
+#define App_Session_File ".\\session.tmp"
+
 
 //
 
@@ -14,6 +16,25 @@ const char* watchFolders[] = {
 	"..\\data\\Textures\\Skyboxes\\", 
 	"..\\data\\Textures\\Minecraft\\"
 };
+
+struct AppSessionSettings {
+	Rect windowRect;
+};
+
+void appWriteSessionSettings(char* filePath, AppSessionSettings* at) {
+	writeDataToFile((char*)at, sizeof(AppSessionSettings), filePath);
+}
+
+void appReadSessionSettings(char* filePath, AppSessionSettings* at) {
+	readDataFile((char*)at, filePath);
+}
+
+void saveAppSettings(AppSessionSettings at) {
+	if(fileExists(App_Session_File)) {
+		appWriteSessionSettings(App_Session_File, &at);
+	}
+}
+
 
 //
 

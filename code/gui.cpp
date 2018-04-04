@@ -183,8 +183,8 @@ struct Gui {
 			settings.scrollBarSliderSize = 30;
 			settings.cursorWidth = 1;
 
-			cornerPos = rectGetUL(panelRect);
-			panelStartDim = rectGetDim(panelRect);
+			cornerPos = rectTL(panelRect);
+			panelStartDim = rectDim(panelRect);
 			panelStartDim.h += settings.border.h*2;
 		} else {
 			guiLoadAll(this, saveSlot);
@@ -197,7 +197,7 @@ struct Gui {
 	void heightPop() { heightStackIndex--; }
 
 	void doScissor(Rect r) {
-		Vec2 dim = rectGetDim(r);
+		Vec2 dim = rectDim(r);
 		if(dim.w < 0 || dim.h < 0) r = rect(0,0,0,0);
 		dcScissor(r);
 	}
@@ -266,9 +266,9 @@ struct Gui {
 		Rect region = getCurrentRegion();
 		scissorPush(region);
 
-		Vec2 textPos = rectGetCen(region) + vec2(0,fontHeight*settings.fontOffset);
-		if(align == 0) textPos.x -= rectGetDim(region).w*0.5f;
-		else if(align == 2) textPos.x += rectGetDim(region).w*0.5f;
+		Vec2 textPos = rectCen(region) + vec2(0,fontHeight*settings.fontOffset);
+		if(align == 0) textPos.x -= rectDim(region).w*0.5f;
+		else if(align == 2) textPos.x += rectDim(region).w*0.5f;
 
 		int textShadow = settings.textShadow;
 		Vec4 sColor = colors.shadowColor;
@@ -286,9 +286,9 @@ struct Gui {
 	void drawText(char* text, int align, Rect region, float cullWidth = -1) {
 		scissorPush(region);
 
-		Vec2 textPos = rectGetCen(region) + vec2(0,fontHeight*settings.fontOffset);
-		if(align == 0) textPos.x -= rectGetDim(region).w*0.5f;
-		else if(align == 2) textPos.x += rectGetDim(region).w*0.5f;
+		Vec2 textPos = rectCen(region) + vec2(0,fontHeight*settings.fontOffset);
+		if(align == 0) textPos.x -= rectDim(region).w*0.5f;
+		else if(align == 2) textPos.x += rectDim(region).w*0.5f;
 
 		if(cullWidth == -1) 
 			dcText(text, font, textPos, colors.textColor, vec2i(align-1, 0), 0, settings.textShadow, colors.shadowColor);		
@@ -331,7 +331,7 @@ struct Gui {
 		for(int i = 0; i < arrayCount(heightStack); i++) heightStack[i] = 1;
 		heightStackIndex = 0;
 
-		Rect background = rectULDim(cornerPos, vec2(panelWidth+settings.border.x*2, -(lastPos.y-cornerPos.y)+lastDim.h - settings.border.y));
+		Rect background = rectTLDim(cornerPos, vec2(panelWidth+settings.border.x*2, -(lastPos.y-cornerPos.y)+lastDim.h - settings.border.y));
 
 		incrementId();
 		// drag window
@@ -342,16 +342,16 @@ struct Gui {
 				cornerPos += dragDelta;
 			}
 
-			// clamp(&cornerPos, rect(0, -res.y, res.x - rectGetDim(background).w+1, 0.5f));
+			// clamp(&cornerPos, rect(0, -res.y, res.x - rectDim(background).w+1, 0.5f));
 			if(clipToWindow)
-				clamp(&cornerPos, rect(0, -res.y + rectGetDim(background).h, res.x - rectGetDim(background).w+1, 0.5f));
-			background = rectAddOffset(background, cornerPos - oldPos);
+				clamp(&cornerPos, rect(0, -res.y + rectDim(background).h, res.x - rectDim(background).w+1, 0.5f));
+			background = rectTrans(background, cornerPos - oldPos);
 		}
 
 		// resize window
 		Rect resizeRegion;
 		{
-			resizeRegion = rect(rectGetDR(background)-vec2(settings.border.x*2,0), rectGetDR(background)+vec2(0,-settings.border.y*2));
+			resizeRegion = rect(rectBR(background)-vec2(settings.border.x*2,0), rectBR(background)+vec2(0,-settings.border.y*2));
 			Vec2 dragDelta = vec2(0,0);
 			int oldMainScrollHeight = panelStartDim.h;
 			float oldPanelWidth = panelStartDim.w;
@@ -384,11 +384,11 @@ struct Gui {
 
 			Vec2 dragAfterClamp = vec2(panelStartDim.w - oldPanelWidth, oldMainScrollHeight - panelStartDim.h);
 			if(showScrollBar[0] == false) dragAfterClamp.y = 0;
-			resizeRegion = rectAddOffset(resizeRegion, dragAfterClamp);
+			resizeRegion = rectTrans(resizeRegion, dragAfterClamp);
 			background = rectExpand(background, 0, dragAfterClamp.y, dragAfterClamp.x, 0);
 
 			if(clipToWindow)
-				clamp(&cornerPos, rect(0, -res.y + rectGetDim(background).h, res.x - rectGetDim(background).w+1, 0.5f));
+				clamp(&cornerPos, rect(0, -res.y + rectDim(background).h, res.x - rectDim(background).w+1, 0.5f));
 		}
 
 		setScissor(true);
@@ -561,7 +561,7 @@ struct Gui {
 	void div(float a, float b, float c, float d) {div(vec4(a,b,c,d));};
 
 	Rect getCurrentRegion() {
-		Rect result = rectULDim(currentPos, currentDim);
+		Rect result = rectTLDim(currentPos, currentDim);
 		return result;
 	}
 
@@ -603,7 +603,7 @@ struct Gui {
 	void beginScroll(int scrollHeight, float* scrollAmount) {
 		scrollEndY[scrollStackIndexX] = currentPos.y - scrollHeight - settings.offsets.h;
 
-		Rect r = rectULDim(getDefaultPos(), vec2(panelWidth, scrollHeight));
+		Rect r = rectTLDim(getDefaultPos(), vec2(panelWidth, scrollHeight));
 
 		float scrollValue = scrollStack[scrollStackIndexX][scrollStackIndexY[scrollStackIndexX]];
 		float diff = (scrollValue - scrollHeight - settings.offsets.y);
@@ -626,7 +626,7 @@ struct Gui {
 			scrollRect.min.x += panelWidth + settings.offsets.w;
 			// r.min.x += panelWidth;
 
-			Rect regCen = rectGetCenDim(scrollRect);
+			Rect regCen = rectCenDim(scrollRect);
 			float sliderHeight = regCen.dim.h - diff;
 			sliderHeight = clampMin(sliderHeight, settings.scrollBarSliderSize);
 
@@ -795,7 +795,7 @@ struct Gui {
 		float sliderSize = verticalSlider ? sliderS : settings.sliderSize;
 		if(typeFloat) sliderSize = verticalSlider ? sliderS : settings.sliderSize;
 		else {
-			sliderSize = rectGetDim(region).w * 1/(float)((int)roundInt(max)-(int)roundInt(min) + 1);
+			sliderSize = rectDim(region).w * 1/(float)((int)roundInt(max)-(int)roundInt(min) + 1);
 			sliderSize = clampMin(sliderSize, settings.sliderSize);
 		}
 
@@ -996,12 +996,12 @@ struct Gui {
 				}
 			}
 
-			Rect regCen = rectGetCenDim(region);
+			Rect regCen = rectCenDim(region);
 			Vec2 textStart = regCen.cen - vec2(regCen.dim.w*0.5f,0);
 
 			Vec2 cursorPos = textIndexToPos(textBoxText, font, textStart, textBoxIndex, vec2i(-1,0));
 			Rect cursorRect = rectCenDim(cursorPos, vec2(settings.cursorWidth, font->height));
-			if(textBoxIndex == 0) cursorRect = rectAddOffset(cursorRect, vec2(1,0));
+			if(textBoxIndex == 0) cursorRect = rectTrans(cursorRect, vec2(1,0));
 
 			if(selectionAnchor != -1) {
 				int start = min(textBoxIndex, selectionAnchor);
@@ -1463,8 +1463,8 @@ struct Console {
 		float inputHeight = cs.inputFont->height * cs.inputHeightPadding;
 		float bodyTextHeight = cs.bodyFont->height * cs.bodyFontHeightPadding;
 		float consoleBodyHeight = consoleTotalHeight - inputHeight;
-		Rect consoleBody = rectMinDim(vec2(0, pos + inputHeight), vec2(res.w, consoleBodyHeight));
-		Rect consoleInput = rectMinDim(vec2(0, pos), vec2(res.w, inputHeight));
+		Rect consoleBody = rectBLDim(vec2(0, pos + inputHeight), vec2(res.w, consoleBodyHeight));
+		Rect consoleInput = rectBLDim(vec2(0, pos), vec2(res.w, inputHeight));
 
 		float preTextSize = getTextDim(cs.commandPreText, cs.bodyFont).w;
 		bodyTextWrapWidth = consoleBody.max.x - cs.scrollBarWidth - cs.consolePadding.x*2 - preTextSize;
@@ -1845,7 +1845,7 @@ struct Console {
 			float cWidth = cursorAtEnd ? getTextDim("M", cs.inputFont).w : cs.cursorWidth;
 			Rect cursorRect = rectCenDim(cursorPos, vec2(cWidth, cs.inputFont->height));
 
-			if(cursorAtEnd) cursorRect = rectAddOffset(cursorRect, vec2(rectGetDim(cursorRect).w/2, 0));
+			if(cursorAtEnd) cursorRect = rectTrans(cursorRect, vec2(rectDim(cursorRect).w/2, 0));
 			dcRect(cursorRect, cs.cursorColor + cmod);
 
 		}
@@ -1863,8 +1863,8 @@ struct Console {
 		float inputHeight = cs.inputFont->height * cs.inputHeightPadding;
 		float bodyTextHeight = cs.bodyFont->height * cs.bodyFontHeightPadding;
 		float consoleBodyHeight = consoleTotalHeight - inputHeight;
-		Rect consoleBody = rectMinDim(vec2(0, pos + inputHeight), vec2(res.w, consoleBodyHeight));
-		Rect consoleInput = rectMinDim(vec2(0, pos), vec2(res.w, inputHeight));
+		Rect consoleBody = rectBLDim(vec2(0, pos + inputHeight), vec2(res.w, consoleBodyHeight));
+		Rect consoleInput = rectBLDim(vec2(0, pos), vec2(res.w, inputHeight));
 
 
 
@@ -1873,7 +1873,7 @@ struct Console {
 
 			float scrollOffset = 0;
 
-			float consoleTextHeight = rectGetDim(consoleBody).h - cs.consolePadding.h*2;
+			float consoleTextHeight = rectDim(consoleBody).h - cs.consolePadding.h*2;
 			float heightDiff = mainBufferTextHeight - consoleTextHeight;
 
 			if(heightDiff >= 0) {
@@ -1886,7 +1886,7 @@ struct Console {
 
 				// Scrollbar cursor.
 
-				float consoleHeight = rectGetDim(consoleBody).h;
+				float consoleHeight = rectDim(consoleBody).h;
 				float scrollCursorHeight = (consoleHeight / (consoleHeight + heightDiff)) * consoleHeight;
 				clampMin(&scrollCursorHeight, cs.scrollCursorMinHeight);
 
@@ -1973,7 +1973,7 @@ struct Console {
 				Vec2 textPos = vec2(cs.consolePadding.x + preSize, pos + consoleTotalHeight + scrollOffset - cs.consolePadding.y);
 				float textStart = textPos.y;
 				float textStartX = textPos.x;
-				float wrappingWidth = rectGetDim(consoleTextRect).w - textStartX;
+				float wrappingWidth = rectDim(consoleTextRect).w - textStartX;
 
 				bool mousePressed = input->mouseButtonPressed[0];
 				bool mouseInsideConsole = pointInRect(input->mousePosNegative, consoleTextRect);
@@ -2260,7 +2260,7 @@ void textEditBox(char* text, int textMaxSize, Font* font, Rect textRect, Input* 
 	if(tes.singleLine) tes.wrapping = false;
 
 	Vec2 startPos = rectGetUL(textRect) + tev->scrollOffset;
-	int wrapWidth = tes.wrapping ? rectGetDim(textRect).w : 0;
+	int wrapWidth = tes.wrapping ? rectDim(textRect).w : 0;
 
 	int cursorIndex = tev->cursorIndex;
 	int markerIndex = tev->markerIndex;

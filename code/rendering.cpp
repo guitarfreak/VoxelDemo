@@ -663,6 +663,8 @@ struct GraphicsState {
 	GLuint samplerUnits[16];
 
 	FrameBuffer frameBuffers[FRAMEBUFFER_SIZE];
+
+	Vec2i screenRes;
 };
 
 Shader* getShader(int shaderId) {
@@ -860,7 +862,7 @@ void getUniform(uint shaderId, int shaderStage, uint uniformId, float* data) {
 void drawRect(Rect r, Vec4 color, Rect uv = rect(0,0,1,1), int texture = -1, float texZ = -1) {	
 	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_PRIMITIVE_MODE, 0);
 
-	Rect cd = rectGetCenDim(r);
+	Rect cd = rectCenDim(r);
 
 	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_MOD, cd.e);
 	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_UV, uv.min.x, uv.max.x, uv.max.y, uv.min.y);
@@ -877,7 +879,7 @@ void drawRect(Rect r, Vec4 color, Rect uv = rect(0,0,1,1), int texture = -1, flo
 }
 
 void ortho(Rect r) {
-	r = rectGetCenDim(r);
+	r = rectCenDim(r);
 
 	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_CAMERA, r.e);
 }
@@ -1064,7 +1066,7 @@ Rect getTextLineRect(char* text, Font* font, Vec2 startPos, Vec2i align = vec2i(
 	startPos = testgetTextStartPos(text, font, startPos, align, 0);
 
 	Vec2 textDim = getTextDim(text, font);
-	Rect r = rectULDim(startPos, textDim);
+	Rect r = rectTLDim(startPos, textDim);
 
 	return r;
 }
@@ -1465,7 +1467,7 @@ void executeCommandList(DrawCommandList* list, bool print = false, bool skipStri
 			case Draw_Command_Scissor_Type: {
 				dcGetStructAndIncrement(Scissor);
 				Rect r = dc.rect;
-				Vec2 dim = rectGetDim(r);
+				Vec2 dim = rectDim(r);
 				assert(dim.w >= 0 && dim.h >= 0);
 				glScissor(r.min.x, r.min.y, dim.x, dim.y);
 			} break;
