@@ -4,8 +4,34 @@
 #include <stdio.h>
 
 #define arrayCount(array) (sizeof(array) / sizeof((array)[0]))
-#define addPointer(ptr, int) ptr = (char*)ptr + int
+#define addPointer(ptr, int) ptr = (char*)ptr + (int)
 #define memberSize(type, member) sizeof(((type *)0)->member)
+#define memberOffsetSize(type, member) vec2i(offsetof(type, member), memberSize(type, member))
+#define mallocArray(type, count) (type*)malloc(sizeof(type)*(count))
+#define mallocStruct(type) (type*)malloc(sizeof(type))
+#define mallocString(count) (char*)malloc(sizeof(char)*(count))
+
+#define allocaArray(type, count) (type*)alloca(sizeof(type)*(count))
+#define allocaStruct(type) (type*)alloca(sizeof(type))
+#define allocaString(count) (char*)alloca(sizeof(char)*(count))
+
+#define zeroStruct(s, structType) zeroMemory(s, sizeof(structType));
+#define copyArray(dst, src, type, count) memCpy(dst, src, sizeof(type)*count);
+#define moveArray(dst, src, type, count) memmove(dst, src, sizeof(type)*count);
+
+#define PVEC2(v) v.x, v.y
+#define PVEC3(v) v.x, v.y, v.z
+#define PVEC4(v) v.x, v.y, v.z, v.w
+#define PRECT(r) r.left, r.bottom, r.right, r.top
+
+#define Void_Dref(type, ptr) (*((type*)ptr))
+
+#define For_Array(array, count, type) \
+	for(type* it = array; (it-array) < count; it++)
+
+#define arrayIndex(w, x, y) (y*w + x)
+#define arrayIndex3D(w, h, x, y, z) (z*h*w + y*w + x)
+
 
 int myAssert(bool check) {
 	if(!check) {
@@ -42,6 +68,32 @@ void memCpy(void* dest, void* source, int numOfBytes) {
 	char* sourcePointer = (char*)source;
 	for(int i = 0; i < numOfBytes; i++) {
 		destPointer[i] = sourcePointer[i];
+	}
+}
+
+void freeAndSetNullSave(void* data) {
+	if(data) {
+		free(data);
+		data = 0;
+	}
+}
+
+#define reallocArraySave(type, ptr, count) \
+	freeAndSetNullSave(ptr);               \
+	ptr = mallocArray(type, (count));
+
+#define reallocStructSave(type, ptr) \
+	freeAndSetNullSave(ptr);         \
+	ptr = mallocStruct(type);
+
+#define reallocStringSave(ptr, count) \
+	freeAndSetNullSave(ptr);          \
+	ptr = mallocString((count));
+
+void freeZero(void* data) {
+	if(data) {
+		free(data);
+		data = 0;
 	}
 }
 

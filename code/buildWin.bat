@@ -49,9 +49,9 @@ set LINC=%LINC% -LIBPATH:"C:\Program Files (x86)\Microsoft SDKs\Windows\v7.1A\Li
 :compilerSelectionEnd
 
 
-rem set INC=%INC% -I"..\libs\freetype 2.9\include"
-rem set LINC=%LINC% -LIBPATH:"..\libs\freetype 2.9\lib\%PLATFORM%"
-rem set LINKER_LIBS=%LINKER_LIBS% -DEFAULTLIB:freetype.lib
+set INC=%INC% -I"..\libs\freetype 2.9\include"
+set LINC=%LINC% -LIBPATH:"..\libs\freetype 2.9\lib\%PLATFORM%"
+set LINKER_LIBS=%LINKER_LIBS% -DEFAULTLIB:freetype.lib
 
 
 set BUILD_MODE=-Od
@@ -111,7 +111,7 @@ goto packShippingFolderEnd
 		del ".\%BUILD_FOLDER%\*.obj"
 	:nodelete
 
-	rem xcopy ".\libs\freetype 2.9\lib\%PLATFORM%\*.dll" ".\%BUILD_FOLDER%" /Q
+	xcopy ".\libs\freetype 2.9\lib\%PLATFORM%\*.dll" ".\%BUILD_FOLDER%" /Q
 
 	xcopy ".\README.txt" ".\%BUILD_FOLDER%" /Q
 	xcopy ".\Licenses.txt" ".\%BUILD_FOLDER%" /Q

@@ -2,6 +2,10 @@
 #define USE_SRGB 1
 const int INTERNAL_TEXTURE_FORMAT = USE_SRGB ? GL_SRGB8_ALPHA8 : GL_RGBA8;
 
+#define COLOR_SRGB(color) \
+	(globalGraphicsState->useSRGB ? colorSRGB(color) : color);
+
+
 #define editor_executable_path "C:\\Program Files\\Sublime Text 3\\sublime_text.exe"
 
 #define HOTRELOAD_SHADERS 1
@@ -15,6 +19,20 @@ const int INTERNAL_TEXTURE_FORMAT = USE_SRGB ? GL_SRGB8_ALPHA8 : GL_RGBA8;
 #endif
 
 #define GUI_SETTINGS_FILE DATA_FOLDER("guiSettings.txt")
+
+#define App_Font_Folder DATA_FOLDER("Fonts\\")
+// #define App_Image_Folder DATA_FOLDER("Images\\")
+
+#define FONT_SOURCESANS_PRO "LiberationSans-Regular.ttf"
+#define FONT_CONSOLAS "consola.ttf"
+#define FONT_CALIBRI "LiberationSans-Regular.ttf"
+
+// #define FONT_SOURCESANS_PRO "SourceSansPro-Regular.ttf"
+// #define FONT_CONSOLAS "consola.ttf"
+// #define FONT_CALIBRI "calibri.ttf"
+
+#define Windows_Font_Folder "\\Fonts\\"
+#define Windows_Font_Path_Variable "windir"
 
 //
 
@@ -78,26 +96,6 @@ char* cubeMapPaths[] = {
 	// "..\\data\\Textures\\Skyboxes\\sb3.jpg", 
 	// "..\\data\\Textures\\Skyboxes\\sb4.png", 
 	DATA_FOLDER("Textures\\Skyboxes\\xoGVD3X.jpg"),
-};
-
-//
-
-enum FontId {
-	FONT_LIBERATION_MONO = 0,
-	FONT_SOURCESANS_PRO,
-	FONT_CONSOLAS,
-	FONT_ARIAL,
-	FONT_CALIBRI,
-	FONT_SIZE,
-};
-
-char* fontPaths[] = {
-	// "..\\data\\Fonts\\LiberationMono-Bold.ttf",
-	DATA_FOLDER("Fonts\\LiberationMono-Regular.ttf"),
-	DATA_FOLDER("Fonts\\SourceSansPro-Regular.ttf"),
-	DATA_FOLDER("Fonts\\consola.ttf"),
-	DATA_FOLDER("Fonts\\arial.ttf"),
-	DATA_FOLDER("Fonts\\calibri.ttf"),
 };
 
 //

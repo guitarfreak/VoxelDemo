@@ -490,15 +490,40 @@ void recreateTexture(Texture* t) {
 // Fonts.
 //
 
+struct PackedChar {
+   unsigned short x0,y0,x1,y1;
+   float xBearing, yBearing;
+   float width, height;
+   float xadvance; // yBearing + h-yBearing
+};
+
 struct Font {
+	char* file;
 	int id;
+	float heightIndex;
+
+	FT_Library library;
+	FT_Face face;
+
+	float pixelScale;
+
 	char* fileBuffer;
 	Texture tex;
-	int glyphStart, glyphCount;
-	stbtt_bakedchar* cData;
+	Vec2i glyphRanges[5];
+	int glyphRangeCount;
+	int totalGlyphCount;
+
+	PackedChar* cData;
 	int height;
 	float baseOffset;
+	float lineSpacing;
+
+	Font* boldFont;
+	Font* italicFont;
+
+	bool pixelAlign;
 };
+
 
 // 
 // Meshes.
@@ -656,8 +681,12 @@ struct GraphicsState {
 	Texture cubeMaps[CUBEMAP_SIZE];
 	Texture textures3d[2];
 	GLuint samplers[SAMPLER_SIZE];
-	Font fonts[FONT_SIZE][20];
 	Mesh meshs[MESH_SIZE];
+
+	Font fonts[10][20];
+	int fontsCount;
+	char* fontFolders[10];
+	int fontFolderCount;
 
 	GLuint textureUnits[16];
 	GLuint samplerUnits[16];
@@ -665,6 +694,9 @@ struct GraphicsState {
 	FrameBuffer frameBuffers[FRAMEBUFFER_SIZE];
 
 	Vec2i screenRes;
+
+	float zOrder;
+	bool useSRGB;
 };
 
 Shader* getShader(int shaderId) {
@@ -709,58 +741,209 @@ FrameBuffer* getFrameBuffer(int id) {
 	return fb;
 }
 
-Font* getFont(int fontId, int height) {
 
-	// Search if Font in this size exists, if not create it.
 
-	int fontSlots = arrayCount(globalGraphicsState->fonts[0]);
-	Font* fontArray = globalGraphicsState->fonts[fontId];
-	Font* fontSlot = 0;
-	for(int i = 0; i < fontSlots; i++) {
-		int fontHeight = fontArray[i].height;
-		if(fontHeight == height || fontHeight == 0) {
-			fontSlot = fontArray + i;
+#define Font_Error_Glyph (int)0x20-1
+
+Font* fontInit(Font* fontSlot, char* file, float height, bool enableHinting = false) {
+	char* fontFolder = 0;
+	for(int i = 0; i < globalGraphicsState->fontFolderCount; i++) {
+		if(fileExists(fillString("%s%s", globalGraphicsState->fontFolders[i], file))) {
+			fontFolder = globalGraphicsState->fontFolders[i];
 			break;
 		}
 	}
+	if(!fontFolder) return 0;
+
+	char* path = fillString("%s%s", fontFolder, file);
+
+
+
+	Font font;
+
+	// Settings.
+	
+	bool stemDarkening = true;
+	bool pixelAlign = true;
+	
+	// FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING | FT_LOAD_NO_AUTOHINT | FT_LOAD_FORCE_AUTOHINT
+	// FT_LOAD_TARGET_NORMAL | FT_LOAD_TARGET_LIGHT | FT_LOAD_TARGET_MONO
+
+
+	int loadFlags = FT_LOAD_DEFAULT | FT_LOAD_FORCE_AUTOHINT | FT_LOAD_TARGET_NORMAL;
+	// int loadFlags = FT_LOAD_DEFAULT | FT_LOAD_TARGET_LCD;
+
+	
+	// FT_RENDER_MODE_NORMAL, FT_RENDER_MODE_LIGHT, FT_RENDER_MODE_MONO, FT_RENDER_MODE_LCD, FT_RENDER_MODE_LCD_V,
+	FT_Render_Mode renderFlags = FT_RENDER_MODE_NORMAL;
+	// FT_Render_Mode renderFlags = FT_RENDER_MODE_LCD;
+
+
+	font.glyphRangeCount = 0;
+	#define setupRange(a,b) vec2i(a, b - a + 1)
+	font.glyphRanges[font.glyphRangeCount++] = setupRange(0x20, 0x7F);
+	font.glyphRanges[font.glyphRangeCount++] = setupRange(0xA1, 0xFF);
+	font.glyphRanges[font.glyphRangeCount++] = setupRange(0x25BA, 0x25C4);
+	// font.glyphRanges[font.glyphRangeCount++] = setupRange(0x48, 0x49);
+	#undef setupRange
+
+	font.totalGlyphCount = 0;
+	for(int i = 0; i < font.glyphRangeCount; i++) font.totalGlyphCount += font.glyphRanges[i].y;
+
+
+
+	font.file = getPString(strLen(file)+1);
+	strCpy(font.file, file);
+	font.heightIndex = height;
+
+	int error;
+	error = FT_Init_FreeType(&font.library); assert(error == 0);
+	error = FT_New_Face(font.library, path, 0, &font.face); assert(error == 0);
+	FT_Face face = font.face;
+
+	FT_Parameter parameter;
+	FT_Bool darkenBool = stemDarkening;
+	parameter.tag = FT_PARAM_TAG_STEM_DARKENING;
+	parameter.data = &darkenBool;
+	error = FT_Face_Properties(face, 1, &parameter); assert(error == 0);
+
+	int pointFraction = 64;
+	font.pixelScale = (float)1/pointFraction;
+	float fullHeightToAscend = (float)face->ascender / (float)(face->ascender + abs(face->descender));
+
+	// Height < 0 means use point size instead of pixel size
+	if(height > 0) {
+		error = FT_Set_Pixel_Sizes(font.face, 0, roundInt(height) * fullHeightToAscend); assert(error == 0);
+	} else {
+		error = FT_Set_Char_Size(font.face, 0, (roundInt(-height) * fullHeightToAscend) * pointFraction, 0, 0); assert(error == 0);
+	}
+
+	// Get true height from freetype.
+	font.height = (face->size->metrics.ascender + abs(face->size->metrics.descender)) / pointFraction;
+	font.baseOffset = (face->size->metrics.ascender / pointFraction);
+
+	// We calculate the scaling ourselves because Freetype doesn't offer it??
+	float scale = (float)face->size->metrics.ascender / (float)face->ascender;
+	font.lineSpacing = roundInt(((face->height * scale) / pointFraction));
+	font.pixelAlign = pixelAlign;
+
+
+
+	int gridSize = (sqrt(font.totalGlyphCount) + 1);
+	Vec2i texSize = vec2i(gridSize * font.height);
+	uchar* fontBitmapBuffer = mallocArray(unsigned char, texSize.x*texSize.y);
+	memSet(fontBitmapBuffer, 0, texSize.x*texSize.y);
+
+	{
+		font.cData = mallocArray(PackedChar, font.totalGlyphCount);
+		int glyphIndex = 0;
+		for(int rangeIndex = 0; rangeIndex < font.glyphRangeCount; rangeIndex++) {
+			for(int i = 0; i < font.glyphRanges[rangeIndex].y; i++) {
+				int unicode = font.glyphRanges[rangeIndex].x + i;
+
+				FT_Load_Char(face, unicode, loadFlags);
+				FT_Render_Glyph(face->glyph, renderFlags);
+
+				FT_Bitmap* bitmap = &face->glyph->bitmap;
+				Vec2i coordinate = vec2i(glyphIndex%gridSize, glyphIndex/gridSize);
+				Vec2i startPixel = coordinate * font.height;
+
+				font.cData[glyphIndex].x0 = startPixel.x;
+				font.cData[glyphIndex].x1 = startPixel.x + bitmap->width;
+				font.cData[glyphIndex].y1 = startPixel.y + bitmap->rows;
+				font.cData[glyphIndex].y0 = startPixel.y;
+
+				font.cData[glyphIndex].xBearing = face->glyph->metrics.horiBearingX / pointFraction;
+				font.cData[glyphIndex].yBearing = face->glyph->metrics.horiBearingY / pointFraction;
+				font.cData[glyphIndex].width =    face->glyph->metrics.width        / pointFraction;
+				font.cData[glyphIndex].height =   face->glyph->metrics.height       / pointFraction;
+
+				font.cData[glyphIndex].xadvance = face->glyph->metrics.horiAdvance / pointFraction;
+
+				for(int y = 0; y < bitmap->rows; y++) {
+					for(int x = 0; x < bitmap->width; x++) {
+						Vec2i coord = startPixel + vec2i(x,y);
+						fontBitmapBuffer[coord.y*texSize.w + coord.x] = bitmap->buffer[y*bitmap->width + x];
+					}
+				}
+
+				glyphIndex++;
+			}
+		}
+	}
+
+
+	Texture tex;
+	uchar* fontBitmap = mallocArray(unsigned char, texSize.x*texSize.y*4);
+	memSet(fontBitmap, 255, texSize.w*texSize.h*4);
+	for(int i = 0; i < texSize.w*texSize.h; i++) fontBitmap[i*4+3] = fontBitmapBuffer[i];
+
+	// loadTexture(&tex, fontBitmap, texSize.w, texSize.h, 1, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE);
+	loadTexture(&tex, fontBitmap, texSize.w, texSize.h, 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+
+	font.tex = tex;
+
+
+	free(fontBitmapBuffer);
+	free(fontBitmap);
+
+	*fontSlot = font;
+	return fontSlot;
+}
+
+void freeFont(Font* font) {
+	freeZero(font->cData);
+	// FT_Done_Face(font->face);
+	// FT_Done_Library(font->library);
+	glDeleteTextures(1, &font->tex.id);
+	font->heightIndex = 0;
+}
+
+Font* getFont(char* fontFile, float heightIndex, char* boldFontFile = 0, char* italicFontFile = 0) {
+
+	int fontCount = arrayCount(globalGraphicsState->fonts);
+	int fontSlotCount = arrayCount(globalGraphicsState->fonts[0]);
+	Font* fontSlot = 0;
+	for(int i = 0; i < fontCount; i++) {
+		if(globalGraphicsState->fonts[i][0].heightIndex == 0) {
+			fontSlot = &globalGraphicsState->fonts[i][0];
+			break;
+		} else {
+			if(strCompare(fontFile, globalGraphicsState->fonts[i][0].file)) {
+				for(int j = 0; j < fontSlotCount; j++) {
+					float h = globalGraphicsState->fonts[i][j].heightIndex;
+					if(h == 0 || h == heightIndex) {
+						fontSlot = &globalGraphicsState->fonts[i][j];
+						goto forEnd;
+					}
+				}
+			}
+		}
+	}
+	forEnd:
 
 	// We are going to assume for now that a font size of 0 means it is uninitialized.
-
-	if(fontSlot->height == 0) {
-		Font font;
-		char* path = fontPaths[fontId];
-
-		// font.fileBuffer = (char*)getPMemory(fileSize(path) + 1);
-		char* fileBuffer = getTArray(char, fileSize(path) + 1);
-
-		readFileToBuffer(fileBuffer, path);
-		Vec2i size = vec2i(512,512);
-		unsigned char* fontBitmapBuffer = (unsigned char*)getTMemory(size.x*size.y);
-		unsigned char* fontBitmap = (unsigned char*)getTMemory(size.x*size.y*4);
-		
-		font.id = fontId;
-		font.height = height;
-		font.baseOffset = 0.8f;
-		font.glyphStart = 32;
-		font.glyphCount = 95;
-		font.cData = (stbtt_bakedchar*)getPMemory(sizeof(stbtt_bakedchar)*font.glyphCount);
-		stbtt_BakeFontBitmap((unsigned char*)fileBuffer, 0, font.height, fontBitmapBuffer, size.w, size.h, font.glyphStart, font.glyphCount, font.cData);
-		for(int i = 0; i < size.w*size.h; i++) {
-			fontBitmap[i*4] = fontBitmapBuffer[i];
-			fontBitmap[i*4+1] = fontBitmapBuffer[i];
-			fontBitmap[i*4+2] = fontBitmapBuffer[i];
-			fontBitmap[i*4+3] = fontBitmapBuffer[i];
+	if(fontSlot->heightIndex == 0) {
+		Font* font = fontInit(fontSlot, fontFile, heightIndex);
+		if(!font) {
+			printf("Could not initialize font!\n");
+			exit(0);
 		}
 
-		Texture tex;
-		loadTexture(&tex, fontBitmap, size.w, size.h, 1, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
-		font.tex = tex;
+		if(boldFontFile) {
+			fontSlot->boldFont = getPStruct(Font);
+			fontInit(fontSlot->boldFont, boldFontFile, heightIndex);
+		} else font->boldFont = 0;
 
-		*fontSlot = font;
+		if(italicFontFile) {
+			fontSlot->italicFont = getPStruct(Font);
+			fontInit(fontSlot->italicFont, italicFontFile, heightIndex);
+		} else font->italicFont = 0;
 	}
 
 	return fontSlot;
 }
+
 
 void bindShader(int shaderId) {
 	int shader = globalGraphicsState->shaders[shaderId].program;
@@ -898,8 +1081,7 @@ void perspective(float fov, float aspect, float n, float f) {
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_PROJ, proj.e);
 }
 
-
-
+//
 
 enum TextStatus {
 	TEXTSTATUS_END = 0, 
@@ -909,19 +1091,133 @@ enum TextStatus {
 	TEXTSTATUS_SIZE, 
 };
 
-void getTextQuad(char c, Font* font, Vec2 pos, Rect* r, Rect* uv) {
-	stbtt_aligned_quad q;
-	stbtt_GetBakedQuad(font->cData, font->tex.dim.w, font->tex.dim.h, c-font->glyphStart, pos.x, pos.y, &q);
-
-	float baseLine = 0.8f;
-	float off = baseLine * font->height;
-
-	*r = rect(q.x0, q.y0 - off, q.x1, q.y1 - off);
-	*uv = rect(q.s0, q.t0, q.s1, q.t1);
+inline char getRightBits(char n, int count) {
+	int bitMask = 0;
+	for(int i = 0; i < count; i++) bitMask += (1 << i);
+	return n&bitMask;
 }
 
-float getCharAdvance(char c, Font* font) {
-	float result = stbtt_GetCharAdvance(font->cData, c-font->glyphStart);
+int unicodeDecode(uchar* s, int* byteCount) {
+	if(s[0] <= 127) {
+		*byteCount = 1;
+		return s[0];
+	}
+
+	int bitCount = 1;
+	for(;;) {
+		char bit = (1 << 8-bitCount-1);
+		if(s[0]&bit) bitCount++;
+		else break;
+	}
+
+	(*byteCount) = bitCount;
+
+	int unicodeChar = 0;
+	for(int i = 0; i < bitCount; i++) {
+		char byte = i==0 ? getRightBits(s[i], 8-(bitCount+1)) : getRightBits(s[i], 6);
+
+		unicodeChar += ((int)byte) << (6*((bitCount-1)-i));
+	}
+
+	return unicodeChar;
+}
+
+int unicodeGetSize(uchar* s) {
+	if(s[0] <= 127) return 1;
+
+	int bitCount = 1;
+	for(;;) {
+		char bit = (1 << 8-bitCount-1);
+		if(s[0]&bit) bitCount++;
+		else break;
+	}
+
+	return bitCount;
+}
+
+int getUnicodeRangeOffset(int c, Font* font) {
+	int unicodeOffset = -1;
+
+	bool found = false;
+	for(int i = 0; i < font->glyphRangeCount; i++) {
+		if(valueBetweenInt(c, font->glyphRanges[i].x, font->glyphRanges[i].x+font->glyphRanges[i].y)) {
+			unicodeOffset += c - font->glyphRanges[i].x + 1;
+			found = true;
+			break;
+		}
+		unicodeOffset += font->glyphRanges[i].y;
+	}
+
+	if(!found) {
+		if(c == Font_Error_Glyph) return 0;
+		unicodeOffset = getUnicodeRangeOffset(Font_Error_Glyph, font);
+	}
+
+	return unicodeOffset;
+}
+
+static int counter = 0;
+static __int64 total = 0;
+
+// Taken from stbtt_truetype.
+void getPackedQuad(PackedChar *chardata, Vec2i texDim, int char_index, Vec2 pos, Rect* r, Rect* uv, int alignToInteger)
+{
+   PackedChar *b = chardata + char_index;
+
+   if (alignToInteger) {
+   	  *r = rectBLDim(roundFloat(pos.x + b->xBearing), roundFloat(pos.y - (b->height - b->yBearing)), b->width, b->height);
+
+   	  (*r).left = roundFloat(pos.x + b->xBearing);
+   	  (*r).bottom = roundFloat(pos.y - (b->height - b->yBearing));
+   	  (*r).right = (*r).left + b->width;
+   	  (*r).top = (*r).bottom + b->height;
+
+   } else {
+   	  // *r = rectBLDim(pos.x + b->xBearing, pos.y - (b->height - b->yBearing), b->width, b->height);
+
+   	  (*r).left = pos.x + b->xBearing;
+   	  (*r).bottom = pos.y - (b->height - b->yBearing);
+   	  (*r).right = (*r).left + b->width;
+   	  (*r).top = (*r).bottom + b->height;
+   }
+
+   Vec2 ip = vec2(1.0f / texDim.w, 1.0f / texDim.h);
+   *uv = rect(b->x0*ip.x, b->y0*ip.y, b->x1*ip.x, b->y1*ip.y);
+}
+
+void getTextQuad(int c, Font* font, Vec2 pos, Rect* r, Rect* uv) {
+
+	int unicodeOffset = getUnicodeRangeOffset(c, font);
+	getPackedQuad(font->cData, font->tex.dim, unicodeOffset, pos, r, uv, font->pixelAlign);
+
+	float off = font->baseOffset;
+	if(font->pixelAlign) off = roundInt(off);
+	r->bottom -= off;
+	r->top -= off;
+}
+
+float getCharAdvance(int c, Font* font) {
+	int unicodeOffset = getUnicodeRangeOffset(c, font);
+	float result = font->cData[unicodeOffset].xadvance;
+	return result;
+}
+
+float getCharAdvance(int c, int c2, Font* font) {
+	int unicodeOffset = getUnicodeRangeOffset(c, font);
+	float result = font->cData[unicodeOffset].xadvance;
+
+	if(FT_HAS_KERNING(font->face)) {
+		FT_Vector kerning;
+
+		uint charIndex1 = FT_Get_Char_Index(font->face, c);
+		uint charIndex2 = FT_Get_Char_Index(font->face, c2);
+
+		FT_Get_Kerning(font->face, charIndex1, charIndex2, FT_KERNING_DEFAULT, &kerning);
+		float kernAdvance = kerning.x * font->pixelScale;
+
+		result += kernAdvance;
+	}
+
 	return result;
 }
 
@@ -945,16 +1241,125 @@ struct TextSimInfo {
 
 	bool lineBreak;
 	Vec2 breakPos;
+
+	bool bold;
+	bool italic;
+
+	bool colorMode;
+	Vec3 colorOverwrite;
 };
 
 TextSimInfo initTextSimInfo(Vec2 startPos) {
-	TextSimInfo tsi;
+	TextSimInfo tsi = {};
 	tsi.pos = startPos;
 	tsi.index = 0;
 	tsi.wrapIndex = 0;
 	tsi.lineBreak = false;
 	tsi.breakPos = vec2(0,0);
 	return tsi;
+}
+
+enum {
+	TEXT_MARKER_BOLD = 0,
+	TEXT_MARKER_ITALIC,
+	TEXT_MARKER_COLOR,
+};
+
+#define Marker_Size 3
+#define Bold_Marker "<b>"
+#define Italic_Marker "<i>"
+#define Color_Marker "<c>"
+
+// The marker system is badly designed and has all kinds of edge cases where it breaks if you
+// don't pay attention, so... put markers in sparingly.
+
+int parseTextMarkers(char* text, TextSimInfo* tsi, int* type = 0) {
+	// Return how many characters to skip.
+
+	if(text[0] == '<') {
+		if(text[1] != '\0' && text[2] != '\0' && text[2] == '>') {
+			switch(text[1]) {
+				case 'b': if(type) { *type = TEXT_MARKER_BOLD; } return Marker_Size;
+				case 'i': if(type) { *type = TEXT_MARKER_ITALIC; } return Marker_Size;
+				case 'c': if(type) { *type = TEXT_MARKER_COLOR; } 
+					if(tsi->colorMode) return Marker_Size;
+					else return Marker_Size + 6; // FFFFFF
+			}
+		}
+	}
+
+	return 0;
+}
+
+void updateMarkers(char* text, TextSimInfo* tsi, Font* font, bool skip = false) {
+
+	int type;
+	int length = 0;
+	while(length = parseTextMarkers(text + tsi->index, tsi, &type)) {
+		switch(type) {
+			case TEXT_MARKER_BOLD: {
+				tsi->index += length;
+				tsi->wrapIndex += length;
+
+				if(!font->boldFont) return;
+				if(!skip) {
+					if(!tsi->bold) {
+						glEnd();
+						glBindTexture(GL_TEXTURE_2D, font->boldFont->tex.id);
+						glBegin(GL_QUADS);
+					} else {
+						glEnd();
+						glBindTexture(GL_TEXTURE_2D, font->tex.id);
+						glBegin(GL_QUADS);
+					}
+				}
+
+				tsi->bold = !tsi->bold;
+			} break;
+
+			case TEXT_MARKER_ITALIC: {
+				tsi->index += length;
+				tsi->wrapIndex += length;
+
+				if(!font->italicFont) return;
+				if(!skip) {
+					if(!tsi->italic && font->italicFont) {
+						glEnd();
+						glBindTexture(GL_TEXTURE_2D, font->italicFont->tex.id);
+						glBegin(GL_QUADS);
+					} else {
+						glEnd();
+						glBindTexture(GL_TEXTURE_2D, font->tex.id);
+						glBegin(GL_QUADS);
+					}
+				}
+
+				tsi->italic = !tsi->italic;
+			} break;
+
+			case TEXT_MARKER_COLOR: {
+				if(skip) {
+					tsi->index += length;
+					tsi->wrapIndex += length;
+					if(type == TEXT_MARKER_COLOR) tsi->colorMode = !tsi->colorMode;
+					continue;
+				} 
+				tsi->index += Marker_Size;
+				tsi->wrapIndex += Marker_Size;
+				Vec3 c;
+				if(!tsi->colorMode) {
+					c.r = colorIntToFloat(strHexToInt(getTStringCpy(&text[tsi->index], 2))); tsi->index += 2;
+					c.g = colorIntToFloat(strHexToInt(getTStringCpy(&text[tsi->index], 2))); tsi->index += 2;
+					c.b = colorIntToFloat(strHexToInt(getTStringCpy(&text[tsi->index], 2))); tsi->index += 2;
+					tsi->colorOverwrite = COLOR_SRGB(c);
+					
+					tsi->wrapIndex += 6;
+				}
+
+				tsi->colorMode = !tsi->colorMode;
+			} break;
+		}
+	}
 }
 
 int textSim(char* text, Font* font, TextSimInfo* tsi, TextInfo* ti, Vec2 startPos = vec2(0,0), int wrapWidth = 0) {
@@ -975,20 +1380,37 @@ int textSim(char* text, Font* font, TextSimInfo* tsi, TextInfo* ti, Vec2 startPo
 	Vec2 oldPos = tsi->pos;
 
 	int i = tsi->index;
-	char t = text[i];
+	int tSize;
+	int t = unicodeDecode((uchar*)(&text[i]), &tSize);
 
 	bool wrapped = false;
 
 	if(wrapWidth != 0 && i == tsi->wrapIndex) {
-		char c = text[i];
+		int size;
+		int c = unicodeDecode((uchar*)(&text[i]), &size);
 		float wordWidth = 0;
 		if(c == '\n') wordWidth = getCharAdvance(c, font);
 
+		char* tempText = text;
 		int it = i;
 		while(c != '\n' && c != '\0' && c != ' ') {
+
+			// Awkward.
+			bool hadMarker = false;
+			int markerLength = 0;
+			while(markerLength = parseTextMarkers(tempText + it, tsi)) {
+				// Pretend markers aren't there by moving text pointer.
+				tempText += markerLength;
+				hadMarker = true;
+			}
+			if(hadMarker) {
+				c = unicodeDecode((uchar*)(&tempText[it]), &size);
+				continue;
+			}
+
 			wordWidth += getCharAdvance(c, font);
-			it++;
-			c = text[it];
+			it += size;
+			c = unicodeDecode((uchar*)(&tempText[it]), &size);
 		}
 
 		if(tsi->pos.x + wordWidth > startPos.x + wrapWidth) {
@@ -1005,14 +1427,20 @@ int textSim(char* text, Font* font, TextSimInfo* tsi, TextInfo* ti, Vec2 startPo
 		if(wrapped) tsi->breakPos = tsi->pos;
 
 		tsi->pos.x = startPos.x;
-		tsi->pos.y -= font->height;
+		// tsi->pos.y -= font->height;
+		tsi->pos.y -= font->lineSpacing;
 
 		if(wrapped) {
 			return textSim(text, font, tsi, ti, startPos, wrapWidth);
 		}
 	} else {
 		getTextQuad(t, font, tsi->pos, &ti->r, &ti->uv);
-		tsi->pos.x += getCharAdvance(t, font);
+
+		if(text[i+1] != '\0') {
+			int tSize2;
+			int t2 = unicodeDecode((uchar*)(&text[i+tSize]), &tSize2);
+			tsi->pos.x += getCharAdvance(t, t2, font);
+		} else tsi->pos.x += getCharAdvance(t, font);
 	}
 
 	if(ti) {
@@ -1021,30 +1449,54 @@ int textSim(char* text, Font* font, TextSimInfo* tsi, TextInfo* ti, Vec2 startPo
 		ti->posAdvance = tsi->pos - oldPos;
 	}
 
-	tsi->index++;
+	tsi->index += tSize;
 
 	return 1;
 }
 
-float getTextHeight(char* text, Font* font, Vec2 startPos = vec2(0,0), int wrapWidth = 0) {
+struct TextSettings {
+	Font* font;
+	Vec4 color;
 
-	TextSimInfo tsi = initTextSimInfo(startPos);
-	while(true) {
-		TextInfo ti;
-		if(!textSim(text, font, &tsi, &ti, startPos, wrapWidth)) break;
-	}
+	int shadowMode;
+	Vec2 shadowDir;
+	float shadowSize;
+	Vec4 shadowColor;
 
-	float height = startPos.y - (tsi.pos.y - font->height);
-	return height;
+	bool srgb;
+
+	bool cull;
+};
+
+TextSettings textSettings(Font* font, Vec4 color, int shadowMode, Vec2 shadowDir, float shadowSize, Vec4 shadowColor) {
+	return {font, color, shadowMode, shadowDir, shadowSize, shadowColor};
 }
+TextSettings textSettings(Font* font, Vec4 color, int shadowMode, float shadowSize, Vec4 shadowColor) {
+	return {font, color, shadowMode, vec2(-1,-1), shadowSize, shadowColor};
+}
+TextSettings textSettings(Font* font, Vec4 color) {
+	return {font, color};
+}
+
+
+enum {
+	TEXTSHADOW_MODE_NOSHADOW = 0,
+	TEXTSHADOW_MODE_SHADOW,
+	TEXTSHADOW_MODE_OUTLINE,
+};
 
 Vec2 getTextDim(char* text, Font* font, Vec2 startPos = vec2(0,0), int wrapWidth = 0) {
 	float maxX = startPos.x;
 
 	TextSimInfo tsi = initTextSimInfo(startPos);
 	while(true) {
+		Font* f = font;
+		updateMarkers(text, &tsi, font, true);
+		if(tsi.bold) f = font->boldFont;
+		else if(tsi.italic) f = font->italicFont;
+
 		TextInfo ti;
-		if(!textSim(text, font, &tsi, &ti, startPos, wrapWidth)) break;
+		if(!textSim(text, f, &tsi, &ti, startPos, wrapWidth)) break;
 
 		maxX = max(maxX, ti.pos.x + ti.posAdvance.x);
 	}
@@ -1071,46 +1523,169 @@ Rect getTextLineRect(char* text, Font* font, Vec2 startPos, Vec2i align = vec2i(
 	return r;
 }
 
-void drawText(char* text, Font* font, Vec2 startPos, Vec4 color, Vec2i align = vec2i(-1,1), int wrapWidth = 0) {
+void drawText(char* text, Vec2 startPos, Vec2i align, int wrapWidth, TextSettings settings) {
+	float z = globalGraphicsState->zOrder;
+	Font* font = settings.font;
+
+	int cullWidth = wrapWidth;
+	if(settings.cull) wrapWidth = 0;
+
 	startPos = testgetTextStartPos(text, font, startPos, align, wrapWidth);
-	startPos = vec2(roundInt((int)startPos.x), roundInt((int)startPos.y));
+
+	// if(!settings.srgb) setSRGB(false);
+
+	Vec4 c = COLOR_SRGB(settings.color);
+	Vec4 sc = COLOR_SRGB(settings.shadowColor);
+
+	// pushColor(c);
+
+	int texId = font->tex.id;
+	// glBindTexture(GL_TEXTURE_2D, texId);
+	// glBegin(GL_QUADS);
 
 	TextSimInfo tsi = initTextSimInfo(startPos);
 	while(true) {
+		
+		Font* f = font;
+		updateMarkers(text, &tsi, font);
+		if(tsi.bold) f = font->boldFont;
+		else if(tsi.italic) f = font->italicFont;
+
 		TextInfo ti;
-		if(!textSim(text, font, &tsi, &ti, startPos, wrapWidth)) break;
+		if(!textSim(text, f, &tsi, &ti, startPos, wrapWidth)) break;
 		if(text[ti.index] == '\n') continue;
 
-		drawRect(ti.r, color, ti.uv, font->tex.id);
+		if(settings.cull && (ti.pos.x > startPos.x + cullWidth)) break;
+
+		if(settings.shadowMode != TEXTSHADOW_MODE_NOSHADOW) {
+			// pushColor(sc);
+
+			if(settings.shadowMode == TEXTSHADOW_MODE_SHADOW) {
+				Vec2 p = ti.r.min + normVec2(settings.shadowDir) * settings.shadowSize;
+				Rect sr = rectBLDim(vec2(roundFloat(p.x), roundFloat(p.y)), rectDim(ti.r));
+
+				// pushRect(sr, ti.uv, z);
+				drawRect(sr, sc, ti.uv, texId);
+
+			} else if(settings.shadowMode == TEXTSHADOW_MODE_OUTLINE) {
+				for(int i = 0; i < 8; i++) {
+					
+					// Not sure if we should align to pixels on an outline.
+
+					Vec2 dir = rotateVec2(vec2(1,0), (M_2PI/8)*i);
+					Rect r = rectTrans(ti.r, dir*settings.shadowSize);
+					// pushRect(r, ti.uv, z);
+					drawRect(r, sc, ti.uv, texId);
+
+
+					// Vec2 dir = rotateVec2(vec2(1,0), (M_2PI/8)*i);
+					// Vec2 p = ti.r.min + dir * settings.shadowSize;
+					// Rect sr = rectBLDim(vec2(roundFloat(p.x), roundFloat(p.y)), rectDim(ti.r));
+					// pushRect(sr, ti.uv, z);
+				}
+			}
+		}
+
+		// if(tsi.colorMode) pushColor(vec4(tsi.colorOverwrite, 1));
+		// else pushColor(c);
+
+		// pushRect(ti.r, ti.uv, z);
+		drawRect(ti.r, c, ti.uv, texId);
 	}
+	
+	// glEnd();
+
+	// if(!settings.srgb) setSRGB();
+}
+void drawText(char* text, Vec2 startPos, TextSettings settings) {
+	return drawText(text, startPos, vec2i(-1,1), 0, settings);
+}
+void drawText(char* text, Vec2 startPos, Vec2i align, TextSettings settings) {
+	return drawText(text, startPos, align, 0, settings);
 }
 
-void drawTextLineCulled(char* text, Font* font, Vec2 startPos, float width, Vec4 color, Vec2i align = vec2i(-1,1)) {
-	startPos = testgetTextStartPos(text, font, startPos, align, 0);
-	startPos = vec2(roundInt((int)startPos.x), roundInt((int)startPos.y));
+// // @CodeDuplication.
+// void drawTextLineCulled(char* text, Vec2 startPos, Vec2i align, int width, TextSettings settings) {
+// 	float z = globalGraphicsState->zOrder;
+// 	Font* font = settings.font;
 
-	TextSimInfo tsi = initTextSimInfo(startPos);
-	while(true) {
-		TextInfo ti;
-		if(!textSim(text, font, &tsi, &ti, startPos, 0)) break;
-		if(text[ti.index] == '\n') continue;
+// 	startPos = testgetTextStartPos(text, font, startPos, align, wrapWidth);
 
-		if(ti.pos.x > startPos.x + width) break;
+// 	Vec4 c = COLOR_SRGB(settings.color);
+// 	Vec4 sc = COLOR_SRGB(settings.shadowColor);
 
-		drawRect(ti.r, color, ti.uv, font->tex.id);
-	}
-}
+// 	TextSimInfo tsi = initTextSimInfo(startPos);
+// 	while(true) {
+		
+// 		Font* f = font;
+// 		updateMarkers(text, &tsi, font);
+// 		if(tsi.bold) f = font->boldFont;
+// 		else if(tsi.italic) f = font->italicFont;
+
+// 		TextInfo ti;
+// 		if(!textSim(text, f, &tsi, &ti, startPos, wrapWidth)) break;
+// 		if(text[ti.index] == '\n') continue;
+
+// 		if(ti.pos.x > startPos.x + width) break;
+
+// 		if(settings.shadowMode != TEXTSHADOW_MODE_NOSHADOW) {
+
+// 			if(settings.shadowMode == TEXTSHADOW_MODE_SHADOW) {
+// 				Vec2 p = ti.r.min + normVec2(settings.shadowDir) * settings.shadowSize;
+// 				Rect sr = rectBLDim(vec2(roundFloat(p.x), roundFloat(p.y)), rectDim(ti.r));
+
+// 				drawRect(sr, sc, ti.uv, font->tex.id);
+
+// 			} else if(settings.shadowMode == TEXTSHADOW_MODE_OUTLINE) {
+// 				for(int i = 0; i < 8; i++) {
+					
+// 					Vec2 dir = rotateVec2(vec2(1,0), (M_2PI/8)*i);
+// 					Rect r = rectTrans(ti.r, dir*settings.shadowSize);
+// 					drawRect(r, sc, ti.uv, font->tex.id);
+// 				}
+// 			}
+// 		}
+
+// 		drawRect(ti.r, c, ti.uv, font->tex.id);
+// 	}
+// }
+
+// void drawTextLineCulled(char* text, Font* font, Vec2 startPos, float width, Vec4 color, Vec2i align = vec2i(-1,1)) {
+// 	startPos = testgetTextStartPos(text, font, startPos, align, 0);
+// 	startPos = vec2(roundInt((int)startPos.x), roundInt((int)startPos.y));
+
+// 	TextSimInfo tsi = initTextSimInfo(startPos);
+// 	while(true) {
+// 		Font* f = font;
+// 		updateMarkers(text, &tsi, font, true);
+// 		if(tsi.bold) f = font->boldFont;
+// 		else if(tsi.italic) f = font->italicFont;
+
+// 		TextInfo ti;
+// 		if(!textSim(text, f, &tsi, &ti, startPos, 0)) break;
+// 		if(text[ti.index] == '\n') continue;
+
+// 		if(ti.pos.x > startPos.x + width) break;
+
+// 		drawRect(ti.r, color, ti.uv, f->tex.id);
+// 	}
+// }
 
 Vec2 textIndexToPos(char* text, Font* font, Vec2 startPos, int index, Vec2i align = vec2i(-1,1), int wrapWidth = 0) {
 	startPos = testgetTextStartPos(text, font, startPos, align, wrapWidth);
 
 	TextSimInfo tsi = initTextSimInfo(startPos);
 	while(true) {
+		Font* f = font;
+		updateMarkers(text, &tsi, font, true);
+		if(tsi.bold) f = font->boldFont;
+		else if(tsi.italic) f = font->italicFont;
+
 		TextInfo ti;
-		int result = textSim(text, font, &tsi, &ti, startPos, wrapWidth);
+		int result = textSim(text, f, &tsi, &ti, startPos, wrapWidth);
 
 		if(ti.index == index) {
-			Vec2 pos = ti.pos - vec2(0, font->height/2);
+			Vec2 pos = ti.pos - vec2(0, f->height/2);
 			return pos;
 		}
 
@@ -1120,7 +1695,7 @@ Vec2 textIndexToPos(char* text, Font* font, Vec2 startPos, int index, Vec2i alig
 	return vec2(0,0);
 }
 
-void drawTextSelection(char* text, Font* font, Vec2 startPos, int index1, int index2, Vec4 color, Vec2i align = vec2i(-1,1), int wrapWidth = 0, DrawCommandList* drawList = 0) {
+void drawTextSelection(char* text, Font* font, Vec2 startPos, int index1, int index2, Vec4 color, Vec2i align = vec2i(-1,1), int wrapWidth = 0) {
 	if(index1 == index2) return;
 	if(index1 > index2) swap(&index1, &index2);
 
@@ -1131,8 +1706,13 @@ void drawTextSelection(char* text, Font* font, Vec2 startPos, int index1, int in
 
 	TextSimInfo tsi = initTextSimInfo(startPos);
 	while(true) {
+		Font* f = font;
+		updateMarkers(text, &tsi, font, true);
+		if(tsi.bold) f = font->boldFont;
+		else if(tsi.italic) f = font->italicFont;
+
 		TextInfo ti;
-		int result = textSim(text, font, &tsi, &ti, startPos, wrapWidth);
+		int result = textSim(text, f, &tsi, &ti, startPos, wrapWidth);
 
 		bool endReached = ti.index == index2;
 
@@ -1144,8 +1724,8 @@ void drawTextSelection(char* text, Font* font, Vec2 startPos, int index1, int in
 				else if(!result) lineEnd = tsi.pos;
 				else lineEnd = ti.pos;
 
-				Rect r = rect(lineStart - vec2(0,font->height), lineEnd);
-				dcRect(r, color, drawList);
+				Rect r = rect(lineStart - vec2(0,f->height), lineEnd);
+				drawRect(r, color);
 
 				lineStart = ti.pos;
 
@@ -1170,10 +1750,15 @@ int textMouseToIndex(char* text, Font* font, Vec2 startPos, Vec2 mousePos, Vec2i
 	bool foundLine = false;
 	TextSimInfo tsi = initTextSimInfo(startPos);
 	while(true) {
+		Font* f = font;
+		updateMarkers(text, &tsi, font, true);
+		if(tsi.bold) f = font->boldFont;
+		else if(tsi.italic) f = font->italicFont;
+
 		TextInfo ti;
-		int result = textSim(text, font, &tsi, &ti, startPos, wrapWidth);
+		int result = textSim(text, f, &tsi, &ti, startPos, wrapWidth);
 		
-		bool fLine = valueBetween(mousePos.y, ti.pos.y - font->height, ti.pos.y);
+		bool fLine = valueBetween(mousePos.y, ti.pos.y - f->height, ti.pos.y);
 		if(fLine) foundLine = true;
 		else if(foundLine) return ti.index-1;
 
@@ -1187,6 +1772,15 @@ int textMouseToIndex(char* text, Font* font, Vec2 startPos, Vec2 mousePos, Vec2i
 
 	return tsi.index;
 }
+
+// char* textSelectionToString(char* text, int index1, int index2) {
+// 	myAssert(index1 >= 0 && index2 >= 0);
+
+// 	int range = abs(index1 - index2);
+// 	char* str = getTStringDebug(range + 1); // We assume text selection will only be used for debug things.
+// 	strCpy(str, text + minInt(index1, index2), range);
+// 	return str;
+// }
 
 char* textSelectionToString(char* text, int index1, int index2) {
 	assert(index1 >= 0 && index2 >= 0);
@@ -1453,13 +2047,15 @@ void executeCommandList(DrawCommandList* list, bool print = false, bool skipStri
 				if(skipStrings) break;
 
 				if(dc.cullWidth == -1) {
-					if(dc.shadow != 0) 
-						drawText(dc.text, dc.font, dc.pos + vec2(dc.shadow,-dc.shadow), dc.shadowColor, vec2i(dc.vAlign, dc.hAlign), dc.wrapWidth);
-					drawText(dc.text, dc.font, dc.pos, dc.color, vec2i(dc.vAlign, dc.hAlign), dc.wrapWidth);
+					TextSettings ts = textSettings(dc.font, dc.color, TEXTSHADOW_MODE_SHADOW, vec2(dc.shadow,-dc.shadow), lenVec2(vec2(dc.shadow,-dc.shadow)), dc.shadowColor);
+
+					drawText(dc.text, dc.pos, vec2i(dc.vAlign, dc.hAlign), dc.wrapWidth, ts);
+
 				} else {
-					if(dc.shadow != 0) 
-						drawTextLineCulled(dc.text, dc.font, dc.pos + vec2(dc.shadow,-dc.shadow), dc.cullWidth, dc.shadowColor, vec2i(dc.vAlign, dc.hAlign));
-					drawTextLineCulled(dc.text, dc.font, dc.pos, dc.cullWidth, dc.color, vec2i(dc.vAlign, dc.hAlign));
+					TextSettings ts = textSettings(dc.font, dc.color, TEXTSHADOW_MODE_SHADOW, vec2(dc.shadow,-dc.shadow), lenVec2(vec2(dc.shadow,-dc.shadow)), dc.shadowColor);
+					ts.cull = true;
+
+					drawText(dc.text, dc.pos, vec2i(dc.vAlign, dc.hAlign), dc.cullWidth, ts);
 				}
 
 			} break;

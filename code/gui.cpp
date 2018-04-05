@@ -2101,7 +2101,7 @@ struct Console {
 		mainBuffer[mainBufferSize] = newString;
 		mainBufferSize++;
 
-		float height = getTextHeight(newString, cs.bodyFont, vec2(0,0), bodyTextWrapWidth);
+		float height = getTextDim(newString, cs.bodyFont, vec2(0,0), bodyTextWrapWidth).h;
 		mainBufferTextHeight += height;
 	}
 

@@ -126,3 +126,38 @@ void *getTMemory(int size, MemoryBlock * memory = 0) {
 
 
 
+
+
+inline char* getPStringCpy(char* str, int size = -1) {
+	char* newStr = getPString((size == -1 ? strLen(str) : size) + 1);
+	strCpy(newStr, str, size);
+	return newStr;
+}
+
+inline char* getTStringCpy(char* str, int size = -1) {
+	char* newStr = getTString((size == -1 ? strLen(str) : size) + 1);
+	strCpy(newStr, str, size);
+	return newStr;
+}
+
+inline char* getPStringClr(int size) { 
+	char* s = getPString(size);
+	s[0] = '\0';
+	return s;
+}
+
+inline char* getTStringClr(int size) { 
+	char* s = getTString(size);
+	s[0] = '\0';
+	return s;
+}
+
+char** getTStringArray(char** strings, int count) {
+
+	char** array = getTArray(char*, count);
+	for(int i = 0; i < count; i++) {
+		array[i] = getTString(strLen(strings[i]));
+	}
+
+	return array;
+}

@@ -126,6 +126,8 @@ Changing course for now:
  - Open devenv from within sublime.
  - Shadow mapping, start with cloud texture projection.
 
+ - Put in vsync time saving.
+
 //-------------------------------------
 //               BUGS
 //-------------------------------------
@@ -176,8 +178,14 @@ Changing course for now:
 #define STBI_ONLY_JPEG
 #include "external\stb_image.h"
 
-#define STB_TRUETYPE_IMPLEMENTATION
-#include "external\stb_truetype.h"
+// #define STB_TRUETYPE_IMPLEMENTATION
+// #include "external\stb_truetype.h"
+
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include FT_PARAMETER_TAGS_H
+#include FT_MODULE_H
+
 
 #define STB_VOXEL_RENDER_IMPLEMENTATION
 // #define STBVOX_CONFIG_LIGHTING_SIMPLE
@@ -185,6 +193,8 @@ Changing course for now:
 // #define STBVOX_CONFIG_MODE 0
 #define STBVOX_CONFIG_MODE 1
 #include "external\stb_voxel_render.h"
+
+
 
 //
 
@@ -579,6 +589,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 		//
 		//
 
+		globalGraphicsState->fontFolders[globalGraphicsState->fontFolderCount++] = getPStringCpy(App_Font_Folder);
+		char* windowsFontFolder = fillString("%s%s", getenv(Windows_Font_Path_Variable), Windows_Font_Folder);
+		globalGraphicsState->fontFolders[globalGraphicsState->fontFolderCount++] = getPStringCpy(windowsFontFolder);
+
 		// Setup app temp settings.
 		AppSessionSettings appSessionSettings = {};
 		{
@@ -728,6 +742,16 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		if(HOTRELOAD_SHADERS) {
 			loadShaders();
+		}
+
+		// Bad news.
+		for(int i = 0; i < arrayCount(globalGraphicsState->fonts); i++) {
+			for(int j = 0; j < arrayCount(globalGraphicsState->fonts[0]); j++) {
+				Font* font = &globalGraphicsState->fonts[i][j];
+				if(font->heightIndex != 0) {
+					freeFont(font);
+				} else break;
+			}
 		}
 	}
 
