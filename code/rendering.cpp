@@ -2076,3 +2076,26 @@ void executeCommandList(DrawCommandList* list, bool print = false, bool skipStri
 		printf("\n\n");
 	}
 }
+
+
+void scissorTest(Rect r) {
+	int left   = roundInt(r.left);
+	int bottom = roundInt(r.bottom);
+	int right  = roundInt(r.right);
+	int top    = roundInt(r.top);
+
+	// glScissor(left, bottom, right-left, top-bottom);
+	dcScissor(rect(left, bottom, right, top));
+}
+
+Rect scissorRectScreenSpace(Rect r, float screenHeight) {
+	Rect scissorRect = {r.min.x, r.min.y+screenHeight, r.max.x, r.max.y+screenHeight};
+	return scissorRect;
+}
+
+void scissorTestScreen(Rect r) {
+	Rect sr = scissorRectScreenSpace(r, globalGraphicsState->screenRes.h);
+	if(rectW(sr) < 0 || rectH(sr) < 0) sr = rect(0,0,0,0);
+
+	scissorTest(sr);
+}

@@ -2052,6 +2052,15 @@ inline Vec4 vec4(float a, float b, float c, float d) {
 	return vec;
 }
 
+inline Vec4 vec4(float rgb, float a) {
+	Vec4 vec;
+	vec.r = rgb;
+	vec.g = rgb;
+	vec.b = rgb;
+	vec.a = a;
+	return vec;
+}
+
 inline Vec4 vec4(float a[4]) {
 	Vec4 vec;
 	vec.x = a[0];

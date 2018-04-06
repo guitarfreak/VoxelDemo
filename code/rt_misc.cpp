@@ -984,17 +984,13 @@ struct AppMemory {
 //
 //
 
-uint flagSet(uint flags, int flagType)
-{
-	uint newFlags = flags | flagType;
-	return newFlags;
-}
+inline int flagSet(int flags, int flagType) { return flags | flagType; }
+inline int flagRemove(int flags, int flagType) { return flags &= ~flagType; }
 
-bool flagCheck(uint flags, int flagType)
-{
-	bool result = (flags | flagType) == flags;
-	return result;
-}
+inline void flagSet(int* flags, int flagType) { (*flags) |= flagType; }
+inline void flagRemove(int* flags, int flagType) { (*flags) &= ~flagType; }
+
+inline bool flagGet(int flags, int flagType) { return (flags | flagType) == flags; }
 
 //
 //
