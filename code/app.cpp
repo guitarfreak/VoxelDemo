@@ -463,6 +463,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 			ds->notificationStack[i] = getPStringDebug(DEBUG_NOTE_LENGTH+1);
 		}
 
+		ds->fontScale = 1.0f;
+
 		TIMER_BLOCK_NAMED("Init");
 
 		//
@@ -475,15 +477,36 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// int windowStyle = WS_OVERLAPPEDWINDOW & ~WS_SYSMENU;
 		int windowStyle = WS_OVERLAPPEDWINDOW;
 		initSystem(sd, ws, windowsData, vec2i(1920*0.85f, 1080*0.85f), windowStyle, 1);
+// BOOL WINAPI SetWindowText(
+  // _In_     HWND    hWnd,
+  // _In_opt_ LPCTSTR lpString
+// );
 
 		windowHandle = sd->windowHandle;
 
+		SetWindowText(windowHandle, APP_NAME);
+
 		loadFunctions();
-		wglSwapIntervalEXT(1);
+
+		if(true) {
+			wglSwapIntervalEXT(1);
+			ws->vsync = true;
+			ws->frameRate = ws->refreshRate;
+		} else {
+			wglSwapIntervalEXT(0);
+			ws->vsync = false;
+			ws->frameRate = 200;
+		}
 
 		initInput(&ad->input);
 		sd->input = &ad->input;
 
+		#ifndef SHIPPING_MODE
+		if(!IsDebuggerPresent()) {
+			makeWindowTopmost(sd);
+		}
+		#endif
+		
 		//
 		// Init Folder Handles.
 		//
@@ -624,6 +647,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// @AppInit.
 		//
 
+		timerInit(&ds->swapTimer);
+		timerInit(&ds->frameTimer);
+		timerInit(&ds->tempTimer);
+
 		// Entity.
 
 		ad->captureMouse = false;
@@ -760,11 +787,22 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// Update timer.
 	{
 		if(init) {
-			ds->lastTimeStamp = timerInit();
+			timerStart(&ds->frameTimer);
 			ds->dt = 1/(float)60;
 		} else {
-			ds->dt = timerUpdate(ds->lastTimeStamp, &ds->lastTimeStamp);
+			ds->dt = timerUpdate(&ds->frameTimer);
 			ds->time += ds->dt;
+
+			ds->fpsTime += ds->dt;
+			ds->fpsCounter++;
+			if(ds->fpsTime >= 1) {
+				ds->avgFps = 1 / (ds->fpsTime / (f64)ds->fpsCounter);
+				ds->fpsTime = 0;
+				ds->fpsCounter = 0;
+			}
+
+			// timerStart(&ad->frameTimer);
+			// printf("%f\n", ad->dt);
 		}
 	}
 
@@ -804,6 +842,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->time = ds->time;
 
 		ad->frameCount++;
+
+		sd->fontHeight = getSystemFontHeight(sd->windowHandle);
+		ds->fontHeight = roundInt(ds->fontScale*sd->fontHeight);
 	}
 
 	// Handle recording.
@@ -2551,12 +2592,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 		bindFrameBuffer(FRAMEBUFFER_DebugMsaa);
 		executeCommandList(&ad->commandList2d);
 
-		double timeStamp = timerInit();
-			executeCommandList(&ds->commandListDebug, false, reload);
 		static double tempTime = 0;
+		timerInit(&ds->tempTimer);
+			executeCommandList(&ds->commandListDebug, false, reload);
 		tempTime += ds->dt;
 		if(tempTime >= 1) {
-			ds->debugRenderTime = timerUpdate(timeStamp);
+			ds->debugRenderTime = timerStop(&ds->tempTimer);
 			tempTime = 0;
 		}
 
@@ -2591,42 +2632,38 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 
-
-
-	if(input->keysPressed[KEYCODE_1]) { 
-		int t[] = {1,5};
-		threadQueueAdd(threadQueue, threadBench, &t);
-		threadQueueAdd(threadQueue, threadBench, &t);
-		threadQueueAdd(threadQueue, threadBench, &t);
-	}
-
-	if(input->keysPressed[KEYCODE_2]) {
-		int t[] = {1,20};
-		threadQueueAdd(threadQueue, threadBench, &t);
-		threadQueueAdd(threadQueue, threadBench, &t);
-		threadQueueAdd(threadQueue, threadBench, &t);
-	}
-
-	if(input->keysPressed[KEYCODE_3]) { 
-		int t[] = {1,50};
-		threadQueueAdd(threadQueue, threadBench, &t);
-		threadQueueAdd(threadQueue, threadBench, &t);
-		threadQueueAdd(threadQueue, threadBench, &t);
-	}
-
-
-
-
-
 	// Swap window background buffer.
 	{
 		TIMER_BLOCK_NAMED("Swap");
+
+		if(!ws->vsync) sd->vsyncTempTurnOff = false;
+
+		// Sleep until monitor refresh.
+		double frameTime = timerStop(&ds->swapTimer);
+		int sleepTimeMS = 0;
+		if(!init && ws->vsync && !sd->vsyncTempTurnOff) {
+			// double frameTime = timerStop(swapTimer);
+			double fullFrameTime = ((double)1/ws->frameRate);
+
+			if(frameTime < fullFrameTime) {
+				double sleepTime = fullFrameTime - frameTime;
+				sleepTimeMS = sleepTime*1000.0 - 0.5f;
+
+				if(sleepTimeMS > 0) {
+	    			glFlush();
+					Sleep(sleepTimeMS);
+				}
+			}
+		}
+
 		if(sd->vsyncTempTurnOff) {
 			wglSwapIntervalEXT(0);
 		}
 
 		swapBuffers(sd);
 		glFinish();
+
+		timerStart(&ds->swapTimer);
 
 		if(sd->vsyncTempTurnOff) {
 			wglSwapIntervalEXT(1);
@@ -2662,12 +2699,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, bool* isRunning, bool init, ThreadQueue* threadQueue) {
 	// @DebugStart.
 
-	#define PVEC3(v) v.x, v.y, v.z
-	#define PVEC2(v) v.x, v.y
-
 	globalMemory->debugMode = true;
 
-	i64 timeStamp = timerInit();
+	timerStart(&ds->tempTimer);
 
 	Input* input = ds->input;
 	WindowSettings* ws = &ad->wSettings;
@@ -2707,7 +2741,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 	}
 
 	if(ds->showMenu) {
-		int fontSize = 20;
+		int fontSize = ds->fontHeight;
 
 		bool initSections = false;
 
@@ -3095,7 +3129,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 		// float cyclesPerFrame = (float)((3.5f*((float)1/60))*1024*1024*1024);
 		float cyclesPerFrame = (float)((3.5f*((float)1/60))*1000*1000*1000);
-		fontHeight = 20;
+		int fontSize = ds->fontHeight;
 		Vec2 textPos = vec2(550, -fontHeight);
 		int infoCount = timer->timerInfoCount;
 
@@ -3755,7 +3789,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		}
 
 		// Draw notes.
-		float fontSize = 24;
+		int fontSize = ds->fontHeight;
 		Font* font = getFont(FONT_CALIBRI, fontSize);
 		Vec4 color = vec4(1,0.5f,0,1);
 
@@ -3768,7 +3802,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 	}
 
 	if(ds->showHud) {
-		int fontSize = 19;
+		int fontSize = ds->fontHeight*1.1f;
 		int pi = 0;
 		// Vec4 c = vec4(1.0f,0.2f,0.0f,1);
 		Vec4 c = vec4(1.0f,0.4f,0.0f,1);
@@ -3822,7 +3856,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 	static f64 tempTime = 0;
 	tempTime += ds->dt;
 	if(tempTime >= 1) {
-		ds->debugTime = timerUpdate(timeStamp);
+		ds->debugTime = timerStop(&ds->tempTimer);
 		tempTime = 0;
 	}
 }

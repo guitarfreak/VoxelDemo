@@ -381,6 +381,9 @@ struct WindowSettings {
 	bool dontUpdateCursor;
 	bool customCursor;
 	POINT lastMousePosition;
+
+	bool vsync;
+	int frameRate;
 };
 
 void updateCursor(WindowSettings* ws) {
@@ -393,6 +396,10 @@ void updateCursor(WindowSettings* ws) {
 void setCursor(WindowSettings* ws, LPCSTR type) {
 	SetCursor(LoadCursor(0, type));
 	ws->customCursor = true;
+}
+
+void makeWindowTopmost(SystemData* sd) {
+    SetWindowPos(sd->windowHandle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 }
 
 void showWindow(HWND windowHandle) {
@@ -933,30 +940,69 @@ __int64 getCycleStamp() {
 	return __rdtsc();
 }
 
-i64 timerInit() {
-	LARGE_INTEGER counter;
-	QueryPerformanceCounter(&counter);
+struct MSTimer {
+	double frequency;
+	LARGE_INTEGER timeStamp;
 
-	return counter.QuadPart;
-}
+	double dt;
+};
 
-// Returns time in milliseconds;
-f64 timerUpdate(i64 lastTimeStamp, i64* setTimeStamp = 0) {
-	LARGE_INTEGER counter;
+void timerInit(MSTimer* timer) {
 	LARGE_INTEGER frequency;
 	QueryPerformanceFrequency(&frequency); 
-	QueryPerformanceCounter(&counter);
 
-	i64 timeStamp = counter.QuadPart;
-	f64 dt = (timeStamp - lastTimeStamp);
-	dt *= 1000000;
-	dt /= frequency.QuadPart;
-	dt /= 1000000;
-	
-	if(setTimeStamp) *setTimeStamp = timeStamp;
-
-	return dt;
+	timer->frequency = (double)frequency.QuadPart;
 }
+
+void timerStart(MSTimer* timer) {
+	QueryPerformanceCounter(&timer->timeStamp);
+}
+
+double timerStop(MSTimer* timer) {	
+	LARGE_INTEGER newTimeStamp;
+	QueryPerformanceCounter(&newTimeStamp);
+
+	timer->dt = newTimeStamp.QuadPart - timer->timeStamp.QuadPart;
+
+	// In seconds.
+	timer->dt /= timer->frequency;
+
+	return timer->dt;
+}
+
+double timerUpdate(MSTimer* timer) {	
+	double time = timerStop(timer);
+	timerStart(timer);
+
+	return time;
+}
+
+// i64 timerInit() {
+// 	LARGE_INTEGER counter;
+// 	QueryPerformanceCounter(&counter);
+
+// 	return counter.QuadPart;
+// }
+
+// // Returns time in milliseconds;
+// f64 timerUpdate(i64 lastTimeStamp, i64* setTimeStamp = 0) {
+// 	LARGE_INTEGER counter;
+// 	LARGE_INTEGER frequency;
+// 	QueryPerformanceFrequency(&frequency); 
+// 	QueryPerformanceCounter(&counter);
+
+// 	i64 timeStamp = counter.QuadPart;
+// 	f64 dt = (timeStamp - lastTimeStamp);
+// 	dt *= 1000000;
+// 	dt /= frequency.QuadPart;
+// 	dt /= 1000000;
+	
+// 	if(setTimeStamp) *setTimeStamp = timeStamp;
+
+// 	return dt;
+// }
+
+
 
 // MetaPlatformFunction();
 // void shellExecute(MemoryBlock* memory, char* pathOrFile, int shellCommand) {

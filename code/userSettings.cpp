@@ -5,6 +5,8 @@ const int INTERNAL_TEXTURE_FORMAT = USE_SRGB ? GL_SRGB8_ALPHA8 : GL_RGBA8;
 #define COLOR_SRGB(color) \
 	(globalGraphicsState->useSRGB ? colorSRGB(color) : color);
 
+#define APP_NAME "VoxelGame"
+
 
 #define editor_executable_path "C:\\Program Files\\Sublime Text 3\\sublime_text.exe"
 

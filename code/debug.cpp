@@ -312,6 +312,14 @@ struct DebugState {
 	f64 debugTime;
 	f64 debugRenderTime;
 
+	MSTimer swapTimer;
+	MSTimer frameTimer;
+	MSTimer tempTimer;
+
+	f64 fpsTime;
+	int fpsCounter;
+	float avgFps;
+
 	bool showMenu;
 	bool showStats;
 	bool showConsole;
@@ -353,6 +361,9 @@ struct DebugState {
 	int lineGraphHighlight;
 
 	//
+
+	int fontHeight;
+	float fontScale;
 
 	GuiInput gInput;
 	Gui* gui;
