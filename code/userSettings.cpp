@@ -24,6 +24,7 @@ const int INTERNAL_TEXTURE_FORMAT = USE_SRGB ? GL_SRGB8_ALPHA8 : GL_RGBA8;
 
 #define App_Font_Folder DATA_FOLDER("Fonts\\")
 // #define App_Image_Folder DATA_FOLDER("Images\\")
+#define App_Audio_Folder DATA_FOLDER("Audio\\")
 
 #define FONT_SOURCESANS_PRO "LiberationSans-Regular.ttf"
 #define FONT_CONSOLAS "consola.ttf"

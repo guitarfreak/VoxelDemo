@@ -100,14 +100,14 @@ struct Input {
 	char inputCharacters[32];
 	int inputCharacterCount;
 
-	bool mShift, mCtrl, mAlt;
-
 	bool anyKey;
 
 	bool closeWindow;
 	bool maximizeWindow;
 	bool minimizeWindow;
 	bool resize;
+
+	bool altEnter;
 };
 
 
@@ -330,8 +330,8 @@ LRESULT CALLBACK mainWindowCallBack(HWND window, UINT message, WPARAM wParam, LP
         case WM_SETFOCUS: {
         	sd->setFocus = true;
         	sd->windowIsFocused = true;
-        	sd->vsyncTempTurnOff = true;
-        	SwitchToFiber(sd->mainFiber);
+        	// sd->vsyncTempTurnOff = true;
+        	// SwitchToFiber(sd->mainFiber);
         } break;
 
         case WM_KILLFOCUS: {
@@ -346,6 +346,13 @@ LRESULT CALLBACK mainWindowCallBack(HWND window, UINT message, WPARAM wParam, LP
         case WM_TIMER: {
         	sd->vsyncTempTurnOff = true;
         	SwitchToFiber(sd->mainFiber);
+        } break;
+
+        // Make alt+enter not beep....
+        case WM_MENUCHAR: {
+            if(LOWORD(wParam) & VK_RETURN) 
+            	return MAKELRESULT(0, MNC_CLOSE);
+            return DefWindowProc(window, message, wParam, lParam);
         } break;
 
         default: {
@@ -377,6 +384,7 @@ struct WindowSettings {
 
 	Vec2i currentRes;
 	float aspectRatio;
+	float windowScale;
 
 	bool dontUpdateCursor;
 	bool customCursor;
@@ -396,6 +404,14 @@ void updateCursor(WindowSettings* ws) {
 void setCursor(WindowSettings* ws, LPCSTR type) {
 	SetCursor(LoadCursor(0, type));
 	ws->customCursor = true;
+}
+
+void showCursor(bool show) {
+	if(show) {
+		while(ShowCursor(true) < 0) {};
+	} else {
+		while(ShowCursor(false) >= 0) {};
+	}
 }
 
 void makeWindowTopmost(SystemData* sd) {
@@ -450,9 +466,6 @@ void inputPrepare(Input* input) {
     for(int i = 0; i < arrayCount(input->mouseButtonPressed); i++) input->mouseButtonPressed[i] = 0;
     for(int i = 0; i < arrayCount(input->mouseButtonReleased); i++) input->mouseButtonReleased[i] = 0;
     for(int i = 0; i < arrayCount(input->keysPressed); i++) input->keysPressed[i] = 0;
-    input->mShift = 0;
-    input->mCtrl = 0;
-    input->mAlt = 0;
     input->inputCharacterCount = 0;
     input->mouseDelta = vec2(0,0);
 
@@ -461,6 +474,8 @@ void inputPrepare(Input* input) {
     input->closeWindow = false;
 	input->maximizeWindow = false;
 	input->minimizeWindow = false;
+
+	input->altEnter = false;
 }
 
 void CALLBACK updateInput(SystemData* sd) {
@@ -489,9 +504,12 @@ void CALLBACK updateInput(SystemData* sd) {
 	                int keycode = vkToKeycode(vk);
 	                input->keysDown[keycode] = keyDown;
 	                input->keysPressed[keycode] = keyDown;
-	                input->mShift = ((GetKeyState(VK_SHIFT) & 0x80) != 0);
-	                input->mCtrl = ((GetKeyState(VK_CONTROL) & 0x80) != 0);
-	                input->mAlt = ((GetKeyState(VK_MENU) & 0x80) != 0);
+	                // input->mShift = ((GetKeyState(VK_SHIFT) & 0x80) != 0);
+	                // input->mCtrl = ((GetKeyState(VK_CONTROL) & 0x80) != 0);
+	                bool alt = ((GetKeyState(VK_MENU) & 0x80) != 0);
+	                if(keyDown && keycode == KEYCODE_RETURN && alt) {
+	                	input->altEnter = true;
+	                }
 
 	                if(keyDown) {
 	                	input->anyKey = true;
@@ -500,6 +518,21 @@ void CALLBACK updateInput(SystemData* sd) {
 	                TranslateMessage(&message); 
 	                DispatchMessage(&message); 
 	            } break;
+
+	            case WM_SYSKEYDOWN:
+	            case WM_SYSKEYUP: {
+	                uint vk = uint(message.wParam);
+	            	bool keyDown = (message.message == WM_SYSKEYDOWN);
+
+	            	if(keyDown) {
+		            	if(vk == VK_RETURN) {
+		            		input->altEnter = true;
+		            	}
+	            	}
+
+	            	TranslateMessage(&message); 
+	            	DispatchMessage(&message); 
+	            };
 
 	            case WM_CHAR: {
 	                // input->inputCharacters[input->inputCharacterCount] = (char)uint(message.wParam);
@@ -594,6 +627,10 @@ void CALLBACK updateInput(SystemData* sd) {
 	    	}
 
 	    	sd->killedFocus = false;
+	    }
+
+	    if(input->altEnter) {
+	    	input->keysPressed[KEYCODE_RETURN] = false;
 	    }
 
 	    input->closeWindow = closeWindowTemp;
@@ -852,6 +889,16 @@ DWORD getWindowStyle(HWND hwnd) {
 void updateResolution(HWND windowHandle, WindowSettings* ws) {
 	getWindowProperties(windowHandle, &ws->currentRes.x, &ws->currentRes.y,0,0,0,0);
 	ws->aspectRatio = ws->currentRes.x / (float)ws->currentRes.y;
+
+	{
+		MONITORINFO monitorInfo;
+		monitorInfo.cbSize = sizeof(MONITORINFO);
+		bool result = GetMonitorInfo(MonitorFromWindow(windowHandle, MONITOR_DEFAULTTONEAREST), &monitorInfo);
+		RECT rWork = monitorInfo.rcMonitor;
+		Vec2i monitorRes = vec2i(rWork.right - rWork.left, rWork.bottom - rWork.top);
+
+		ws->windowScale = (float)ws->currentRes.h / monitorRes.h;
+	}
 }
 
 void setWindowMode(HWND hwnd, WindowSettings* wSettings, int mode) {
@@ -1039,4 +1086,33 @@ void shellExecuteNoWindow(char* command) {
 // MetaPlatformFunction();
 void sleep(int milliseconds) {
     Sleep(milliseconds);
+}
+
+
+struct FolderSearchData {
+	WIN32_FIND_DATA findData;
+	HANDLE folderHandle;
+
+	char* fileName;
+};
+
+bool folderSearchStart(FolderSearchData* fd, char* folder) {	
+	// Remember, for searching folder add "*" at the end of path
+
+	fd->folderHandle = FindFirstFile(folder, &fd->findData);
+
+	if(fd->folderHandle != INVALID_HANDLE_VALUE) return true;
+	else return false;
+}
+
+bool folderSearchNextFile(FolderSearchData* fd) {
+	if(FindNextFile(fd->folderHandle, &fd->findData) == 0) return false;
+
+	if(strLen(fd->findData.cFileName) <= 2) {
+		return folderSearchNextFile(fd); // Skip ".."
+	}
+
+	fd->fileName = fd->findData.cFileName;
+
+	return true;
 }

@@ -663,6 +663,14 @@ void readDataFile(char* data, char* fileName) {
 	fclose(file);
 }
 
+char* getFileExtension(char* file) {
+	char* ext = strrchr(file, '.');
+	if(!ext) return 0;
+	else ext++;
+
+	return ext;
+}
+
 //
 // ???
 //
