@@ -138,12 +138,14 @@ Changing course for now:
 
 struct ThreadQueue;
 struct GraphicsState;
+struct AudioState;
 struct DrawCommandList;
 struct MemoryBlock;
 struct DebugState;
 struct Timer;
 ThreadQueue* globalThreadQueue;
 GraphicsState* globalGraphicsState;
+AudioState* theAudioState;
 DrawCommandList* globalCommandList;
 MemoryBlock* globalMemory;
 DebugState* globalDebugState;
@@ -174,14 +176,11 @@ Timer* globalTimer;
 #include "debug.cpp"
 
 
-// int mid = pulse * width/2;
-// for(int i = 0; i < mid; ++i) buf[i] = vol;
-// for(int i = mid; i < width; ++i) buf[i] = -vol;
-
 
 
 enum Game_Mode {
 	GAME_MODE_MENU,
+	GAME_MODE_LOAD,
 	GAME_MODE_MAIN,
 };
 
@@ -192,7 +191,6 @@ enum Menu_Screen {
 
 struct MainMenu {
 	int screen;
-
 	int activeId;
 };
 
@@ -204,6 +202,8 @@ struct AppData {
 	Input input;
 	WindowSettings wSettings;
 	GraphicsState graphicsState;
+
+	AudioState audioState;
 
 	f64 dt;
 	f64 time;
@@ -236,10 +236,13 @@ struct AppData {
 
 	// Game.
 
-	AudioState audioState;
-
 	int gameMode;
 	MainMenu menu;
+
+	bool loading;
+	float startFade;
+
+	//
 
 	float mouseSensitivity;
 
@@ -356,6 +359,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	globalThreadQueue = threadQueue;
 	globalGraphicsState = &ad->graphicsState;
+	theAudioState = &ad->audioState;
 	globalDebugState = ds;
 	globalTimer = ds->timer;
 
@@ -561,10 +565,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 
 		//
-		// Audio.
+		// @AudioInit.
 		//
 
 		AudioState* as = &ad->audioState;
+		(*as) = {};
 
 		{
 			int hr;
@@ -577,7 +582,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			       (void**)&as->deviceEnumerator);
 			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
 
-			hr = as->deviceEnumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &as->immDevice);
+			hr = as->deviceEnumerator->GetDefaultAudioEndpoint(eRender, eConsole, &as->immDevice);
 			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
 
 			hr = as->immDevice->Activate(__uuidof(IAudioClient),CLSCTX_ALL,NULL,(void**)&as->audioClient);
@@ -586,6 +591,19 @@ extern "C" APPMAINFUNCTION(appMain) {
 			int referenceTimeToSeconds = 10 * 1000 * 1000;
 			REFERENCE_TIME referenceTime = referenceTimeToSeconds; // 100 nano-seconds -> 1 second.
 			hr = as->audioClient->GetMixFormat(&as->waveFormat);
+
+			{
+				WAVEFORMATEX* format = as->waveFormat;
+				format->wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
+				format->nChannels = 2;
+				format->wBitsPerSample = 32;
+				format->cbSize = 0;
+
+				WAVEFORMATEX what = {};
+				WAVEFORMATEX* formatClosest = &what;
+				hr = as->audioClient->IsFormatSupported(AUDCLNT_SHAREMODE_SHARED, format, &formatClosest);
+				if(hr) { printf("Failed to initialise sound."); assert(!hr); };
+			}
 
 			as->audioClient->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, referenceTime, 0, as->waveFormat, 0);
 			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
@@ -608,7 +626,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 			hr = as->renderClient->GetBuffer(as->bufferFrameCount, (BYTE**)&buffer);
 			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
 
-			hr = as->renderClient->ReleaseBuffer(as->bufferFrameCount, AUDCLNT_BUFFERFLAGS_SILENT);
+			// hr = as->renderClient->ReleaseBuffer(as->bufferFrameCount, AUDCLNT_BUFFERFLAGS_SILENT);
+			hr = as->renderClient->ReleaseBuffer(0, AUDCLNT_BUFFERFLAGS_SILENT);
 			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
 
 			// // Calculate the actual duration of the allocated buffer.
@@ -621,50 +640,34 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		as->masterVolume = 1.0f;
 
-		as->fileCountMax = 20;
-		as->fileCount = 0;
-
+		as->fileCountMax = 100;
 		as->files = getPArray(Audio, as->fileCountMax);
 
+		char* audioFolderPath = fillString("%s*", App_Audio_Folder);
+
 		FolderSearchData fd;
-		folderSearchStart(&fd, fillString("%s*", App_Audio_Folder));
+		folderSearchStart(&fd, audioFolderPath);
 
 		while(folderSearchNextFile(&fd)) {
-			Audio audio = {};
 
-			// Only load wav files.
+			if(fd.type == FILE_TYPE_FOLDER) {
+				char* subFolder = fd.fileName;
+				char* subFolderPath = fillString("%s%s\\*", App_Audio_Folder, subFolder);
 
-			char* extension = getFileExtension(fd.fileName);
-			if(!extension) continue;
-			int result = strFind(extension, "wav");
-			if(result == -1) continue;
+				FolderSearchData fdSub;
+				folderSearchStart(&fdSub, subFolderPath);
 
-			char* fileName = fillString("%s%s", App_Audio_Folder, fd.fileName);
+				while(folderSearchNextFile(&fdSub)) {
 
-			int size = fileSize(fileName);
-			char* file = (char*)getPMemory(size);
-			readFileToBuffer(file, fileName);
+					char* filePath = fillString("%s%s\\%s", App_Audio_Folder, subFolder, fdSub.fileName);
+					char* name = fillString("%s\\%s", subFolder, fdSub.fileName);
+					addAudio(as, filePath, name);
+				}
 
-			WaveFileHeader* waveHeader = (WaveFileHeader*)file;
-
-			// Only accept specific wave formats for now.
-			assert(waveHeader->audioFormat == WAVE_FORMAT_PCM);
-			assert(waveHeader->bitsPerSample == 16);
-
-			audio.name = getPStringCpy(fd.fileName);
-			audio.file = file;
-			audio.data = &waveHeader->data;
-			audio.sampleRate = waveHeader->sampleRate;
-			audio.channels = waveHeader->numChannels;
-			audio.bitsPerSample = waveHeader->bitsPerSample;
-
-			int bytesPerSample = audio.bitsPerSample/8;
-			audio.totalLength = waveHeader->subchunk2Size/bytesPerSample;
-			audio.frameCount = audio.totalLength/audio.channels;
-
-			as->files[as->fileCount++] = audio;
-
-			if(as->fileCount == as->fileCountMax) break;
+			} else {
+				char* folderPath = fillString("%s%s", App_Audio_Folder, fd.fileName);
+				addAudio(as, folderPath, fd.fileName);
+			}
 		}
 
 		//
@@ -795,28 +798,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 			voxelLightingCache[i] = ad->voxelLightingCache[i];
 		}
 
-		// Load voxel meshes around the player at startup.
-		{
-			Vec2i pPos = coordToMesh(ad->player->pos);
-			for(int y = -1; y < 2; y++) {
-				for(int x = -1; x < 2; x++) {
-					Vec2i coord = pPos - vec2i(x,y);
-
-					VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
-					makeMesh(m, ad->voxelHash, ad->voxelHashSize);
-				}
-			}
-
-			threadQueueComplete(globalThreadQueue);
-
-			// Push the player up until he is right above the ground.
-
-			Entity* player = ad->player;
-
-			while(collisionVoxelWidthBox(ad->voxelHash, ad->voxelHashSize, player->pos, player->dim)) {
-				player->pos.z += 2;
-			}
-		}	
 	}
 
 	// @AppStart.
@@ -1152,15 +1133,19 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// @GameMenu.
 
+	{
+		if(input->keysPressed[KEYCODE_K]) {
+			addTrack("ui\\start.wav");
+		}
+	}
+
 	if(ad->gameMode == GAME_MODE_MENU) {
 		globalCommandList = &ad->commandList2d;
 
-		Rect sr = rectTLDim(0,0,ws->currentRes.w,ws->currentRes.h);
-
+		Rect sr = getScreenRect(ws);
 		Vec2 top = rectT(sr);
 		float rHeight = rectH(sr);
 		float rWidth = rectW(sr);
-
 
 		int titleFontHeight = ds->fontHeight * ws->windowScale * 8.0f;
 		int optionFontHeight = titleFontHeight * 0.5f;
@@ -1184,8 +1169,16 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		MainMenu* menu = &ad->menu;
 
-		if(input->keysPressed[KEYCODE_DOWN]) menu->activeId++;
-		if(input->keysPressed[KEYCODE_UP]) menu->activeId--;
+		float volumeMid = 0.5f;
+
+		if(input->keysPressed[KEYCODE_DOWN]) {
+			addTrack("ui\\select.wav", volumeMid);
+			menu->activeId++;
+		}
+		if(input->keysPressed[KEYCODE_UP]) {
+			addTrack("ui\\select.wav", volumeMid);
+			menu->activeId--;
+		}
 
 		bool activate = input->keysPressed[KEYCODE_RETURN];
 
@@ -1206,14 +1199,17 @@ extern "C" APPMAINFUNCTION(appMain) {
 			p = top - vec2(0,rHeight*0.4f);
 			dcText("New Game", font, p, menu->activeId != currentId ? cOption : cOptionActive, vec2i(0,0), 0, optionShadowSize, cOptionShadow);
 			if(activate && menu->activeId == currentId) {
-				ad->gameMode = GAME_MODE_MAIN;
-				input->keysPressed[KEYCODE_F3] = true;
+				addTrack("ui\\start.wav");
+
+				ad->gameMode = GAME_MODE_LOAD;
 			} 
 			currentId++;
 
 			p.y -= optionOffset;
 			dcText("Settings", font, p, menu->activeId != currentId ? cOption : cOptionActive, vec2i(0,0), 0, optionShadowSize, cOptionShadow);
 			if(activate && menu->activeId == currentId) {
+				addTrack("ui\\menuPush.wav", volumeMid);
+
 				menu->screen = MENU_SCREEN_SETTINGS;
 				menu->activeId = 0;
 			} 
@@ -1258,329 +1254,63 @@ extern "C" APPMAINFUNCTION(appMain) {
 			if((activate && menu->activeId == currentId) || 
 			   input->keysPressed[KEYCODE_ESCAPE] ||
 			   input->keysPressed[KEYCODE_BACKSPACE]) {
+				addTrack("ui\\menuPop.wav", volumeMid);
+
 				menu->screen = MENU_SCREEN_MAIN;
 				menu->activeId = 0;
 			} 
 			currentId++;
 
 		}
+	}
 
-		// if(false) 
-		if(init) 
-		{
-			AudioState* as = &ad->audioState;
+	if(ad->gameMode == GAME_MODE_LOAD) {
 
-			int hr;
+		globalCommandList = &ad->commandList2d;
 
-			const CLSID CLSID_MMDeviceEnumerator = __uuidof(MMDeviceEnumerator);
-			const IID IID_IMMDeviceEnumerator = __uuidof(IMMDeviceEnumerator);
-			hr = CoCreateInstance(
-			       CLSID_MMDeviceEnumerator, NULL,
-			       CLSCTX_ALL, IID_IMMDeviceEnumerator,
-			       (void**)&as->deviceEnumerator);
-			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
+		int titleFontHeight = ds->fontHeight * ws->windowScale * 8.0f;
+		Font* titleFont = getFont(FONT_SOURCESANS_PRO, titleFontHeight);
 
-			hr = as->deviceEnumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &as->immDevice);
-			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
+		Rect sr = getScreenRect(ws);
 
-			hr = as->immDevice->Activate(__uuidof(IAudioClient),CLSCTX_ALL,NULL,(void**)&as->audioClient);
-			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
+		dcRect(sr, vec4(0,1));
+		dcText("Loading", titleFont, rectCen(sr), vec4(1,1), vec2i(0,-1));
 
-			int referenceTimeToSeconds = 10 * 1000 * 1000;
-			REFERENCE_TIME referenceTime = referenceTimeToSeconds; // 100 nano-seconds -> 1 second.
-			hr = as->audioClient->GetMixFormat(&as->waveFormat);
+		if(!ad->loading) {
+			ad->loading = true;
 
-			as->audioClient->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, referenceTime, 0, as->waveFormat, 0);
-			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
-
-			REFERENCE_TIME latency;
-			as->audioClient->GetStreamLatency(&latency);
-			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
-
-			float asdf = (float)latency / referenceTimeToSeconds;
-
-
-
-			hr = as->audioClient->GetBufferSize(&as->bufferFrameCount);
-			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
-
-
-			hr = as->audioClient->GetService(__uuidof(IAudioRenderClient), (void**)&as->renderClient);
-			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
-
-			// Fill with silence before starting.
-
-			float* buffer;
-			hr = as->renderClient->GetBuffer(as->bufferFrameCount, (BYTE**)&buffer);
-			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
-
-			hr = as->renderClient->ReleaseBuffer(as->bufferFrameCount, AUDCLNT_BUFFERFLAGS_SILENT);
-			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
-
-			// // Calculate the actual duration of the allocated buffer.
-			// hnsActualDuration = (double)REFTIMES_PER_SEC *
-			//                     as->bufferFrameCount / pwfx->nSamplesPerSec;
-
-			hr = as->audioClient->Start();  // Start playing.
-			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
-
-
-			// typedef struct {
-			//   WORD  wFormatTag;
-			//   WORD  nChannels;
-			//   DWORD nSamplesPerSec;
-			//   DWORD nAvgBytesPerSec;
-			//   WORD  nBlockAlign;
-			//   WORD  wBitsPerSample;
-			//   WORD  cbSize;
-			// } WAVEFORMATEX;
-
-
-			// If wFormatTag equals WAVE_FORMAT_EXTENSIBLE, the structure is interpreted as a WAVEFORMATEXTENSIBLE structure.
-			// If wFormatTag equals WAVE_FORMAT_MPEG, the structure is interpreted as an MPEG1WAVEFORMAT structure.
-			// If wFormatTag equals WAVE_FORMAT_MPEGLAYER3, the structure is interpreted as an MPEGLAYER3WAVEFORMAT
-
-			// int tag = waveFormat->wFormatTag;
-			// if(tag == WAVE_FORMAT_EXTENSIBLE) {
-			// 	WAVEFORMATEXTENSIBLE* extended = (WAVEFORMATEXTENSIBLE*)waveFormat;
-			// 	int stop = 2134;
-			// } else if(tag == WAVE_FORMAT_MPEG) {
-			// 	MPEG1WAVEFORMAT* extended = (MPEG1WAVEFORMAT*)waveFormat;
-			// 	int stop = 2134;
-
-			// } else if(tag == WAVE_FORMAT_MPEGLAYER3) {
-			// 	MPEGLAYER3WAVEFORMAT* extended = (MPEGLAYER3WAVEFORMAT*)waveFormat;
-			// 	int stop = 2134;
-
-			// }
-
+			// Load voxel meshes around the player at startup.
 			{
-				// float* buffer;
+				Vec2i pPos = coordToMesh(ad->player->pos);
+				for(int y = -1; y < 2; y++) {
+					for(int x = -1; x < 2; x++) {
+						Vec2i coord = pPos - vec2i(x,y);
 
-				// Grab the entire buffer for the initial fill operation.
-			// 	hr = audioRenderClient->GetBuffer(bufferFrameCount, (BYTE**)&buffer);
-			// if(hr) { printf("Failed to initialise sound."); assert(!hr); };
+						VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
+						makeMesh(m, ad->voxelHash, ad->voxelHashSize);
+					}
+				}
 
-				// // Load the initial data into the shared buffer.
-				// hr = pMySource->LoadData(bufferFrameCount, buffer, &flags);
-				// EXIT_ON_ERROR(hr)
+				// threadQueueComplete(globalThreadQueue);
 
-				// {
-				// 	float amplitude = 0.5f;
+				// Push the player up until he is right above the ground.
 
-				// 	int w = 10;
-				// 	int squ = 0;
-				// 	for(int i = 0; i < bufferFrameCount; i++) {
-				// 		// short value = randomInt(-SHRT_MAX+10, SHRT_MAX-10);
+				Entity* player = ad->player;
 
-				// 		// float value = randomFloat(-amplitude,amplitude, 0.0001f);
-
-				// 		// if(squ < (w/2)) value = -amplitude;
-				// 		// else value = amplitude;
-				// 		// squ = squ % w;
-
-				// 		// printf("%i\n", value);
-
-				// 		float value = sin(i*0.05f)*0.5f;
-
-				// 		buffer[(i*2)+0] = value;
-				// 		buffer[(i*2)+1] = value;
-				// 	}
-				// }
-
-					// {
-					// 	Audio* audio = &ad->audioFile;
-
-					// 	float amplitude = 0.5f;
-					// 	int startPos = audio->frameCount/2;
-					// 	for(int i = 0; i < bufferFrameCount; i++) {
-					// 		short valueLeft = audio->data[startPos + (i*2)+0];
-					// 		short valueRight = audio->data[startPos + (i*2)+1];
-
-					// 		float floatValueLeft = (float)valueLeft/SHRT_MAX;
-					// 		float floatValueRight = (float)valueRight/SHRT_MAX;
-
-					// 		buffer[(i*2)+0] = floatValueLeft * amplitude;
-					// 		buffer[(i*2)+1] = floatValueRight * amplitude;
-					// 	}
-
-					// }
-
-			// 	hr = audioRenderClient->ReleaseBuffer(bufferFrameCount, AUDCLNT_BUFFERFLAGS_SILENT);
-			// if(hr) { printf("Failed to initialise sound."); assert(!hr); };
-
-			// 	// // Calculate the actual duration of the allocated buffer.
-			// 	// hnsActualDuration = (double)REFTIMES_PER_SEC *
-			// 	//                     bufferFrameCount / pwfx->nSamplesPerSec;
-
-			// 	hr = audioClient->Start();  // Start playing.
-			// if(hr) { printf("Failed to initialise sound."); assert(!hr); };
-
-					// 	// Each loop fills about half of the shared buffer.
-					// 	while (flags != AUDCLNT_BUFFERFLAGS_SILENT)
-					// 	{
-					// 	    // Sleep for half the buffer duration.
-					// 	    Sleep((DWORD)(hnsActualDuration/REFTIMES_PER_MILLISEC/2));
-
-					// 	    // See how much buffer space is available.
-					// 	    hr = pAudioClient->GetCurrentPadding(&numFramesPadding);
-					// 	    EXIT_ON_ERROR(hr)
-
-					// 	    numFramesAvailable = bufferFrameCount - numFramesPadding;
-
-					// 	    // Grab all the available space in the shared buffer.
-					// 	    hr = audioRenderClient->GetBuffer(numFramesAvailable, &buffer);
-					// 	    EXIT_ON_ERROR(hr)
-
-					// 	    // Get next 1/2-second of data from the audio source.
-					// 	    hr = pMySource->LoadData(numFramesAvailable, buffer, &flags);
-					// 	    EXIT_ON_ERROR(hr)
-
-					// 	    hr = audioRenderClient->ReleaseBuffer(numFramesAvailable, flags);
-					// 	    EXIT_ON_ERROR(hr)
-					// 	}
-
-					// 	// Wait for last data in buffer to play before stopping.
-					// 	Sleep((DWORD)(hnsActualDuration/REFTIMES_PER_MILLISEC/2));
-
-					// 	hr = pAudioClient->Stop();  // Stop playing.
-					// 	EXIT_ON_ERROR(hr)
-					// }
-
-			// waveFormat->nBlockAlign;
-
-			// IAudioClient::GetBufferSize
-			// IAudioClient::GetCurrentPadding
-			// IAudioClient::GetDevicePeriod 
-
+				while(collisionVoxelWidthBox(ad->voxelHash, ad->voxelHashSize, player->pos, player->dim)) {
+					player->pos.z += 2;
+				}
 			}
 		}
 
-	}
+		if(threadQueueFinished(globalThreadQueue)) {
+			ad->loading = false;
+			ad->gameMode = GAME_MODE_MAIN;
+			ad->startFade = 0;
 
-	{
-		AudioState* as = &ad->audioState;
-
-		if(input->keysPressed[KEYCODE_H]) {
-			Audio* audio = &as->files[3];
-			addTrack(as, audio);
+			input->keysPressed[KEYCODE_F3] = true;
 		}
 
-		if(input->keysPressed[KEYCODE_J]) {
-			Audio* audio = &as->files[5];
-			addTrack(as, audio);
-		}
-
-		if(input->keysPressed[KEYCODE_K]) {
-			Audio* audio = &as->files[6];
-			addTrack(as, audio);
-		}
-	}
-
-	// Update Audio.
-	{
-		AudioState* as = &ad->audioState;
-
-		as->masterVolume = 0.4f;
-
-		int framesPerFrame = 600;
-		// int framesPerFrame = 800;
-
-		uint numFramesPadding;
-		as->audioClient->GetCurrentPadding(&numFramesPadding);
-		uint numFramesAvailable = as->bufferFrameCount - numFramesPadding;
-		framesPerFrame = min(framesPerFrame, numFramesAvailable);
-
-		if(numFramesAvailable) {
-
-			float* buffer;
-			as->renderClient->GetBuffer(numFramesAvailable, (BYTE**)&buffer);
-
-			// Clear to zero.
-
-			for(int i = 0; i < numFramesAvailable*2; i++) buffer[i] = 0.0f;
-
-			for(int trackIndex = 0; trackIndex < arrayCount(as->tracks); trackIndex++) {
-				Track* track = as->tracks + trackIndex;
-				Audio* audio = track->audio;
-
-				if(!track->used) continue;
-
-				// Push all frames that are available.
-
-				int index = track->index;
-				int channels = audio->channels;
-				int availableFrames = min(audio->frameCount - index, numFramesAvailable);
-
-				for(int i = 0; i < availableFrames; i++) {
-					short valueLeft = audio->data[(index*channels) + (i*channels)+0];
-					short valueRight;
-					if(channels > 1) valueRight = audio->data[(index*channels) + (i*channels)+1];
-					else valueRight = valueLeft;
-
-					float floatValueLeft = (float)valueLeft/SHRT_MAX;
-					float floatValueRight = (float)valueRight/SHRT_MAX;
-
-					buffer[(i*2)+0] += floatValueLeft * as->masterVolume * track->volume;
-					buffer[(i*2)+1] += floatValueRight * as->masterVolume * track->volume;
-				}
-
-				track->index += framesPerFrame;
-
-				if(track->index >= audio->frameCount) {
-					track->used = false;
-				}
-
-			}
-
-			as->renderClient->ReleaseBuffer(framesPerFrame, 0);
-
-		}
-
-
-
-		// AudioState* as = &ad->audioState;
-
-		// uint numFramesPadding;
-		// as->audioClient->GetCurrentPadding(&numFramesPadding);
-		// uint numFramesAvailable = as->bufferFrameCount - numFramesPadding;
-
-		// uint frames = 600;
-		// // uint frames = numFramesAvailable;
-
-		// // printf("%i %i\n", frames, numFramesAvailable);
-
-		// int playIndex = as->playIndex;
-
-		// uint newPlayIndex = as->playIndex + frames;
-		// if(newPlayIndex >= as->audioFile.frameCount-1) {
-		// 	// frames = newPlayIndex - as->audioFile.frameCount - as->playIndex;
-		// 	as->activePlaying = false;
-		// 	as->playIndex = 0;
-		// } else {
-		// 	as->playIndex += frames;
-		// }
-
-		// float* buffer;
-		// as->renderClient->GetBuffer(numFramesAvailable, (BYTE**)&buffer);
-
-		// {
-		// 	Audio* audio = &as->audioFile;
-
-		// 	float amplitude = 0.20f;
-		// 	for(int i = 0; i < frames; i++) {
-		// 		short valueLeft = audio->data[(playIndex*2) + (i*2)+0];
-		// 		short valueRight = audio->data[(playIndex*2) + (i*2)+1];
-
-		// 		float floatValueLeft = (float)valueLeft/SHRT_MAX;
-		// 		float floatValueRight = (float)valueRight/SHRT_MAX;
-
-		// 		buffer[(i*2)+0] = floatValueLeft * amplitude;
-		// 		buffer[(i*2)+1] = floatValueRight * amplitude;
-		// 	}
-		// }
-
-		// as->renderClient->ReleaseBuffer(frames, 0);
 	}
 
 	if(ad->gameMode == GAME_MODE_MAIN) {
@@ -2672,6 +2402,38 @@ extern "C" APPMAINFUNCTION(appMain) {
 		globalCommandList = &ad->commandList3d;
 	}
 
+
+	// Start fading.
+
+	if(ad->startFade < 1.0f)
+	{
+		float v = ad->startFade;
+
+		ad->startFade += ad->dt / 6.0f;
+
+		float p = 0.25f;
+
+		float r[] = {0, 0.3f, 0.9, 1};
+		int stage = 0;
+		for(int i = 0; i < arrayCount(r); i++) {
+			if(v >= r[i] && v < r[i+1]) { stage = i; break; }
+		}
+
+		float a = 0;
+		if(stage == 0) {
+			a = 1;
+		} else if(stage == 1) {
+			a = mapRange(v, r[stage], r[stage+1], 1, 0.1f);
+			a = powf(a, p);
+		} else if(stage == 2) {
+			float s = powf(0.1f, p);
+			a = mapRange(v, r[stage], r[stage+1], s, 0);
+		}
+
+		Vec4 c = vec4(0,a);
+		dcRect(getScreenRect(ws), c, &ad->commandList2d);
+	}
+
 	// Particle test.
 	if(false)
 	{
@@ -2920,160 +2682,69 @@ extern "C" APPMAINFUNCTION(appMain) {
 		#endif 
 	}
 
-	// This is a test. 
-	if(true)
-	{
-		// bindShader(SHADER_QUAD);
-
-		// drawRect(rectCenDim(0,0,100000,100000), vec4(0.2f,0.2f,0.2f,1));
-
-		// bindShader(SHADER_CUBE);
-
-
-		globalCommandList = &ad->commandList3d;
-		Vec3 p = vec3(10,10,90);
-		Vec3 look = vec3(0,1,0);
-		Vec3 up = vec3(0,0,1);
-		Vec3 right = vec3(1,0,0);
-
-		Vec3 baseLook = vec3(0,1,0);
-		Vec3 baseUp = vec3(0,0,1);
-		Vec3 baseRight = vec3(1,0,0);
-
-		static Vec3 rot = vec3(0,0,0);
-		// static Quat q = {};
-
-		float speed = 0.05f;
-
-		if(input->keysDown[KEYCODE_RIGHT]) rot.x -= speed; 
-		if(input->keysDown[KEYCODE_LEFT]) rot.x += speed; 
-		if(input->keysDown[KEYCODE_UP]) rot.y -= speed; 
-		if(input->keysDown[KEYCODE_DOWN]) rot.y += speed; 
-		if(input->keysDown[KEYCODE_U]) rot.z -= speed; 
-		if(input->keysDown[KEYCODE_I]) rot.z += speed; 
-
-
-		// Quat q = quat(rot.x, baseOrientation.dir) * quat(rot.y, baseOrientation.up) * quat(rot.z, baseOrientation.right);
-		// Quat q = quat(rot.x, vec3(1,0,0)) * quat(rot.y, vec3(0,1,0)) * quat(rot.z, vec3(0,0,1));
-		// Vec3 rotAngle = normVec3(vec3(1,0.6f,0.4f));
-		// Vec3 rotAngle = normVec3(vec3(1,-0.2f,-1));
-
-		// Vec3 rotAngle = normVec3(vec3(0.5f,0.4f,-0.2f));
-		// Vec3 rotAngle = normVec3(vec3(0.7f,-0.4f,-0.2f));
-
-
-		// Quat q = quat(rot.x, rotAngle);
-
-		
-		// Mat4 m = quatRotationMatrix(quat(rot.x, rotAngle));
-		// right = (m * vec4(right,0)).xyz;
-
-		// rotateVec3(&right, rot.x, rotAngle);
-		// right = (quat(rot.x, rotAngle)*quat(0, right.x, right.y, right.z)).xyz;
-
-		look = normVec3((quat(rot.x, vec3(1,0,0)) * quat(rot.y, vec3(0,0,1)) * quat(rot.z, vec3(0,1,0))) * look);
-		up = normVec3((quat(rot.x, vec3(1,0,0)) * quat(rot.y, vec3(0,0,1)) * quat(rot.z, vec3(0,1,0))) * up);
-		right = normVec3((quat(rot.x, vec3(1,0,0)) * quat(rot.y, vec3(0,0,1)) * quat(rot.z, vec3(0,1,0))) * right);
-
-		// rotateVec3(&look, rot.x, rotAngle);
-		// rotateVec3(&up, rot.x, rotAngle);
-		// rotateVec3(&right, rot.x, rotAngle);
-
-
-
-		// void rotateVec3(Vec3* v, float a, Vec3 axis) {
-		// rotateVec3(&look, rot.x, rotAngle);
-		// rotateVec3(&right, rot.x, rotAngle);
-
-
-
-		// Quat r = q*quat(0, v.x, v.y, v.z);
-		// right = normVec3((quat(rot.x, rotAngle)*quat(0, right.x, right.y, right.z)).xyz);
-
-		// Vec3 operator*(Quat q, Vec3 v) {
-		// 	Quat r = q*quat(0, v.x, v.y, v.z);
-		// 	return r.xyz;
-		// }
-
-
-		// look = normVec3(q*baseLook);
-		// up = normVec3(q*baseUp);
-		// right = normVec3(q*baseRight);
-
-		// right = normVec3(cross(look, up));
-
-
-
-
-// Vec3 rotateVec3(Vec3 v, float a, Vec3 axis) {
-		// rotateVec3(&look, rot.x, vec3(1,0,0));
-		// rotateVec3(&look, rot.y, vec3(0,1,0));
-		// rotateVec3(&look, rot.z, vec3(0,0,1));
-
-		// rotateVec3(&up, rot.x, vec3(1,0,0));
-		// rotateVec3(&up, rot.y, vec3(0,1,0));
-		// rotateVec3(&up, rot.z, vec3(0,0,1));
-
-
-
-		// right = normVec3(cross(look, up));
-
-
-
-		// Vec3 gUp = vec3(0,0,1);
-
-		// rotateVec3(&look, rot.x, gUp);
-		// rotateVec3(&look, rot.y, normVec3(cross(gUp, look)));
-		// up = normVec3(cross(look, normVec3(cross(gUp, look))));
-		// look = look;
-
-		// rotateVec3(&up, rot.z, look);
-
-		// right = normVec3(cross(gUp, look));
-
-
-
-
-		// Vec3 gUp = vec3(0,0,1);
-		// rotateVec3(&look, rot.x, gUp);
-		// rotateVec3(&up, rot.z, look);
-
-		// look = baseLook;
-		// rotateVec3(&look, rot.x, up);
-		// // up = normVec3(cross(look, normVec3(cross(gUp, look))));
-		// // look = look;
-		// // rotateVec3(&up, rot.z, look);
-		// right = normVec3(cross(up, look));
-
-
-
-
-
-
-		// addDebugInfo(fillString("%f,%f,%f");
-
-
-
-
-		float length = 10;
-
-		dcState(STATE_LINEWIDTH, 10);
-		dcLine(p, p+look*length, vec4(0,1,0,1));
-		dcLine(p, p+up*length,   vec4(0,0,1,1));
-		dcLine(p, p+right*length,vec4(1,0,0,1));
-
-		// dcLine(p, p+rotAngle*length,vec4(1,1,1,1));
-
-
-// void dcCube(Vec3 trans, Vec3 scale, Vec4 color, float degrees = 0, Vec3 rot = vec3(0,0,0), DrawCommandList* drawList = 0) {
-		// dcCube(p, vec3(2,2,2), vec4(1,0,0,1), 1, rot);
-
-
 	}
-	}
-
 
 	endOfMainLabel:
+
+	// Update Audio.
+	{
+		AudioState* as = &ad->audioState;
+
+		as->masterVolume = 0.5f;
+
+		int framesPerFrame = ad->dt * as->waveFormat->nSamplesPerSec;
+
+		uint numFramesPadding;
+		as->audioClient->GetCurrentPadding(&numFramesPadding);
+		uint numFramesAvailable = as->bufferFrameCount - numFramesPadding;
+		framesPerFrame = min(framesPerFrame, numFramesAvailable);
+
+		if(numFramesAvailable) {
+
+			float* buffer;
+			as->renderClient->GetBuffer(numFramesAvailable, (BYTE**)&buffer);
+
+			// Clear to zero.
+
+			for(int i = 0; i < numFramesAvailable*2; i++) buffer[i] = 0.0f;
+
+			for(int trackIndex = 0; trackIndex < arrayCount(as->tracks); trackIndex++) {
+				Track* track = as->tracks + trackIndex;
+				Audio* audio = track->audio;
+
+				if(!track->used) continue;
+
+				// Push all frames that are available.
+
+				int index = track->index;
+				int channels = audio->channels;
+				int availableFrames = min(audio->frameCount - index, numFramesAvailable);
+
+				for(int i = 0; i < availableFrames; i++) {
+					short valueLeft = audio->data[(index*channels) + (i*channels)+0];
+					short valueRight;
+					if(channels > 1) valueRight = audio->data[(index*channels) + (i*channels)+1];
+					else valueRight = valueLeft;
+
+					float floatValueLeft = (float)valueLeft/SHRT_MAX;
+					float floatValueRight = (float)valueRight/SHRT_MAX;
+
+					buffer[(i*2)+0] += floatValueLeft * as->masterVolume * track->volume;
+					buffer[(i*2)+1] += floatValueRight * as->masterVolume * track->volume;
+				}
+
+				track->index += framesPerFrame;
+
+				if(track->index >= audio->frameCount) {
+					track->used = false;
+				}
+
+			}
+
+			as->renderClient->ReleaseBuffer(framesPerFrame, 0);
+
+		}
+	}
 
 	// Render.
 	{

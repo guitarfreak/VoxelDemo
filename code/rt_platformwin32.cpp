@@ -976,6 +976,10 @@ int getSystemFontHeight(HWND windowHandle) {
 	return textMetric.tmHeight;
 }
 
+Rect getScreenRect(WindowSettings* ws) {
+	return rectTLDim(0,0,ws->currentRes.w,ws->currentRes.h);
+}
+
 // MetaPlatformFunction();
 uint getTicks() {
     uint result = GetTickCount();
@@ -1088,12 +1092,18 @@ void sleep(int milliseconds) {
     Sleep(milliseconds);
 }
 
+enum FileType {
+	FILE_TYPE_FILE = 0,
+	FILE_TYPE_FOLDER,
+};
 
 struct FolderSearchData {
 	WIN32_FIND_DATA findData;
 	HANDLE folderHandle;
 
 	char* fileName;
+	char* filePath;
+	int type;
 };
 
 bool folderSearchStart(FolderSearchData* fd, char* folder) {	
@@ -1106,13 +1116,33 @@ bool folderSearchStart(FolderSearchData* fd, char* folder) {
 }
 
 bool folderSearchNextFile(FolderSearchData* fd) {
-	if(FindNextFile(fd->folderHandle, &fd->findData) == 0) return false;
+	if(FindNextFile(fd->folderHandle, &fd->findData) == 0) {
+		FindClose(fd->folderHandle);
+		return false;
+	}
 
-	if(strLen(fd->findData.cFileName) <= 2) {
+	if(strCompare(fd->findData.cFileName, "..")) {
 		return folderSearchNextFile(fd); // Skip ".."
+	}
+
+	if(flagGet(fd->findData.dwFileAttributes, FILE_ATTRIBUTE_DIRECTORY)) {
+		fd->type = FILE_TYPE_FOLDER;
+	} else {
+		fd->type = FILE_TYPE_FILE;
 	}
 
 	fd->fileName = fd->findData.cFileName;
 
 	return true;
+}
+
+int folderFileCount(char* folder) {
+	FolderSearchData fd;
+	folderSearchStart(&fd, folder);
+	int count = 0;
+	while(folderSearchNextFile(&fd)) {
+		if(fd.type == FILE_TYPE_FILE) count++;
+	}
+
+	return count;
 }
