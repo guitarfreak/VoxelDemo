@@ -1967,10 +1967,37 @@ Vec3 hslToRgb(Vec3 hslColor) {
 	return result;
 }
 
+inline Vec3 hslToRgbFloat(Vec3 hsl) {
+	float c[3];
+	hsl.x = modFloat(hsl.x, 1.0f);
+	hsl.y = clamp(hsl.y, 0, 1);
+	hsl.z = clamp(hsl.z, 0, 1);
+	hslToRgb(c, 360 * hsl.x, hsl.y, hsl.z);
+
+	return vec3(c[0], c[1], c[2]);
+}
+inline Vec3 hslToRgbFloat(float h, float s, float l) {
+	return hslToRgbFloat(vec3(h,s,l));
+}
+
+inline Vec3 rgbToHslFloat(Vec3 rgb) {
+	Vec3 hsl = rgbToHsl(rgb);
+	Vec3 hslFloat = vec3(hsl.x / (float)360, hsl.y, hsl.z);
+	return hslFloat;
+}
+
 Vec2 operator+(Vec2 a, Vec2i b) {
 	a.x += b.x;
 	a.y += b.y;
 	return a;	
+}
+
+Vec3 lerp(float percent, Vec3 a, Vec3 b) {
+	a.x = lerp(percent, a.x, b.x);
+	a.y = lerp(percent, a.y, b.y);
+	a.z = lerp(percent, a.z, b.z);
+
+	return a;
 }
 
 //

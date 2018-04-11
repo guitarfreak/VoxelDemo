@@ -89,17 +89,16 @@ Vec3 getRotationToVector(Vec3 start, Vec3 dest, float* angle) {
 	return side;
 }	
 
-void initEntity(Entity* e, int type, Vec3 pos, Vec3 dir, Vec3 dim, Vec3 camOff) {
+void initEntity(Entity* e, int type, Vec3 pos, Vec3 dim, Vec3 camOff) {
 	*e = {};
 	e->init = true;
 	e->type = type;
 	e->pos = pos;
-	e->dir = dir;
+	// e->dir = dir;
 	e->dim = dim;
 	e->camOff = camOff;
 	
-	e->rot = getRotationToVector(vec3(0,1,0), dir, &e->rotAngle);
-	int stop = 234;
+	// e->rot = getRotationToVector(vec3(0,1,0), dir, &e->rotAngle);
 }
 
 Entity* addEntity(EntityList* list, Entity* e) {

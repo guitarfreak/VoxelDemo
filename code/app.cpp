@@ -178,6 +178,14 @@ Timer* globalTimer;
 
 
 
+struct GameSettings {
+	float mouseSensitivity;
+};
+
+void defaultGameSettings(GameSettings* settings) {
+	settings->mouseSensitivity = 0.1f;
+}
+
 enum Game_Mode {
 	GAME_MODE_MENU,
 	GAME_MODE_LOAD,
@@ -190,9 +198,40 @@ enum Menu_Screen {
 };
 
 struct MainMenu {
+	bool gameRunning;
+
 	int screen;
 	int activeId;
+	int currentId;
+
+	float buttonAnimState;
+
+	Font* font;
+	Vec4 cOption;
+	Vec4 cOptionActive;
+	Vec4 cOptionShadow;
+	Vec4 cOptionShadowActive;
+
+	float optionShadowSize;
+
+	bool pressedEnter;
 };
+
+bool menuOption(MainMenu* menu, char* text, Vec2 pos, Vec2i alignment) {
+
+	bool isActive = menu->activeId == menu->currentId;
+	Vec4 textColor = isActive ? menu->cOptionActive : menu->cOption;
+	Vec4 shadowColor = isActive ? menu->cOptionShadowActive : menu->cOptionShadow;
+
+	dcText(text, menu->font, pos, textColor, alignment, 0, menu->optionShadowSize, shadowColor);
+
+	bool result = menu->pressedEnter && menu->activeId == menu->currentId;
+
+	menu->currentId++;
+
+	return result;
+}
+
 
 struct AppData {
 	
@@ -242,9 +281,9 @@ struct AppData {
 	bool loading;
 	float startFade;
 
-	//
+	GameSettings settings;
 
-	float mouseSensitivity;
+	//
 
 	EntityList entityList;
 	Entity* player;
@@ -263,7 +302,6 @@ struct AppData {
 	bool bombButtonDown;
 	float bombSpawnTimer;
 
-	int selectionRadius;
 	bool blockSelected;
 	Vec3 selectedBlock;
 	Vec3 selectedBlockFaceDir;
@@ -281,7 +319,6 @@ struct AppData {
 	int voxelTriangleCount;
 
 	int skyBoxId;
-	Vec3 fogColor;
 
 	// Particles.
 
@@ -462,7 +499,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			makeWindowTopmost(sd);
 		}
 		#endif
-		
+
 		//
 		// Init Folder Handles.
 		//
@@ -721,83 +758,69 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->captureMouse = false;
 		showCursor(false);
 
+		//
+
+		defaultGameSettings(&ad->settings);
+
 		// Entity.
 
 		ad->playerMode = true;
 		ad->pickMode = true;
-		ad->selectionRadius = 5;
 
 		ad->entityList.size = 1000;
 		ad->entityList.e = (Entity*)getPMemory(sizeof(Entity)*ad->entityList.size);
 		for(int i = 0; i < ad->entityList.size; i++) ad->entityList.e[i].init = false;
 
-		Vec3 startDir = normVec3(vec3(1,0,0));
-
-		Entity player;
-		Vec3 playerDim = vec3(0.8f, 0.8f, 1.8f);
-		float camOff = playerDim.z*0.5f - playerDim.x*0.25f;
-		initEntity(&player, ET_Player, vec3(0,0,40), startDir, playerDim, vec3(0,0,camOff));
-		player.rot = vec3(M_2PI,0,0);
-		player.playerOnGround = false;
-		strCpy(player.name, "Player");
-		ad->player = addEntity(&ad->entityList, &player);
-
-		Entity freeCam;
-		initEntity(&freeCam, ET_Camera, vec3(35,35,32), startDir, vec3(0,0,0), vec3(0,0,0));
-		strCpy(freeCam.name, "Camera");
-		ad->cameraEntity = addEntity(&ad->entityList, &freeCam);
-
-		ad->mouseSensitivity = 0.1f;
-
 		// Voxel.
 
 		ad->skyBoxId = CUBEMAP_5;
-		ad->fogColor = colorSRGB(vec3(0.43f,0.38f,0.44f));
 		ad->bombFireInterval = 0.1f;
 		ad->bombButtonDown = false;
 
-		*ad->blockMenu = {};
-		ad->blockMenuSelected = 0;
+		// Hashes and thread data.
+		{
+			ad->voxelHashSize = sizeof(arrayCount(ad->voxelHash));
+			// for(int i = 0; i < ad->voxelHashSize; i++) {
+			// 	ad->voxelHash[i] = (VoxelNode*)getPMemory(sizeof(VoxelNode));
+			// 	*ad->voxelHash[i] = {};
+			// }
 
-		ad->voxelHashSize = sizeof(arrayCount(ad->voxelHash));
-		for(int i = 0; i < ad->voxelHashSize; i++) {
-			ad->voxelHash[i] = (VoxelNode*)getPMemory(sizeof(VoxelNode));
-			*ad->voxelHash[i] = {};
+			for(int i = 0; i < arrayCount(ad->threadData); i++) {
+				ad->threadData[i] = {};
+			} 
+
+			for(int i = 0; i < arrayCount(ad->voxelCache); i++) {
+				ad->voxelCache[i] = (uchar*)getPMemory(sizeof(uchar)*VOXEL_CACHE_SIZE);
+				ad->voxelLightingCache[i] = (uchar*)getPMemory(sizeof(uchar)*VOXEL_CACHE_SIZE);
+			}
+
+			for(int i = 0; i < 8; i++) {
+				voxelCache[i] = ad->voxelCache[i];
+				voxelLightingCache[i] = ad->voxelLightingCache[i];
+			}
 		}
 
-		for(int i = 0; i < arrayCount(ad->threadData); i++) {
-			ad->threadData[i] = {};
-		} 
+		// Trees.
+		{
+			int treeRadius = 4;
+			ad->treeNoise = (bool*)getPMemory(VOXEL_X*VOXEL_Y);
+			zeroMemory(ad->treeNoise, VOXEL_X*VOXEL_Y);
 
-		for(int i = 0; i < arrayCount(ad->voxelCache); i++) {
-			ad->voxelCache[i] = (uchar*)getPMemory(sizeof(uchar)*VOXEL_CACHE_SIZE);
-			ad->voxelLightingCache[i] = (uchar*)getPMemory(sizeof(uchar)*VOXEL_CACHE_SIZE);
+			Rect bounds = rect(0, 0, 64, 64);
+			Vec2* noiseSamples;
+			// int noiseSamplesSize = blueNoise(bounds, 5, &noiseSamples);
+			int noiseSamplesSize = blueNoise(bounds, treeRadius, &noiseSamples);
+			// int noiseSamplesSize = 10;
+			for(int i = 0; i < noiseSamplesSize; i++) {
+				Vec2 s = noiseSamples[i];
+				// Vec2i p = vec2i((int)(s.x/gridCell) * gridCell, (int)(s.y/gridCell) * gridCell);
+				// drawRect(rectCenDim(vec2(p), vec2(5,5)), rect(0,0,1,1), vec4(1,0,1,1), ad->textures[0]);
+				Vec2i index = vec2i(s);
+				ad->treeNoise[index.y*VOXEL_X + index.x] = 1;
+			}
+			free(noiseSamples);
+			treeNoise = ad->treeNoise;
 		}
-
-		int treeRadius = 4;
-		ad->treeNoise = (bool*)getPMemory(VOXEL_X*VOXEL_Y);
-		zeroMemory(ad->treeNoise, VOXEL_X*VOXEL_Y);
-
-		Rect bounds = rect(0, 0, 64, 64);
-		Vec2* noiseSamples;
-		// int noiseSamplesSize = blueNoise(bounds, 5, &noiseSamples);
-		int noiseSamplesSize = blueNoise(bounds, treeRadius, &noiseSamples);
-		// int noiseSamplesSize = 10;
-		for(int i = 0; i < noiseSamplesSize; i++) {
-			Vec2 s = noiseSamples[i];
-			// Vec2i p = vec2i((int)(s.x/gridCell) * gridCell, (int)(s.y/gridCell) * gridCell);
-			// drawRect(rectCenDim(vec2(p), vec2(5,5)), rect(0,0,1,1), vec4(1,0,1,1), ad->textures[0]);
-			Vec2i index = vec2i(s);
-			ad->treeNoise[index.y*VOXEL_X + index.x] = 1;
-		}
-		free(noiseSamples);
-		treeNoise = ad->treeNoise;
-
-		for(int i = 0; i < 8; i++) {
-			voxelCache[i] = ad->voxelCache[i];
-			voxelLightingCache[i] = ad->voxelLightingCache[i];
-		}
-
 	}
 
 	// @AppStart.
@@ -941,7 +964,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// 	setWindowMode(windowHandle, ws, WINDOW_MODE_FULLBORDERLESS);
 	// }
 
-	if(input->resize) {
+	if(input->resize || init) {
 		if(!windowIsMinimized(windowHandle)) {
 			updateResolution(windowHandle, ws);
 			ad->updateFrameBuffers = true;
@@ -1133,12 +1156,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// @GameMenu.
 
-	{
-		if(input->keysPressed[KEYCODE_K]) {
-			addTrack("ui\\start.wav");
-		}
-	}
-
 	if(ad->gameMode == GAME_MODE_MENU) {
 		globalCommandList = &ad->commandList2d;
 
@@ -1147,119 +1164,144 @@ extern "C" APPMAINFUNCTION(appMain) {
 		float rHeight = rectH(sr);
 		float rWidth = rectW(sr);
 
-		int titleFontHeight = ds->fontHeight * ws->windowScale * 8.0f;
+		int titleFontHeight = ds->fontHeight * ws->windowScale * 6.0f;
 		int optionFontHeight = titleFontHeight * 0.5f;
 		Font* titleFont = getFont(FONT_SOURCESANS_PRO, titleFontHeight);
 		Font* font = getFont(FONT_SOURCESANS_PRO, optionFontHeight);
 
-		Vec4 cBackground = vec4(0.1f,1);
+		Vec4 cBackground = vec4(hslToRgbFloat(0.63f,0.3f,0.13f),1);
 		Vec4 cTitle = vec4(1,1);
-		Vec4 cTitleShadow = vec4(1,0,0,1);
+		Vec4 cTitleShadow = vec4(0,0,0,1);
 		Vec4 cOption = vec4(0.5f,1);
-		Vec4 cOptionActive = vec4(1,1);
-		Vec4 cOptionShadow = vec4(0,1,1,1);
+		Vec4 cOptionActive = vec4(0.9f,1);
+		Vec4 cOptionShadow1 = vec4(0,1);
+		Vec4 cOptionShadow2 = vec4(hslToRgbFloat(0.0f,0.5f,0.5f), 1);
+		Vec4 cOptionShadow = vec4(0,1);
 
-		float titleShadowSize = titleFontHeight * 0.05f;
-		float optionShadowSize = optionFontHeight * 0.05f;
+		float titleShadowSize = titleFontHeight * 0.07f;
+		float optionShadowSize = optionFontHeight * 0.07f;
 
+		float buttonAnimSpeed = 4;
 
-		float optionOffset = optionFontHeight;
-		float settingsOffset = rWidth * 0.2f;
+		float optionOffset = optionFontHeight*1.2f;
+		float settingsOffset = rWidth * 0.15f;
 
 
 		MainMenu* menu = &ad->menu;
 
 		float volumeMid = 0.5f;
 
+		bool selectionChange = false;
+
 		if(input->keysPressed[KEYCODE_DOWN]) {
 			addTrack("ui\\select.wav", volumeMid);
 			menu->activeId++;
+			selectionChange = true;
 		}
 		if(input->keysPressed[KEYCODE_UP]) {
 			addTrack("ui\\select.wav", volumeMid);
 			menu->activeId--;
+			selectionChange = true;
 		}
 
-		bool activate = input->keysPressed[KEYCODE_RETURN];
+		if(menu->currentId > 0)
+			menu->activeId = mod(menu->activeId, menu->currentId);
 
-		int optionCount[] = {3,3};
-		menu->activeId = mod(menu->activeId, optionCount[menu->screen]);
+		{
+			if(selectionChange) {
+				menu->buttonAnimState = 0;
+			}
 
+			menu->buttonAnimState += ad->dt * buttonAnimSpeed;
+			float anim = (cos(menu->buttonAnimState) + 1)/2.0f;
+			anim = powf(anim, 0.5f);
+			Vec4 cOptionShadowActive = vec4(0,1);
+			cOptionShadowActive.rgb = lerp(anim, cOptionShadow1.rgb, cOptionShadow2.rgb);
+
+			menu->currentId = 0;
+			menu->font = font;
+			menu->cOption = cOption;
+			menu->cOptionActive = cOptionActive;
+			menu->cOptionShadow = cOptionShadow;
+			menu->cOptionShadowActive = cOptionShadowActive;
+			menu->optionShadowSize = optionShadowSize;
+			menu->pressedEnter = input->keysPressed[KEYCODE_RETURN];
+		}
 
 		dcRect(sr, cBackground);
 
 		if(menu->screen == MENU_SCREEN_MAIN) {
 
-			Vec2 p = top;
-			p.y -= rHeight*0.2f;
+			Vec2 p = top - vec2(0, rHeight*0.2f);
 			dcText("Voxel Game", titleFont, p, cTitle, vec2i(0,0), 0, titleShadowSize, cTitleShadow);
 
-			int currentId = 0;
+			bool gameRunning = menu->gameRunning;
 
-			p = top - vec2(0,rHeight*0.4f);
-			dcText("New Game", font, p, menu->activeId != currentId ? cOption : cOptionActive, vec2i(0,0), 0, optionShadowSize, cOptionShadow);
-			if(activate && menu->activeId == currentId) {
+			int optionCount = gameRunning ? 4 : 3;
+			p.y = rectCen(sr).y + ((optionCount-1)*optionOffset)/2;
+
+			if(gameRunning) {
+				if(menuOption(menu, "Resume", p, vec2i(0,0)) || 
+				   input->keysPressed[KEYCODE_ESCAPE]) {
+					input->keysPressed[KEYCODE_ESCAPE] = false;
+
+					ad->gameMode = GAME_MODE_MAIN;
+				}
+				p.y -= optionOffset;
+			}
+
+			if(menuOption(menu, "New Game", p, vec2i(0,0))) {
 				addTrack("ui\\start.wav");
-
 				ad->gameMode = GAME_MODE_LOAD;
-			} 
-			currentId++;
+			}
 
 			p.y -= optionOffset;
-			dcText("Settings", font, p, menu->activeId != currentId ? cOption : cOptionActive, vec2i(0,0), 0, optionShadowSize, cOptionShadow);
-			if(activate && menu->activeId == currentId) {
+			if(menuOption(menu, "Settings", p, vec2i(0,0))) {
 				addTrack("ui\\menuPush.wav", volumeMid);
 
 				menu->screen = MENU_SCREEN_SETTINGS;
 				menu->activeId = 0;
-			} 
-			currentId++;
+			}
 
 			p.y -= optionOffset;
-			dcText("Exit", font, p, menu->activeId != currentId ? cOption : cOptionActive, vec2i(0,0), 0, optionShadowSize, cOptionShadow);
-			if(activate && menu->activeId == currentId) {
+			if(menuOption(menu, "Exit", p, vec2i(0,0))) {
 				*isRunning = false;
-			} 
-			currentId++;
+			}
 
 		} else if(menu->screen == MENU_SCREEN_SETTINGS) {
 
-			Vec2 p = top;
-			p.y -= rHeight*0.2f;
+			Vec2 p = top - vec2(0, rHeight*0.2f);
 			dcText("Settings", titleFont, p, cTitle, vec2i(0,0), 0, titleShadowSize, cTitleShadow);
 
-			int currentId = 0;
+			int optionCount = 4;
+			p.y = rectCen(sr).y + ((optionCount-1)*optionOffset)/2;
 
 			// List settings.
 
-			p = top - vec2(0,rHeight*0.4f);
 			p.x = settingsOffset;
-
-			dcText("Field of view", font, p, menu->activeId != currentId ? cOption : cOptionActive, vec2i(-1,0), 0, optionShadowSize, cOptionShadow);
-			if(activate && menu->activeId == currentId) {
-			} 
-			currentId++;
+			if(menuOption(menu, "Field of view", p, vec2i(-1,0))) {
+			}
 
 			p.y -= optionOffset;
-			dcText("Resolution", font, p, menu->activeId != currentId ? cOption : cOptionActive, vec2i(-1,0), 0, optionShadowSize, cOptionShadow);
-			if(activate && menu->activeId == currentId) {
-			} 
-			currentId++;
+			if(menuOption(menu, "Resolution", p, vec2i(-1,0))) {
+			}
+
+			p.y -= optionOffset;
+			if(menuOption(menu, "Mouse Sensitivity", p, vec2i(-1,0))) {
+			}
 
 			// 
 
 			p.x = rWidth * 0.5f;
 			p.y -= optionOffset;
-			dcText("Back", font, p, menu->activeId != currentId ? cOption : cOptionActive, vec2i(0,0), 0, optionShadowSize, cOptionShadow);
-			if((activate && menu->activeId == currentId) || 
-			   input->keysPressed[KEYCODE_ESCAPE] ||
-			   input->keysPressed[KEYCODE_BACKSPACE]) {
+			if(menuOption(menu, "Back", p, vec2i(0,0)) || 
+			      input->keysPressed[KEYCODE_ESCAPE] ||
+			      input->keysPressed[KEYCODE_BACKSPACE]) {
 				addTrack("ui\\menuPop.wav", volumeMid);
 
 				menu->screen = MENU_SCREEN_MAIN;
 				menu->activeId = 0;
-			} 
-			currentId++;
+			}
 
 		}
 	}
@@ -1276,11 +1318,60 @@ extern "C" APPMAINFUNCTION(appMain) {
 		dcRect(sr, vec4(0,1));
 		dcText("Loading", titleFont, rectCen(sr), vec4(1,1), vec2i(0,-1));
 
+		// @InitNewGame.
+
 		if(!ad->loading) {
 			ad->loading = true;
 
+			{
+				for(int i = 0; i < ad->entityList.size; i++) ad->entityList.e[i].init = false;
+
+				// Init player.
+				{
+					// Vec3 startDir = normVec3(vec3(1,0,0));
+
+					// float v = randomFloat(0,1,0.001f);
+					// Vec3 startRot = normVec3(vec3(sin(v),cos(v),0));
+
+					float v = randomFloat(0,M_2PI,0.001f);
+					Vec3 startRot = vec3(v,0,0);
+
+					Entity player;
+					Vec3 playerDim = vec3(0.8f, 0.8f, 1.8f);
+					float camOff = playerDim.z*0.5f - playerDim.x*0.25f;
+					initEntity(&player, ET_Player, vec3(0,0,40), playerDim, vec3(0,0,camOff));
+					player.rot = startRot;
+					player.playerOnGround = false;
+					strCpy(player.name, "Player");
+					
+					ad->player = addEntity(&ad->entityList, &player);
+				}
+
+				// Debug cam.
+				{
+					Entity freeCam;
+					initEntity(&freeCam, ET_Camera, vec3(35,35,32), vec3(0,0,0), vec3(0,0,0));
+					strCpy(freeCam.name, "Camera");
+					ad->cameraEntity = addEntity(&ad->entityList, &freeCam);
+				}
+
+				ad->blockMenuSelected = 0;
+			}
+
+			// Clear voxel hash and all the meshes.
+			{
+				for(int i = 0; i < arrayCount(ad->voxelHash); i++) {
+					VoxelNode* node = ad->voxelHash[i];
+					freeVoxelList(node);
+					ad->voxelHash[i] = 0;
+				}
+			}
+
 			// Load voxel meshes around the player at startup.
 			{
+				startX = randomInt(0,1000000);
+				startY = randomInt(0,1000000);
+
 				Vec2i pPos = coordToMesh(ad->player->pos);
 				for(int y = -1; y < 2; y++) {
 					for(int x = -1; x < 2; x++) {
@@ -1290,20 +1381,18 @@ extern "C" APPMAINFUNCTION(appMain) {
 						makeMesh(m, ad->voxelHash, ad->voxelHashSize);
 					}
 				}
-
-				// threadQueueComplete(globalThreadQueue);
-
-				// Push the player up until he is right above the ground.
-
-				Entity* player = ad->player;
-
-				while(collisionVoxelWidthBox(ad->voxelHash, ad->voxelHashSize, player->pos, player->dim)) {
-					player->pos.z += 2;
-				}
 			}
 		}
 
 		if(threadQueueFinished(globalThreadQueue)) {
+
+			// Push the player up until he is right above the ground.
+
+			Entity* player = ad->player;
+			while(collisionVoxelWidthBox(ad->voxelHash, ad->voxelHashSize, player->pos, player->dim)) {
+				player->pos.z += 2;
+			}
+
 			ad->loading = false;
 			ad->gameMode = GAME_MODE_MAIN;
 			ad->startFade = 0;
@@ -1314,6 +1403,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 	if(ad->gameMode == GAME_MODE_MAIN) {
+
+	if(input->keysPressed[KEYCODE_ESCAPE]) {
+		ad->gameMode = GAME_MODE_MENU;
+		ad->menu.gameRunning = true;
+		ad->menu.activeId = 0;
+	}
 
 	Entity* player = ad->player;
 	Entity* camera = ad->cameraEntity;
@@ -1356,32 +1451,35 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 	// spawn bomb
-	bool spawnBomb = false;
-	if(input->mouseButtonPressed[2]) {
-		spawnBomb = true;
-		ad->bombSpawnTimer = 0;
+	#if 0
+	{
+		bool spawnBomb = false;
+		if(input->mouseButtonPressed[2]) {
+			spawnBomb = true;
+			ad->bombSpawnTimer = 0;
+		}
+
+		if(input->mouseButtonDown[2]) {
+			ad->bombSpawnTimer += ad->dt;
+		}
+
+		if(ad->bombSpawnTimer >= ad->bombFireInterval) {
+			spawnBomb = true;
+			ad->bombSpawnTimer = 0;
+		}
+
+		if(spawnBomb) {
+			Entity b;
+			Vec3 bombPos = ad->activeCam.pos + ad->activeCam.look*4;
+			initEntity(&b, ET_Rocket, bombPos, ad->activeCam.look, vec3(0.5f), vec3(0,0,0));
+			b.vel = ad->activeCam.look*300;
+			b.acc = ad->activeCam.look*200;
+			b.isMoving = true;
+
+			addEntity(&ad->entityList, &b);
+		}
 	}
-
-	if(input->mouseButtonDown[2]) {
-		ad->bombSpawnTimer += ad->dt;
-	}
-
-	if(ad->bombSpawnTimer >= ad->bombFireInterval) {
-		spawnBomb = true;
-		ad->bombSpawnTimer = 0;
-	}
-
-	if(spawnBomb) {
-		Entity b;
-		Vec3 bombPos = ad->activeCam.pos + ad->activeCam.look*4;
-		initEntity(&b, ET_Rocket, bombPos, ad->activeCam.look, vec3(0.5f), vec3(0,0,0));
-		b.vel = ad->activeCam.look*300;
-		b.acc = ad->activeCam.look*200;
-		b.isMoving = true;
-
-		addEntity(&ad->entityList, &b);
-	}
-
+	#endif
 
 
 	TIMER_BLOCK_BEGIN_NAMED(entities, "Upd Entities");
@@ -1405,14 +1503,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 				float speed = 30;
 
 				if((!ad->fpsMode && input->mouseButtonDown[1]) || ad->fpsMode) {
-					float turnRate = ad->dt*ad->mouseSensitivity;
+					float turnRate = ad->dt*ad->settings.mouseSensitivity;
 					e->rot.y -= turnRate * input->mouseDelta.y;
 					e->rot.x -= turnRate * input->mouseDelta.x;
 
 					float margin = 0.00001f;
-					clamp(&e->rot.y, -M_PI+margin, M_PI-margin);
-
-					e->rot.x = modFloat(e->rot.x, (float)M_PI*4);
+					clamp(&e->rot.y, -M_PI_2+margin, M_PI_2-margin);
+					e->rot.x = modFloat(e->rot.x, (float)M_PI*2);
 				}
 
 				if( input->keysDown[KEYCODE_W] || input->keysDown[KEYCODE_A] || input->keysDown[KEYCODE_S] || 
@@ -1601,12 +1698,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 				if(input->keysDown[KEYCODE_T]) speed = 1000;
 
 				if((!ad->fpsMode && input->mouseButtonDown[1]) || ad->fpsMode) {
-					float turnRate = ad->dt*ad->mouseSensitivity;
+					float turnRate = ad->dt*ad->settings.mouseSensitivity;
 					e->rot.y -= turnRate * input->mouseDelta.y;
 					e->rot.x -= turnRate * input->mouseDelta.x;
 
 					float margin = 0.00001f;
-					clamp(&e->rot.y, -M_PI+margin, M_PI-margin);
+					clamp(&e->rot.y, -M_PI_2+margin, M_PI_2-margin);
+					e->rot.x = modFloat(e->rot.x, (float)M_PI*2);
 				}
 
 				if( input->keysDown[KEYCODE_W] || input->keysDown[KEYCODE_A] || input->keysDown[KEYCODE_S] || 
@@ -1803,7 +1901,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		int intersectionFace;
 
-		for(int i = 0; i < ad->selectionRadius; i++) {
+		for(int i = 0; i < SELECTION_RADIUS; i++) {
 			newPos = newPos + normVec3(startDir);
 
 			Vec3 coords[9];
@@ -2164,7 +2262,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// Draw voxel world and reflection.
 	{
-		setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, ad->fogColor);
+		setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, voxelFogColor);
 
 		// TIMER_BLOCK_NAMED("D World");
 		// draw world without water
@@ -2250,7 +2348,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				glDepthMask(true);
 				glDisable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 
-			setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, ad->fogColor, vec3(0,0,WATER_LEVEL_HEIGHT*2 + 0.01f), vec3(1,1,-1));
+			setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, voxelFogColor, vec3(0,0,WATER_LEVEL_HEIGHT*2 + 0.01f), vec3(1,1,-1));
 			pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CLIPPLANE, true);
 			pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CPLANE1, 0,0,-1,WATER_LEVEL_HEIGHT);
 
@@ -2318,7 +2416,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		// draw water
 		{
-			setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, ad->fogColor);
+			setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, voxelFogColor);
 			pushUniform(SHADER_VOXEL, 1, VOXEL_UNIFORM_ALPHATEST, 0.5f);
 
 			for(int i = sortListSize-1; i >= 0; i--) {
@@ -2409,11 +2507,28 @@ extern "C" APPMAINFUNCTION(appMain) {
 	{
 		float v = ad->startFade;
 
-		ad->startFade += ad->dt / 6.0f;
+		ad->startFade += ad->dt / 3.0f;
 
-		float p = 0.25f;
+		// float p = 0.25f;
 
-		float r[] = {0, 0.3f, 0.9, 1};
+		// float r[] = {0, 0.3f, 0.9, 1};
+		// int stage = 0;
+		// for(int i = 0; i < arrayCount(r); i++) {
+		// 	if(v >= r[i] && v < r[i+1]) { stage = i; break; }
+		// }
+
+		// float a = 0;
+		// if(stage == 0) {
+		// 	a = 1;
+		// } else if(stage == 1) {
+		// 	a = mapRange(v, r[stage], r[stage+1], 1, 0.1f);
+		// 	a = powf(a, p);
+		// } else if(stage == 2) {
+		// 	float s = powf(0.1f, p);
+		// 	a = mapRange(v, r[stage], r[stage+1], s, 0);
+		// }
+
+		float r[] = {0, 0.3f, 1};
 		int stage = 0;
 		for(int i = 0; i < arrayCount(r); i++) {
 			if(v >= r[i] && v < r[i+1]) { stage = i; break; }
@@ -2423,11 +2538,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		if(stage == 0) {
 			a = 1;
 		} else if(stage == 1) {
-			a = mapRange(v, r[stage], r[stage+1], 1, 0.1f);
-			a = powf(a, p);
-		} else if(stage == 2) {
-			float s = powf(0.1f, p);
-			a = mapRange(v, r[stage], r[stage+1], s, 0);
+			a = mapRange(v, r[stage], r[stage+1], 1, 0);
 		}
 
 		Vec4 c = vec4(0,a);
@@ -2838,6 +2949,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 			wglSwapIntervalEXT(0);
 		}
 
+		if(init) {
+			showWindow(windowHandle);
+			GLenum glError = glGetError(); printf("GLError: %i\n", glError);
+		}
+
+		// glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		// drawRect(rectCenDim(0,0,100,100), vec4(1,0,0,1));
+
 		swapBuffers(sd);
 		glFinish();
 
@@ -2848,10 +2967,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 			sd->vsyncTempTurnOff = false;
 		}
 
-		if(init) {
-			showWindow(windowHandle);
-			GLenum glError = glGetError(); printf("GLError: %i\n", glError);
-		}
+		// if(init) {
+		// 	showWindow(windowHandle);
+		// 	GLenum glError = glGetError(); printf("GLError: %i\n", glError);
+		// }
 	}
 
 	debugMain(ds, appMemory, ad, reload, isRunning, init, threadQueue);

@@ -3,6 +3,10 @@ extern ThreadQueue* globalThreadQueue;
 const char* minecraftTextureFolderPath = DATA_FOLDER("Textures\\Minecraft\\");
 
 
+Vec3 voxelFogColor = colorSRGB(vec3(0.43f,0.38f,0.44f));
+
+#define SELECTION_RADIUS 5
+
 // #define VIEW_DISTANCE 4096 // 64
 // #define VIEW_DISTANCE 3072 // 32
 
@@ -13,7 +17,7 @@ const char* minecraftTextureFolderPath = DATA_FOLDER("Textures\\Minecraft\\");
 #define VIEW_DISTANCE 256 // 4
 // #define VIEW_DISTANCE 128 // 2
 
-#define USE_MALLOC 0
+#define USE_MALLOC 1
 
 #define VOXEL_X 64
 #define VOXEL_Y 64
@@ -42,7 +46,6 @@ int globalLumen = 210;
 
 int startX = 37750;
 int startY = 47850;
-
 int startXMod = 58000;
 int startYMod = 68000;
 
@@ -290,6 +293,23 @@ void initVoxelMesh(VoxelMesh* m, Vec2i coord) {
 	}
 }
 
+void freeVoxelMesh(VoxelMesh* m) {
+	if(!m->voxels) return;
+
+	if(USE_MALLOC) {
+		free(m->voxels);
+		free(m->lighting);
+	}
+
+	glDeleteBuffers(1, &m->bufferId);
+	glDeleteBuffers(1, &m->bufferTransId);
+
+	if(STBVOX_CONFIG_MODE == 1) {
+		glDeleteBuffers(1, &m->texBufferId);
+		glDeleteBuffers(1, &m->texBufferTransId);
+	}
+}
+
 struct VoxelNode {
 	VoxelMesh mesh;
 	VoxelNode* next;
@@ -300,27 +320,60 @@ VoxelMesh* getVoxelMesh(VoxelNode** voxelHash, int voxelHashSize, Vec2i coord) {
 
 	VoxelMesh* m = 0;
 	VoxelNode* node = voxelHash[hashIndex];
-	while(node->next) {
-		if(node->mesh.coord == coord) {
-			m = &node->mesh;
-			break;
+	if(node) {
+		while(node->next) {
+			if(node->mesh.coord == coord) {
+				m = &node->mesh;
+				break;
+			}
+
+			node = node->next;
+		}
+	} else {
+		if(USE_MALLOC) {
+			node = (VoxelNode*)malloc(sizeof(VoxelNode));
+		} else {
+			node = (VoxelNode*)getPMemory(sizeof(VoxelNode));
 		}
 
-		node = node->next;
+		voxelHash[hashIndex] = node;
 	}
 
 	if(!m) {
 		m = &node->mesh;
 		initVoxelMesh(m, coord);
 
-		node->next = (VoxelNode*)getPMemory(sizeof(VoxelNode));
+		if(USE_MALLOC) {
+			node->next = (VoxelNode*)malloc(sizeof(VoxelNode));
+		} else {
+			node->next = (VoxelNode*)getPMemory(sizeof(VoxelNode));
+		}
 		*node->next = {};
 	}
 
 	return m;
 }
 
+void freeVoxelList(VoxelNode* listNode) {
+	if(!listNode) return;
 
+	if(listNode->next) {
+		freeVoxelMesh(&listNode->mesh);
+
+		VoxelNode* node = listNode->next;
+		VoxelNode* next = node->next;
+
+		free(listNode);
+
+		do {
+			freeVoxelMesh(&node->mesh);
+			free(node);
+			node = next;
+			next = node->next;
+			if(!next) break;
+		} while(node);
+	}
+}
 
 void generateVoxelMeshThreaded(void* data) {
 	TIMER_BLOCK();

@@ -69,6 +69,7 @@ typedef ptrdiff_t GLintptr;
 	GLOP(void, CreateBuffers, GLsizei n, GLuint *buffers) \
 	GLOP(void, CreateTextures, GLenum target, GLsizei n, GLuint *textures) \
 	GLOP(void, NamedBufferStorage, GLuint buffer, GLsizei size, const void *data, GLbitfield flags) \
+	GLOP(void, DeleteBuffers, GLsizei n, const GLuint * buffers) \
 	GLOP(void*, MapNamedBufferRange, GLuint buffer, GLint* offset, GLsizei length, GLbitfield access) \
 	GLOP(void, TextureBuffer, GLuint texture, GLenum internalformat, GLuint buffer) \
 	GLOP(uint, CreateShaderProgramv, GLenum type, GLsizei count, const char **strings) \

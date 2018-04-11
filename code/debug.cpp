@@ -69,7 +69,7 @@ StructMemberInfo entityStructMemberInfos[] = {
 	initMemberInfo("id", STRUCTTYPE_INT, offsetof(Entity, id)),
 	initMemberInfo("name", STRUCTTYPE_CHAR, offsetof(Entity, name), {ARRAYTYPE_CONSTANT, 2, memberSize(Entity, name)}),
 	initMemberInfo("pos", STRUCTTYPE_VEC3, offsetof(Entity, pos)),
-	initMemberInfo("dir", STRUCTTYPE_VEC3, offsetof(Entity, dir)),
+	// initMemberInfo("dir", STRUCTTYPE_VEC3, offsetof(Entity, dir)),
 	initMemberInfo("rot", STRUCTTYPE_VEC3, offsetof(Entity, rot)),
 	initMemberInfo("rotAngle", STRUCTTYPE_FLOAT, offsetof(Entity, rotAngle)),
 	initMemberInfo("dim", STRUCTTYPE_VEC3, offsetof(Entity, dim)),
