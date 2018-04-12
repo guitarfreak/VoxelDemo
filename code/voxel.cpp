@@ -74,6 +74,61 @@ MakeMeshThreadedData* voxelThreadData;
 
 
 
+struct VoxelMesh {
+	bool generated;
+	bool upToDate;
+	bool meshUploaded;
+
+	volatile uint activeGeneration;
+	volatile uint activeMaking;
+
+	bool modifiedByUser;
+
+	Vec2i coord;
+	uchar* voxels;
+	uchar* lighting;
+
+	float transform[3][3];
+	int quadCount;
+
+	int quadCountTrans;
+
+	char* meshBuffer;
+	int meshBufferSize;
+	int meshBufferCapacity;
+	uint bufferId;
+
+	char* texBuffer;
+	int texBufferSize;
+	int texBufferCapacity;
+	uint textureId;
+	uint texBufferId;
+
+	char* meshBufferTrans;
+	int meshBufferTransCapacity;
+	uint bufferTransId;
+	char* texBufferTrans;
+	int texBufferTransCapacity;
+	uint textureTransId;
+	uint texBufferTransId;
+
+	int bufferSizePerQuad;
+	int textureBufferSizePerQuad;
+};
+
+struct VoxelData {
+	DArray<VoxelMesh> voxels;
+	DArray<int>* voxelHash;
+	int voxelHashSize;
+};
+
+struct MakeMeshThreadedData {
+	VoxelMesh* m;
+	VoxelData* voxelData;
+
+	int inProgress;
+};
+
 enum BlockTypes {
 	BT_None = 0,
 	BT_Water,
@@ -106,6 +161,13 @@ enum BlockTextures {
 	BX_Size,
 };
 
+enum BlockTextures2 {
+	BX2_None = 0,
+	BX2_Leaves,
+
+	BX2_Size,
+};
+
 const char* textureFilePaths[BX_Size] = {
 	DATA_FOLDER("Textures\\Minecraft\\none.png"),
 	DATA_FOLDER("Textures\\Minecraft\\water.png"),
@@ -123,13 +185,6 @@ const char* textureFilePaths[BX_Size] = {
 	DATA_FOLDER("Textures\\Minecraft\\pumpkin_top.png"),
 	DATA_FOLDER("Textures\\Minecraft\\pumpkin_side.png"),
 	DATA_FOLDER("Textures\\Minecraft\\pumpkin_bottom.png"),
-};
-
-enum BlockTextures2 {
-	BX2_None = 0,
-	BX2_Leaves,
-
-	BX2_Size,
 };
 
 const char* textureFilePaths2[BX2_Size] = {
@@ -214,49 +269,6 @@ void buildColorPalette() {
 }
 
 
-
-struct VoxelMesh {
-	bool generated;
-	bool upToDate;
-	bool meshUploaded;
-
-	volatile uint activeGeneration;
-	volatile uint activeMaking;
-
-	bool modifiedByUser;
-
-	Vec2i coord;
-	uchar* voxels;
-	uchar* lighting;
-
-	float transform[3][3];
-	int quadCount;
-
-	int quadCountTrans;
-
-	char* meshBuffer;
-	int meshBufferSize;
-	int meshBufferCapacity;
-	uint bufferId;
-
-	char* texBuffer;
-	int texBufferSize;
-	int texBufferCapacity;
-	uint textureId;
-	uint texBufferId;
-
-	char* meshBufferTrans;
-	int meshBufferTransCapacity;
-	uint bufferTransId;
-	char* texBufferTrans;
-	int texBufferTransCapacity;
-	uint textureTransId;
-	uint texBufferTransId;
-
-	int bufferSizePerQuad;
-	int textureBufferSizePerQuad;
-};
-
 void initVoxelMesh(VoxelMesh* m, Vec2i coord) {
 	TIMER_BLOCK();
 
@@ -310,69 +322,36 @@ void freeVoxelMesh(VoxelMesh* m) {
 	}
 }
 
-struct VoxelNode {
-	VoxelMesh mesh;
-	VoxelNode* next;
-};
+void addVoxelMesh(VoxelData* voxelData, Vec2i coord, int index) {
+	int hashIndex = mod(coord.x*9 + coord.y*23, voxelData->voxelHashSize);
+	
+	DArray<int>* voxelList = voxelData->voxelHash + hashIndex;
+	voxelList->push(index);
+}
 
-VoxelMesh* getVoxelMesh(VoxelNode** voxelHash, int voxelHashSize, Vec2i coord) {
-	int hashIndex = mod(coord.x*9 + coord.y*23, voxelHashSize);
+VoxelMesh* getVoxelMesh(VoxelData* voxelData, Vec2i coord) {
+	int hashIndex = mod(coord.x*9 + coord.y*23, voxelData->voxelHashSize);
 
 	VoxelMesh* m = 0;
-	VoxelNode* node = voxelHash[hashIndex];
-	if(node) {
-		while(node->next) {
-			if(node->mesh.coord == coord) {
-				m = &node->mesh;
-				break;
-			}
-
-			node = node->next;
+	DArray<int>* voxelList = voxelData->voxelHash + hashIndex;
+	for(int i = 0; i < voxelList->count; i++) {
+		VoxelMesh* mesh = voxelData->voxels.data + voxelList->data[i];
+		if(mesh->coord == coord) {
+			m = mesh;
+			break;
 		}
-	} else {
-		if(USE_MALLOC) {
-			node = (VoxelNode*)malloc(sizeof(VoxelNode));
-		} else {
-			node = (VoxelNode*)getPMemory(sizeof(VoxelNode));
-		}
-
-		voxelHash[hashIndex] = node;
 	}
 
 	if(!m) {
-		m = &node->mesh;
-		initVoxelMesh(m, coord);
-
-		if(USE_MALLOC) {
-			node->next = (VoxelNode*)malloc(sizeof(VoxelNode));
-		} else {
-			node->next = (VoxelNode*)getPMemory(sizeof(VoxelNode));
-		}
-		*node->next = {};
+		VoxelMesh mesh;
+		initVoxelMesh(&mesh, coord);
+		voxelData->voxels.push(mesh);
+		m = voxelData->voxels.data + voxelData->voxels.count-1;
+		int index = voxelData->voxels.count-1;
+		voxelList->push(index);
 	}
 
 	return m;
-}
-
-void freeVoxelList(VoxelNode* listNode) {
-	if(!listNode) return;
-
-	if(listNode->next) {
-		freeVoxelMesh(&listNode->mesh);
-
-		VoxelNode* node = listNode->next;
-		VoxelNode* next = node->next;
-
-		free(listNode);
-
-		do {
-			freeVoxelMesh(&node->mesh);
-			free(node);
-			node = next;
-			next = node->next;
-			if(!next) break;
-		} while(node);
-	}
 }
 
 void generateVoxelMeshThreaded(void* data) {
@@ -445,8 +424,8 @@ void generateVoxelMeshThreaded(void* data) {
 
 		for(int i = 0; i < treePositionsSize; i++) {
 			Vec3i p = treePositions[i];
-			int treeHeight = randomInt(3,6);
-			int crownHeight = randomInt(1,3);
+			int treeHeight = randomIntPCG(3,6);
+			int crownHeight = randomIntPCG(1,3);
 
 			Vec3i tp = p + vec3i(0,0,treeHeight);
 			Vec3i offset = vec3i(2,2,1);
@@ -496,24 +475,11 @@ void generateVoxelMeshThreaded(void* data) {
 	m->generated = true;
 }
 
-struct MakeMeshThreadedData {
-	VoxelMesh* m;
-	VoxelNode** voxelHash;
-	int voxelHashSize;
-
-	int inProgress;
-};
-
 void makeMeshThreaded(void* data) {	
 	TIMER_BLOCK();
 	
 	MakeMeshThreadedData* d = (MakeMeshThreadedData*)data;
 	VoxelMesh* m = d->m;
-	// VoxelMesh* vms = d->vms;
-	// int* vmsSize = d->vmsSize;
-
-	VoxelNode** voxelHash = d->voxelHash;
-	int voxelHashSize = d->voxelHashSize;
 
 	int cacheId = THREADING ? getThreadQueueId(globalThreadQueue) : 1;
 
@@ -522,7 +488,7 @@ void makeMeshThreaded(void* data) {
 	for(int y = -1; y < 2; y++) {
 		for(int x = -1; x < 2; x++) {
 			Vec2i c = coord + vec2i(x,y);
-			VoxelMesh* lm = getVoxelMesh(voxelHash, voxelHashSize, c);
+			VoxelMesh* lm = getVoxelMesh(d->voxelData, c);
 
 			assert(lm->generated);
 
@@ -651,7 +617,7 @@ void makeMeshThreaded(void* data) {
 	d->inProgress = false;
 }
 
-void makeMesh(VoxelMesh* m, VoxelNode** voxelHash, int voxelHashSize) {
+void makeMesh(VoxelMesh* m, VoxelData* voxelData) {
 	TIMER_BLOCK();
 
 	// int threadJobsMax = 20;
@@ -661,7 +627,7 @@ void makeMesh(VoxelMesh* m, VoxelNode** voxelHash, int voxelHashSize) {
 	for(int y = -1; y < 2; y++) {
 		for(int x = -1; x < 2; x++) {
 			Vec2i c = coord + vec2i(x,y);
-			VoxelMesh* lm = getVoxelMesh(voxelHash, voxelHashSize, c);
+			VoxelMesh* lm = getVoxelMesh(voxelData, c);
 
 			if(!lm->generated) {
 				if(THREADING) {
@@ -694,7 +660,7 @@ void makeMesh(VoxelMesh* m, VoxelNode** voxelHash, int voxelHashSize) {
 				MakeMeshThreadedData* data;
 				for(int i = 0; i < 256; i++) {
 					if(!voxelThreadData[i].inProgress) {
-						voxelThreadData[i] = {m, voxelHash, voxelHashSize, true};
+						voxelThreadData[i] = {m, voxelData, true};
 						// data = voxelThreadData + i;
 						
 						atomicAdd(&m->activeMaking);
@@ -704,7 +670,7 @@ void makeMesh(VoxelMesh* m, VoxelNode** voxelHash, int voxelHashSize) {
 					}
 				}
 			} else {
-				voxelThreadData[1] = {m, voxelHash, voxelHashSize, true};
+				voxelThreadData[1] = {m, voxelData, true};
 				makeMeshThreaded(&voxelThreadData[1]);
 			}
 		}
@@ -814,8 +780,8 @@ Vec3 coordToMeshCoord(Vec3 coord) {
 
 
 // voxel -> block
-uchar* getBlockFromVoxel(VoxelNode** voxelHash, int voxelHashSize, Vec3i voxel) {
-	VoxelMesh* vm = getVoxelMesh(voxelHash, voxelHashSize, voxelToMesh(voxel));
+uchar* getBlockFromVoxel(VoxelData* voxelData, Vec3i voxel) {
+	VoxelMesh* vm = getVoxelMesh(voxelData, voxelToMesh(voxel));
 	Vec3i localCoord = voxelToLocalVoxel(voxel);
 	uchar* block = &vm->voxels[voxelArray(localCoord.x, localCoord.y, localCoord.z)];
 
@@ -823,13 +789,13 @@ uchar* getBlockFromVoxel(VoxelNode** voxelHash, int voxelHashSize, Vec3i voxel) 
 }
 
 // coord -> block
-uchar* getBlockFromCoord(VoxelNode** voxelHash, int voxelHashSize, Vec3 coord) {
-	return getBlockFromVoxel(voxelHash, voxelHashSize, coordToVoxel(coord));
+uchar* getBlockFromCoord(VoxelData* voxelData, Vec3 coord) {
+	return getBlockFromVoxel(voxelData, coordToVoxel(coord));
 }
 
 // voxel -> lighting
-uchar* getLightingFromVoxel(VoxelNode** voxelHash, int voxelHashSize, Vec3i voxel) {
-	VoxelMesh* vm = getVoxelMesh(voxelHash, voxelHashSize, voxelToMesh(voxel));
+uchar* getLightingFromVoxel(VoxelData* voxelData, Vec3i voxel) {
+	VoxelMesh* vm = getVoxelMesh(voxelData, voxelToMesh(voxel));
 	Vec3i localCoord = voxelToLocalVoxel(voxel);
 	uchar* block = &vm->lighting[voxelArray(localCoord.x, localCoord.y, localCoord.z)];
 
@@ -837,8 +803,8 @@ uchar* getLightingFromVoxel(VoxelNode** voxelHash, int voxelHashSize, Vec3i voxe
 }
 
 // coord -> lighting
-uchar* getLightingFromCoord(VoxelNode** voxelHash, int voxelHashSize, Vec3 coord) {
-	return getLightingFromVoxel(voxelHash, voxelHashSize, coordToVoxel(coord));
+uchar* getLightingFromCoord(VoxelData* voxelData, Vec3 coord) {
+	return getLightingFromVoxel(voxelData, coordToVoxel(coord));
 }
 
 void setupVoxelUniforms(Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit, Mat4 view, Mat4 proj, Vec3 fogColor, Vec3 trans = vec3(0,0,0), Vec3 scale = vec3(1,1,1), Vec3 rotation = vec3(0,0,0)) {
@@ -1095,7 +1061,7 @@ void loadVoxelTextures(char* folderPath, int internalFormat, bool reload = false
 }
 
 
-bool collisionVoxelWidthBox(VoxelNode** voxelHash, int voxelHashSize, Vec3 boxPos, Vec3 boxSize, float* minDistance = 0, Vec3* collisionVoxel = 0) {
+bool collisionVoxelWidthBox(VoxelData* voxelData, Vec3 boxPos, Vec3 boxSize, float* minDistance = 0, Vec3* collisionVoxel = 0) {
 
 	// First get the mesh coords that touch the player box.
 
@@ -1114,7 +1080,7 @@ bool collisionVoxelWidthBox(VoxelNode** voxelHash, int voxelHashSize, Vec3 boxPo
 		for(int y = voxelMin.y; y < voxelMax.y; y++) {
 			for(int z = voxelMin.z; z < voxelMax.z; z++) {
 				Vec3i coord = vec3i(x,y,z);
-				uchar* block = getBlockFromVoxel(voxelHash, voxelHashSize, coord);
+				uchar* block = getBlockFromVoxel(voxelData, coord);
 
 				if(*block > 0) {
 					if(checkDistance) {

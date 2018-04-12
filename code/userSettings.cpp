@@ -20,6 +20,9 @@ const int INTERNAL_TEXTURE_FORMAT = USE_SRGB ? GL_SRGB8_ALPHA8 : GL_RGBA8;
 #define DATA_FOLDER(str) "..\\data\\" str
 #endif
 
+#define SAVES_FOLDER ".\\saves\\"
+#define SAVE_STATE1 "saveState1.sav"
+
 #define GUI_SETTINGS_FILE DATA_FOLDER("guiSettings.txt")
 
 #define App_Font_Folder DATA_FOLDER("Fonts\\")

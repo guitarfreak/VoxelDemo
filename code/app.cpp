@@ -279,6 +279,7 @@ struct AppData {
 	MainMenu menu;
 
 	bool loading;
+	bool newGame;
 	float startFade;
 
 	GameSettings settings;
@@ -306,8 +307,8 @@ struct AppData {
 	Vec3 selectedBlock;
 	Vec3 selectedBlockFaceDir;
 
-	VoxelNode* voxelHash[1024];
-	int voxelHashSize;
+	VoxelData voxelData;
+
 	uchar* voxelCache[8];
 	uchar* voxelLightingCache[8];
 
@@ -742,6 +743,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 			}
 		}
 
+		pcg32_srandom(0, __rdtsc());
+
 		//
 		// @AppInit.
 		//
@@ -750,13 +753,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 		timerInit(&ds->frameTimer);
 		timerInit(&ds->tempTimer);
 
-		ad->gameMode = GAME_MODE_MENU;
-
-		ad->menu.activeId = 0;
-		ad->menu.screen = MENU_SCREEN_MAIN;
+		ad->gameMode = GAME_MODE_LOAD;
+		ad->newGame = false;
+		// ad->menu.activeId = 0;
 
 		ad->captureMouse = false;
 		showCursor(false);
+
+		folderExistsCreate(SAVES_FOLDER);	
 
 		//
 
@@ -779,11 +783,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		// Hashes and thread data.
 		{
-			ad->voxelHashSize = sizeof(arrayCount(ad->voxelHash));
-			// for(int i = 0; i < ad->voxelHashSize; i++) {
-			// 	ad->voxelHash[i] = (VoxelNode*)getPMemory(sizeof(VoxelNode));
-			// 	*ad->voxelHash[i] = {};
-			// }
+			VoxelData* vd = &ad->voxelData;
+			vd->voxelHashSize = 1024;
+			vd->voxelHash = getPArray(DArray<int>, vd->voxelHashSize);
 
 			for(int i = 0; i < arrayCount(ad->threadData); i++) {
 				ad->threadData[i] = {};
@@ -798,6 +800,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 				voxelCache[i] = ad->voxelCache[i];
 				voxelLightingCache[i] = ad->voxelLightingCache[i];
 			}
+
+			ad->voxelData.voxels.reserve(10000);
 		}
 
 		// Trees.
@@ -1156,6 +1160,47 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// @GameMenu.
 
+	// // Save.
+	// if(input->keysPressed[KEYCODE_U]) {
+	// 	char* saveName = "saveState1.sav";
+	// 	char* saveFile = fillString("%s%s", SAVES_FOLDER, saveName);
+
+	// 	DArray<VoxelMesh>* voxels = &ad->voxelData.voxels;
+
+	// 	FILE* file = fopen(saveFile, "wb");
+	// 	if(file) {
+	// 		fwrite(ad->entityList.e, ad->entityList.size * sizeof(Entity), 1, file);
+
+	// 		fwrite(&voxels->count, sizeof(int), 1, file);
+	// 		fwrite(voxels->data, voxels->count * sizeof(VoxelMesh), 1, file);
+	// 	}
+	// }
+
+	// // Load.
+	// if(input->keysPressed[KEYCODE_I]) {
+	// 	char* saveName = "saveState1.sav";
+	// 	char* saveFile = fillString("%s%s", SAVES_FOLDER, saveName);
+
+	// 	DArray<VoxelMesh>* voxels = &ad->voxelData.voxels;
+	// 	voxels->clear();
+
+	// 	FILE* file = fopen(saveFile, "wb");
+	// 	if(file) {
+	// 		fread(ad->entityList.e, ad->entityList.size * sizeof(Entity), 1, file);
+
+	// 		int count = 0;
+	// 		fread(&count, sizeof(int), 1, file);
+
+	// 		voxels->reserve(count);
+	// 		voxels->count = count;
+	// 		fwrite(voxels->data, voxels->count * sizeof(VoxelMesh), 1, file);
+	// 	}
+
+	// 	for(int i = 0; i < ad->voxelData.voxelHashSize; i++) {
+	// 		ad->voxelData.voxelHash[i].clear();
+	// 	}
+	// }
+
 	if(ad->gameMode == GAME_MODE_MENU) {
 		globalCommandList = &ad->commandList2d;
 
@@ -1253,6 +1298,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			if(menuOption(menu, "New Game", p, vec2i(0,0))) {
 				addTrack("ui\\start.wav");
 				ad->gameMode = GAME_MODE_LOAD;
+				ad->newGame = true;
 			}
 
 			p.y -= optionOffset;
@@ -1323,17 +1369,90 @@ extern "C" APPMAINFUNCTION(appMain) {
 		if(!ad->loading) {
 			ad->loading = true;
 
+			bool hasSaveState;
+			char* saveFile = fillString("%s%s", SAVES_FOLDER, SAVE_STATE1);
+			if(fileExists(saveFile)) hasSaveState = true;
+
+			// Pre work.
 			{
+				ad->blockMenuSelected = 0;
+
+				// Clear voxel hash and meshes.
+				{
+					DArray<int>* voxelHash = ad->voxelData.voxelHash;
+					for(int i = 0; i < ad->voxelData.voxelHashSize; i++) {
+						voxelHash[i].clear();
+					}
+
+					DArray<VoxelMesh>* voxels = &ad->voxelData.voxels;
+					for(int i = 0; i < voxels->count; i++) {
+						freeVoxelMesh(voxels->data + i);
+					}
+
+					voxels->clear();
+				}
+			}
+
+			// Load SaveState.
+			if(!ad->newGame && hasSaveState) {
+				DArray<VoxelMesh>* voxels = &ad->voxelData.voxels;
+				voxels->clear();
+
+				FILE* file = fopen(saveFile, "rb");
+				if(file) {
+					fread(ad->entityList.e, ad->entityList.size * sizeof(Entity), 1, file);
+
+					int count = 0;
+					fread(&count, sizeof(int), 1, file);
+
+					voxels->reserve(count);
+					voxels->count = count;
+
+					for(int i = 0; i < voxels->count; i++) {
+						VoxelMesh* m = voxels->data + i;
+						initVoxelMesh(m, vec2i(0,0));
+
+						fread(&m->coord, sizeof(Vec2i), 1, file);
+						fread(m->voxels, VOXEL_SIZE * sizeof(uchar), 1, file);
+						fread(m->lighting, VOXEL_SIZE * sizeof(uchar), 1, file);
+					}
+
+					fread(&startX, sizeof(int), 1, file);
+					fread(&startY, sizeof(int), 1, file);
+				}
+
+				for(int i = 0; i < voxels->count; i++) {
+					VoxelMesh* m = voxels->data + i;
+					m->generated = true;
+					m->upToDate = false;
+					m->meshUploaded = false;
+
+					addVoxelMesh(&ad->voxelData, m->coord, i);
+				}
+
+				EntityList* entityList = &ad->entityList;
+				Entity* player = 0;
+				Entity* camera = 0;
+				for(int i = 0; i < entityList->size; i++) {
+					Entity* e = entityList->e + i;
+					if(e->type == ET_Player) player = e;
+					else if(e->type == ET_Camera) camera = e;
+
+					if(player && camera) break;
+				}
+
+				ad->player = player;
+				ad->cameraEntity = camera;
+
+			} else {
+
+				// New Game.
+
 				for(int i = 0; i < ad->entityList.size; i++) ad->entityList.e[i].init = false;
 
 				// Init player.
 				{
-					// Vec3 startDir = normVec3(vec3(1,0,0));
-
-					// float v = randomFloat(0,1,0.001f);
-					// Vec3 startRot = normVec3(vec3(sin(v),cos(v),0));
-
-					float v = randomFloat(0,M_2PI,0.001f);
+					float v = randomFloatPCG(0,M_2PI,0.001f);
 					Vec3 startRot = vec3(v,0,0);
 
 					Entity player;
@@ -1355,30 +1474,19 @@ extern "C" APPMAINFUNCTION(appMain) {
 					ad->cameraEntity = addEntity(&ad->entityList, &freeCam);
 				}
 
-				ad->blockMenuSelected = 0;
-			}
-
-			// Clear voxel hash and all the meshes.
-			{
-				for(int i = 0; i < arrayCount(ad->voxelHash); i++) {
-					VoxelNode* node = ad->voxelHash[i];
-					freeVoxelList(node);
-					ad->voxelHash[i] = 0;
-				}
+				startX = randomIntPCG(0,1000000);
+				startY = randomIntPCG(0,1000000);
 			}
 
 			// Load voxel meshes around the player at startup.
 			{
-				startX = randomInt(0,1000000);
-				startY = randomInt(0,1000000);
-
 				Vec2i pPos = coordToMesh(ad->player->pos);
 				for(int y = -1; y < 2; y++) {
 					for(int x = -1; x < 2; x++) {
 						Vec2i coord = pPos - vec2i(x,y);
 
-						VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
-						makeMesh(m, ad->voxelHash, ad->voxelHashSize);
+						VoxelMesh* m = getVoxelMesh(&ad->voxelData, coord);
+						makeMesh(m, &ad->voxelData);
 					}
 				}
 			}
@@ -1389,7 +1497,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			// Push the player up until he is right above the ground.
 
 			Entity* player = ad->player;
-			while(collisionVoxelWidthBox(ad->voxelHash, ad->voxelHashSize, player->pos, player->dim)) {
+			while(collisionVoxelWidthBox(&ad->voxelData, player->pos, player->dim)) {
 				player->pos.z += 2;
 			}
 
@@ -1564,7 +1672,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 						float minDistance;
 						Vec3 collisionBox;
-						collision = collisionVoxelWidthBox(ad->voxelHash, ad->voxelHashSize, nPos, pSize, &minDistance, &collisionBox);
+						collision = collisionVoxelWidthBox(&ad->voxelData, nPos, pSize, &minDistance, &collisionBox);
 
 						if(collision) {
 							collisionCount++;
@@ -1668,7 +1776,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 							gp -= up*raycastThreshold;
 
 							Vec3 block = coordToVoxelCoord(gp);
-							uchar* blockType = getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, gp);
+							uchar* blockType = getBlockFromCoord(&ad->voxelData, gp);
 
 							if(*blockType > 0) {
 								groundCollision = true;
@@ -1764,7 +1872,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 						for(int y = voxelMin.y; y < voxelMax.y; y++) {
 							for(int z = voxelMin.z; z < voxelMax.z; z++) {
 								Vec3i coord = vec3i(x,y,z);
-								uchar* block = getBlockFromVoxel(ad->voxelHash, ad->voxelHashSize, coord);
+								uchar* block = getBlockFromVoxel(&ad->voxelData, coord);
 
 								if(*block > 0) {
 									collisionBox = voxelToVoxelCoord(coord);
@@ -1815,10 +1923,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 									// dcCube({coordToVoxelCoord(pos + dir*rad), vec3(cubeSize), vec4(1,0.5f,0,1), 0, vec3(0,0,0)});
 									// dcCube({coordToVoxelCoord(pos - dir*rad), vec3(cubeSize), vec4(1,0.5f,0,1), 0, vec3(0,0,0)});
 
-									*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, pos+dir*rad) = 0; 
-									*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos+dir*rad) = globalLumen; 
-									*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, pos-dir*rad) = 0; 
-									*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos-dir*rad) = globalLumen; 
+									*getBlockFromCoord(&ad->voxelData, pos+dir*rad) = 0; 
+									*getLightingFromCoord(&ad->voxelData, pos+dir*rad) = globalLumen; 
+									*getBlockFromCoord(&ad->voxelData, pos-dir*rad) = 0; 
+									*getLightingFromCoord(&ad->voxelData, pos-dir*rad) = globalLumen; 
 
 									for(int it = 0; it < 2; it++) {
 										bool found = false;
@@ -1844,21 +1952,21 @@ extern "C" APPMAINFUNCTION(appMain) {
 										// dcCube({coordToVoxelCoord(pos - vec3(off2,0,z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
 										// dcCube({coordToVoxelCoord(pos - vec3(off2,0,-z)), vec3(cubeSize), vec4(0,0.5f,1,1), 0, vec3(0,0,0)});
 
-										*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos + vec3(off2,0, z)) = 0; 
-										*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos + vec3(off2,0, z)) = globalLumen; 
-										*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos + vec3(off2,0,-z)) = 0; 
-										*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos + vec3(off2,0,-z)) = globalLumen; 
-										*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos - vec3(off2,0, z)) = 0; 
-										*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos - vec3(off2,0, z)) = globalLumen; 
-										*getBlockFromCoord(ad->voxelHash, ad->voxelHashSize,    pos - vec3(off2,0,-z)) = 0; 
-										*getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, pos - vec3(off2,0,-z)) = globalLumen; 
+										*getBlockFromCoord(&ad->voxelData,    pos + vec3(off2,0, z)) = 0; 
+										*getLightingFromCoord(&ad->voxelData, pos + vec3(off2,0, z)) = globalLumen; 
+										*getBlockFromCoord(&ad->voxelData,    pos + vec3(off2,0,-z)) = 0; 
+										*getLightingFromCoord(&ad->voxelData, pos + vec3(off2,0,-z)) = globalLumen; 
+										*getBlockFromCoord(&ad->voxelData,    pos - vec3(off2,0, z)) = 0; 
+										*getLightingFromCoord(&ad->voxelData, pos - vec3(off2,0, z)) = globalLumen; 
+										*getBlockFromCoord(&ad->voxelData,    pos - vec3(off2,0,-z)) = 0; 
+										*getLightingFromCoord(&ad->voxelData, pos - vec3(off2,0,-z)) = globalLumen; 
 									}
 								}
 							}
 						}
 
 						for(int i = 0; i < updateMeshListSize; i++) {
-							VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, updateMeshList[i]);
+							VoxelMesh* m = getVoxelMesh(&ad->voxelData, updateMeshList[i]);
 							m->upToDate = false;
 							m->meshUploaded = false;
 							m->modifiedByUser = true;
@@ -1926,7 +2034,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			for(int i = 0; i < coordsSize; i++) {
 				Vec3 block = coords[i];
 
-				uchar* blockType = getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, block);
+				uchar* blockType = getBlockFromCoord(&ad->voxelData, block);
 				Vec3 temp = voxelToVoxelCoord(coordToVoxel(block));
 
 				// Vec4 c;
@@ -1976,10 +2084,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 			ad->selectedBlockFaceDir = faceDir;
 
 			if(ad->playerMode && ad->fpsMode) {
-				VoxelMesh* vm = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordToMesh(intersectionBox));
+				VoxelMesh* vm = getVoxelMesh(&ad->voxelData, coordToMesh(intersectionBox));
 
-				uchar* block = getBlockFromCoord(ad->voxelHash, ad->voxelHashSize, intersectionBox);
-				uchar* lighting = getLightingFromCoord(ad->voxelHash, ad->voxelHashSize, intersectionBox);
+				uchar* block = getBlockFromCoord(&ad->voxelData, intersectionBox);
+				uchar* lighting = getLightingFromCoord(&ad->voxelData, intersectionBox);
 
 				bool mouse1 = input->mouseButtonPressed[0];
 				bool mouse2 = input->mouseButtonPressed[1];
@@ -2002,7 +2110,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 						Vec2i mc = coordToMesh(intersectionBox + offset);
 						if(mc != currentCoord) {
-							VoxelMesh* edgeMesh = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, mc);
+							VoxelMesh* edgeMesh = getVoxelMesh(&ad->voxelData, mc);
 							edgeMesh->upToDate = false;
 							edgeMesh->meshUploaded = false;
 							edgeMesh->modifiedByUser = true;
@@ -2036,8 +2144,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 					} forBreak:
 
 					if(!collision) {
-						uchar* sideBlockType = getBlockFromVoxel(ad->voxelHash, ad->voxelHashSize, voxelSideBlock);
-						uchar* sideBlockLighting = getLightingFromVoxel(ad->voxelHash, ad->voxelHashSize, voxelSideBlock);
+						uchar* sideBlockType = getBlockFromVoxel(&ad->voxelData, voxelSideBlock);
+						uchar* sideBlockLighting = getLightingFromVoxel(&ad->voxelData, voxelSideBlock);
 
 						*sideBlockType = ad->blockMenu[ad->blockMenuSelected];
 						*sideBlockLighting = 0;
@@ -2101,12 +2209,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 			for(int y = worldPos.y-radius; y < worldPos.y+radius; y++) {
 				for(int x = worldPos.x-radius; x < worldPos.x+radius; x++) {
 					Vec2i coord = vec2i(x, y);
-					VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
+					VoxelMesh* m = getVoxelMesh(&ad->voxelData, coord);
 					m->upToDate = false;
 					m->meshUploaded = false;
 					m->generated = false;
 
-					makeMesh(m, ad->voxelHash, ad->voxelHashSize);
+					makeMesh(m, &ad->voxelData);
 				}
 			}
 		} 
@@ -2154,10 +2262,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 				radCounter++;
 
 				Vec2i coord = lPos;
-				VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coord);
+				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coord);
 
 				if(!m->meshUploaded) {
-					makeMesh(m, ad->voxelHash, ad->voxelHashSize);
+					makeMesh(m, &ad->voxelData);
 					meshGenerationCount++;
 
 					if(!m->modifiedByUser) continue;
@@ -2268,7 +2376,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// draw world without water
 		{
 			for(int i = 0; i < sortListSize; i++) {
-				VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
+				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coordList[sortList[i].index]);
 				drawVoxelMesh(m, 2);
 			}
 		}
@@ -2293,7 +2401,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			pushUniform(SHADER_VOXEL, 1, VOXEL_UNIFORM_ALPHATEST, 0.5f);
 
 			for(int i = 0; i < sortListSize; i++) {
-				VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
+				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coordList[sortList[i].index]);
 				drawVoxelMesh(m, 1);
 			}
 
@@ -2353,11 +2461,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 			pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CPLANE1, 0,0,-1,WATER_LEVEL_HEIGHT);
 
 			for(int i = 0; i < sortListSize; i++) {
-				VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
+				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coordList[sortList[i].index]);
 				drawVoxelMesh(m, 2);
 			}
 			for(int i = sortListSize-1; i >= 0; i--) {
-				VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
+				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coordList[sortList[i].index]);
 				drawVoxelMesh(m, 1);
 			}
 
@@ -2420,7 +2528,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			pushUniform(SHADER_VOXEL, 1, VOXEL_UNIFORM_ALPHATEST, 0.5f);
 
 			for(int i = sortListSize-1; i >= 0; i--) {
-				VoxelMesh* m = getVoxelMesh(ad->voxelHash, ad->voxelHashSize, coordList[sortList[i].index]);
+				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coordList[sortList[i].index]);
 				drawVoxelMesh(m, 1);
 			}
 		}
@@ -2976,6 +3084,30 @@ extern "C" APPMAINFUNCTION(appMain) {
 	debugMain(ds, appMemory, ad, reload, isRunning, init, threadQueue);
 
 	// debugUpdatePlayback(ds, appMemory);
+
+	// Save game.
+	if(*isRunning == false)
+	{
+		char* saveFile = fillString("%s%s", SAVES_FOLDER, SAVE_STATE1);
+
+		DArray<VoxelMesh>* voxels = &ad->voxelData.voxels;
+
+		FILE* file = fopen(saveFile, "wb");
+		if(file) {
+			fwrite(ad->entityList.e, ad->entityList.size * sizeof(Entity), 1, file);
+
+			fwrite(&voxels->count, sizeof(int), 1, file);
+
+			for(int i = 0; i < voxels->count; i++) {
+				fwrite(&voxels->data[i].coord, sizeof(Vec2i), 1, file);
+				fwrite(voxels->data[i].voxels, VOXEL_SIZE * sizeof(uchar), 1, file);
+				fwrite(voxels->data[i].lighting, VOXEL_SIZE * sizeof(uchar), 1, file);
+			}
+
+			fwrite(&startX, sizeof(int), 1, file);
+			fwrite(&startY, sizeof(int), 1, file);
+		}
+	}
 
 	// @AppSessionWrite
 	if(*isRunning == false) {

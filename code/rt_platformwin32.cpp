@@ -1092,6 +1092,13 @@ void sleep(int milliseconds) {
     Sleep(milliseconds);
 }
 
+void folderExistsCreate(char* path) {
+	bool folderExists = PathFileExists(path);
+	if(!folderExists) {
+		CreateDirectory(path, 0);
+	}
+}
+
 enum FileType {
 	FILE_TYPE_FILE = 0,
 	FILE_TYPE_FOLDER,

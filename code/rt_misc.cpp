@@ -1028,3 +1028,271 @@ void updateStatistic(Statistic* stat, f64 value) {
 void endStatistic(Statistic* stat) {
 	stat->avg /= stat->count;
 }
+
+//
+
+/*
+ * PCG Random Number Generation for C.
+ *
+ * Copyright 2014 Melissa O'Neill <oneill@pcg-random.org>
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * For additional information about the PCG random number generation scheme,
+ * including its license and other licensing options, visit
+ *
+ *       http://www.pcg-random.org
+ */
+
+#include <inttypes.h>
+
+struct pcg_state_setseq_64 {    // Internals are *Private*.
+    uint64_t state;             // RNG state.  All values are possible.
+    uint64_t inc;               // Controls which RNG sequence (stream) is
+                                // selected. Must *always* be odd.
+};
+typedef struct pcg_state_setseq_64 pcg32_random_t;
+
+#define PCG32_INITIALIZER   { 0x853c49e6748fea9bULL, 0xda3e39cb94b95bdbULL }
+
+// state for global RNGs
+
+__declspec(thread) static pcg32_random_t pcg32_global = PCG32_INITIALIZER;
+
+
+// pcg32_srandom(initstate, initseq)
+// pcg32_srandom_r(rng, initstate, initseq):
+//     Seed the rng.  Specified in two parts, state initializer and a
+//     sequence selection constant (a.k.a. stream id)
+
+uint32_t pcg32_random_r(pcg32_random_t* rng);
+void pcg32_srandom_r(pcg32_random_t* rng, uint64_t initstate, uint64_t initseq)
+{
+    rng->state = 0U;
+    rng->inc = (initseq << 1u) | 1u;
+    pcg32_random_r(rng);
+    rng->state += initstate;
+    pcg32_random_r(rng);
+}
+
+void pcg32_srandom(uint64_t seed, uint64_t seq)
+{
+    pcg32_srandom_r(&pcg32_global, seed, seq);
+}
+
+// pcg32_random()
+// pcg32_random_r(rng)
+//     Generate a uniformly distributed 32-bit random number
+
+uint32_t pcg32_random_r(pcg32_random_t* rng)
+{
+    uint64_t oldstate = rng->state;
+    rng->state = oldstate * 6364136223846793005ULL + rng->inc;
+    uint32_t xorshifted = ((oldstate >> 18u) ^ oldstate) >> 27u;
+    uint32_t rot = oldstate >> 59u;
+    return (xorshifted >> rot) | (xorshifted << ((-rot) & 31));
+}
+
+uint32_t pcg32_random()
+{
+    return pcg32_random_r(&pcg32_global);
+}
+
+// pcg32_boundedrand(bound):
+// pcg32_boundedrand_r(rng, bound):
+//     Generate a uniformly distributed number, r, where 0 <= r < bound
+
+uint32_t pcg32_boundedrand_r(pcg32_random_t* rng, uint32_t bound)
+{
+    // To avoid bias, we need to make the range of the RNG a multiple of
+    // bound, which we do by dropping output less than a threshold.
+    // A naive scheme to calculate the threshold would be to do
+    //
+    //     uint32_t threshold = 0x100000000ull % bound;
+    //
+    // but 64-bit div/mod is slower than 32-bit div/mod (especially on
+    // 32-bit platforms).  In essence, we do
+    //
+    //     uint32_t threshold = (0x100000000ull-bound) % bound;
+    //
+    // because this version will calculate the same modulus, but the LHS
+    // value is less than 2^32.
+
+    uint32_t threshold = -bound % bound;
+
+    // Uniformity guarantees that this loop will terminate.  In practice, it
+    // should usually terminate quickly; on average (assuming all bounds are
+    // equally likely), 82.25% of the time, we can expect it to require just
+    // one iteration.  In the worst case, someone passes a bound of 2^31 + 1
+    // (i.e., 2147483649), which invalidates almost 50% of the range.  In 
+    // practice, bounds are typically small and only a tiny amount of the range
+    // is eliminated.
+    for (;;) {
+        uint32_t r = pcg32_random_r(rng);
+        if (r >= threshold)
+            return r % bound;
+    }
+}
+
+uint32_t pcg32_boundedrand(uint32_t bound)
+{
+    return pcg32_boundedrand_r(&pcg32_global, bound);
+}
+
+inline int randomIntPCG(int from, int to) {
+	return pcg32_boundedrand(to - from + 1) + from;
+}
+
+inline float randomFloatPCG(float from, float to, float precision /* eg.: 0.01f*/) {
+	return randomIntPCG(from/precision, to/precision) * precision;
+}
+
+//
+
+template <typename T>
+struct DArray {
+	T* data = 0;
+	int count = 0;
+	int reserved = 0;
+	int startSize = 100;
+
+	void init() {
+		*this = {};
+		startSize = 100;
+	}
+
+	int getReservedCount(int newCount) {
+		if(startSize == 0) startSize = 100;
+
+		int reservedCount = max(startSize, reserved);
+		while(reservedCount < newCount) reservedCount *= 2;
+
+		return reservedCount;
+	}
+
+	void resize(int newCount) {
+		int reservedCount = getReservedCount(newCount);
+
+		T* newData = mallocArray(T, reservedCount);
+		copyArray(newData, data, T, count);
+
+		if(data) free(data);
+		data = newData;
+		reserved = reservedCount;
+	}
+
+	void reserve(int reserveCount) {
+		if(reserveCount > reserved) {
+			resize(reserveCount);
+		}
+	}
+
+	void copy(T* d, int n) {
+		count = 0;
+		push(d, n);
+	}
+
+	void copy(DArray<T> array) {
+		return copy(array.data, array.count);
+	}
+	void copy(DArray<T>* array) {
+		return copy(*array);
+	}
+
+	void dealloc() {
+		if(data) {
+			free(data);
+			count = 0;
+			data = 0;
+			reserved = 0;
+		}
+	}
+
+	void freeResize(int n) {
+		dealloc();
+		resize(n);
+	}
+
+	void push(T element) {
+		if(count == reserved) resize(count+1);
+
+		data[count++] = element;
+	}
+
+	void push(T* elements, int n) {
+		if(count+n-1 >= reserved) resize(count+n);
+
+		copyArray(data+count, elements, T, n);
+		count += n;
+	}
+
+	void push(DArray* array) {
+		push(array->data, array->count);
+	}
+
+	void insertMove(T element, int index) {
+		if(index > count-1) return push(element);
+
+		if(count == reserved) resize(count+1);
+
+		moveArray(data+index+1, data+index, T, count-(index+1));
+		data[index] = element;
+		count++;
+	}
+
+	void insert(T element, int index) {
+		assert(index <= count);
+		
+		if(index == count) return push(element);
+		push(data[index]);
+		data[index] = element;
+	}
+
+	int find(T value) {
+		for(int i = 0; i < count; i++) {
+			if(value == data[i]) return i+1;
+		}
+
+		return 0;
+	}
+
+	T* retrieve(int addedCount) {
+		if(count+addedCount-1 >= reserved) resize(count+addedCount);
+
+		T* p = data + count;
+		count += addedCount;
+
+		return p;
+	}
+
+	bool operator==(DArray<T> array) {
+		if(count != array.count) return false;
+		for(int i = 0; i < count; i++) {
+			if(data[i] != array.data[i]) return false;
+		}
+		return true;
+	}
+	bool operator!=(DArray<T> array) { return !(*this == array); }
+
+	void clear()           { count = 0; }
+	T    first()           { return data[0]; }
+	T    last()            { return data[count-1]; }
+	bool empty()           { return count == 0; };
+	T    pop()             { return data[--count]; }
+	void pop(int n)        { count -= n; }
+	void remove(int i)     { data[i] = data[--count]; }
+	T&   operator[](int i) { return data[i]; }
+	T&   at(int i)         { return data[i]; }
+	T*   operator+(int i)  { return data + i; }
+	T*   atr(int i)        { return data + i; }
+};
