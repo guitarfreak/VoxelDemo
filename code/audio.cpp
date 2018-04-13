@@ -67,6 +67,7 @@ struct Track {
 	bool playing;
 	bool paused;
 	int index;
+	float speed;
 };
 
 struct AudioState {
@@ -78,6 +79,9 @@ struct AudioState {
 
 	WAVEFORMATEX* waveFormat;
 	uint bufferFrameCount;
+	float latency;
+	int channelCount;
+	int sampleRate;
 
 	//
 
@@ -151,7 +155,9 @@ Audio* getAudio(AudioState* as, char* name) {
 	return 0;
 }
 
-void addTrack(Audio* audio, float volume = 1.0f) {
+#define PITCH_PERCENT 0.05946309435929526456
+
+void addTrack(Audio* audio, float volume = 1.0f, bool modulate = false) {
 	AudioState* as = theAudioState;
 
 	Track* track = 0;
@@ -168,15 +174,19 @@ void addTrack(Audio* audio, float volume = 1.0f) {
 	track->playing = true;
 	track->paused = false;
 	track->index = 0;
-	
+	track->speed = 1;
+
+	if(modulate) {
+		float percent = 1 + (PITCH_PERCENT * 0.25f);
+		track->speed = randomFloatPCG(1/percent, percent, 0.00001f);
+	}
+
 	track->volume = volume;
 }
 
-void addTrack(char* name, float volume = 1.0f) {
-	AudioState* as = theAudioState;
-
-	Audio* audio = getAudio(as, name);
+void addTrack(char* name, float volume = 1.0f, bool modulate = false) {
+	Audio* audio = getAudio(theAudioState, name);
 	if(!audio) return;
 
-	return addTrack(audio, volume);
+	return addTrack(audio, volume, modulate);
 }

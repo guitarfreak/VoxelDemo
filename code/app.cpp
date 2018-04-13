@@ -612,6 +612,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		{
 			int hr;
 
+			as->latency = 1.5f;
+
 			const CLSID CLSID_MMDeviceEnumerator = __uuidof(MMDeviceEnumerator);
 			const IID IID_IMMDeviceEnumerator = __uuidof(IMMDeviceEnumerator);
 			hr = CoCreateInstance(
@@ -627,7 +629,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
 
 			int referenceTimeToSeconds = 10 * 1000 * 1000;
-			REFERENCE_TIME referenceTime = referenceTimeToSeconds; // 100 nano-seconds -> 1 second.
+			// REFERENCE_TIME referenceTime = referenceTimeToSeconds; // 100 nano-seconds -> 1 second.
+			REFERENCE_TIME referenceTime = referenceTimeToSeconds * ((float)1/ws->frameRate) * as->latency; // 100 nano-seconds -> 1 second.
 			hr = as->audioClient->GetMixFormat(&as->waveFormat);
 
 			{
@@ -641,6 +644,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 				WAVEFORMATEX* formatClosest = &what;
 				hr = as->audioClient->IsFormatSupported(AUDCLNT_SHAREMODE_SHARED, format, &formatClosest);
 				if(hr) { printf("Failed to initialise sound."); assert(!hr); };
+
+				as->channelCount = format->nChannels;
+				as->sampleRate = format->nSamplesPerSec;
 			}
 
 			as->audioClient->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, referenceTime, 0, as->waveFormat, 0);
@@ -1160,46 +1166,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// @GameMenu.
 
-	// // Save.
-	// if(input->keysPressed[KEYCODE_U]) {
-	// 	char* saveName = "saveState1.sav";
-	// 	char* saveFile = fillString("%s%s", SAVES_FOLDER, saveName);
-
-	// 	DArray<VoxelMesh>* voxels = &ad->voxelData.voxels;
-
-	// 	FILE* file = fopen(saveFile, "wb");
-	// 	if(file) {
-	// 		fwrite(ad->entityList.e, ad->entityList.size * sizeof(Entity), 1, file);
-
-	// 		fwrite(&voxels->count, sizeof(int), 1, file);
-	// 		fwrite(voxels->data, voxels->count * sizeof(VoxelMesh), 1, file);
-	// 	}
-	// }
-
-	// // Load.
-	// if(input->keysPressed[KEYCODE_I]) {
-	// 	char* saveName = "saveState1.sav";
-	// 	char* saveFile = fillString("%s%s", SAVES_FOLDER, saveName);
-
-	// 	DArray<VoxelMesh>* voxels = &ad->voxelData.voxels;
-	// 	voxels->clear();
-
-	// 	FILE* file = fopen(saveFile, "wb");
-	// 	if(file) {
-	// 		fread(ad->entityList.e, ad->entityList.size * sizeof(Entity), 1, file);
-
-	// 		int count = 0;
-	// 		fread(&count, sizeof(int), 1, file);
-
-	// 		voxels->reserve(count);
-	// 		voxels->count = count;
-	// 		fwrite(voxels->data, voxels->count * sizeof(VoxelMesh), 1, file);
-	// 	}
-
-	// 	for(int i = 0; i < ad->voxelData.voxelHashSize; i++) {
-	// 		ad->voxelData.voxelHash[i].clear();
-	// 	}
-	// }
+	if(input->keysPressed[KEYCODE_U]) {
+		addTrack("366.wav", 0.3f);
+	}
 
 	if(ad->gameMode == GAME_MODE_MENU) {
 		globalCommandList = &ad->commandList2d;
@@ -1239,12 +1208,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 		bool selectionChange = false;
 
 		if(input->keysPressed[KEYCODE_DOWN]) {
-			addTrack("ui\\select.wav", volumeMid);
+			addTrack("ui\\select.wav", volumeMid, true);
 			menu->activeId++;
 			selectionChange = true;
 		}
 		if(input->keysPressed[KEYCODE_UP]) {
-			addTrack("ui\\select.wav", volumeMid);
+			addTrack("ui\\select.wav", volumeMid, true);
 			menu->activeId--;
 			selectionChange = true;
 		}
@@ -1303,7 +1272,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			p.y -= optionOffset;
 			if(menuOption(menu, "Settings", p, vec2i(0,0))) {
-				addTrack("ui\\menuPush.wav", volumeMid);
+				addTrack("ui\\menuPush.wav", volumeMid, true);
 
 				menu->screen = MENU_SCREEN_SETTINGS;
 				menu->activeId = 0;
@@ -1343,7 +1312,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			if(menuOption(menu, "Back", p, vec2i(0,0)) || 
 			      input->keysPressed[KEYCODE_ESCAPE] ||
 			      input->keysPressed[KEYCODE_BACKSPACE]) {
-				addTrack("ui\\menuPop.wav", volumeMid);
+				addTrack("ui\\menuPop.wav", volumeMid, true);
 
 				menu->screen = MENU_SCREEN_MAIN;
 				menu->activeId = 0;
@@ -2909,16 +2878,18 @@ extern "C" APPMAINFUNCTION(appMain) {
 	{
 		AudioState* as = &ad->audioState;
 
-		as->masterVolume = 0.5f;
+		as->masterVolume = 0.4f;
 
-		int framesPerFrame = ad->dt * as->waveFormat->nSamplesPerSec;
+		int framesPerFrame = ad->dt * as->waveFormat->nSamplesPerSec * as->latency;
 
 		uint numFramesPadding;
 		as->audioClient->GetCurrentPadding(&numFramesPadding);
 		uint numFramesAvailable = as->bufferFrameCount - numFramesPadding;
 		framesPerFrame = min(framesPerFrame, numFramesAvailable);
 
-		if(numFramesAvailable) {
+		numFramesPadding = framesPerFrame;
+
+		if(framesPerFrame) {
 
 			float* buffer;
 			as->renderClient->GetBuffer(numFramesAvailable, (BYTE**)&buffer);
@@ -2933,23 +2904,51 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 				if(!track->used) continue;
 
-				// Push all frames that are available.
+
 
 				int index = track->index;
 				int channels = audio->channels;
-				int availableFrames = min(audio->frameCount - index, numFramesAvailable);
 
+				int normalFrameCount = audio->frameCount;
+				float speed = track->speed * ((float)audio->sampleRate / as->sampleRate);
+				int frameCount = audio->frameCount;
+				if(speed != 1.0f) {
+					frameCount = roundFloat((frameCount-1) * (float)(1/speed)) + 1;
+				}
+
+				int availableFrames = min(frameCount - index, numFramesAvailable);
+
+				float volume = as->masterVolume * track->volume;
 				for(int i = 0; i < availableFrames; i++) {
-					short valueLeft = audio->data[(index*channels) + (i*channels)+0];
-					short valueRight;
-					if(channels > 1) valueRight = audio->data[(index*channels) + (i*channels)+1];
-					else valueRight = valueLeft;
+					for(int channelIndex = 0; channelIndex < channels; channelIndex++) {
+						float finalValue;
 
-					float floatValueLeft = (float)valueLeft/SHRT_MAX;
-					float floatValueRight = (float)valueRight/SHRT_MAX;
+						if(speed == 1.0f) {
+							short value = audio->data[(index + i)*channels + channelIndex];
+							finalValue = (float)value/SHRT_MAX;
 
-					buffer[(i*2)+0] += floatValueLeft * as->masterVolume * track->volume;
-					buffer[(i*2)+1] += floatValueRight * as->masterVolume * track->volume;
+						} else {
+							float fIndex = (index + i) * speed;
+
+							if(fIndex > (normalFrameCount-1)) break;
+
+							int leftIndex = (int)fIndex;
+							int rightIndex = leftIndex + 1;
+
+							short leftValue = audio->data[leftIndex*channels + channelIndex];
+							short rightValue = audio->data[rightIndex*channels + channelIndex];
+
+							float fLeftValue = (float)leftValue/SHRT_MAX;
+							float fRightValue = (float)rightValue/SHRT_MAX;
+
+							float percent = fIndex - leftIndex;
+							finalValue = fLeftValue + (fRightValue-fLeftValue) * percent;
+
+						}
+
+						buffer[(i*2) + channelIndex] += finalValue * volume;
+						if(channels == 1) buffer[(i*2) + 1] += finalValue * volume;
+					}
 				}
 
 				track->index += framesPerFrame;
@@ -2957,11 +2956,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 				if(track->index >= audio->frameCount) {
 					track->used = false;
 				}
-
 			}
 
 			as->renderClient->ReleaseBuffer(framesPerFrame, 0);
-
 		}
 	}
 
