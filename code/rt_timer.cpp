@@ -71,6 +71,8 @@ inline uint getThreadID() {
 }
 
 void addTimerSlot(int timerIndex, int type) {
+	if(globalTimer->bufferIndex > globalTimer->bufferSize-10) return;
+	
 	int id = InterlockedIncrement((LONG*)(&globalTimer->bufferIndex));
 	id--;
 	TimerSlot* slot = globalTimer->timerBuffer + id;

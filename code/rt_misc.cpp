@@ -18,7 +18,6 @@
 #define zeroStruct(s, structType) zeroMemory(s, sizeof(structType));
 #define copyArray(dst, src, type, count) memCpy(dst, src, sizeof(type)*count);
 #define moveArray(dst, src, type, count) memmove(dst, src, sizeof(type)*count);
-
 #define PVEC2(v) v.x, v.y
 #define PVEC3(v) v.x, v.y, v.z
 #define PVEC4(v) v.x, v.y, v.z, v.w
@@ -32,6 +31,11 @@
 #define arrayIndex(w, x, y) (y*w + x)
 #define arrayIndex3D(w, h, x, y, z) (z*h*w + y*w + x)
 
+#define writeTypeAndAdvance(buf, val, type) \
+		(*(type*)buf) = val; buf += sizeof(type); 
+
+#define readTypeAndAdvance(buf, type) \
+		(*(type*)buf); buf += sizeof(type); 
 
 int myAssert(bool check) {
 	if(!check) {

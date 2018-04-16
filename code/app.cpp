@@ -119,6 +119,11 @@ Changing course for now:
 #define STBI_ONLY_JPEG
 #include "external\stb_image.h"
 
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#define STBI_ONLY_PNG
+#include "external\stb_image_write.h"
+
+
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_PARAMETER_TAGS_H
@@ -1362,7 +1367,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				}
 			}
 
-			// Load SaveState.
+			// Load game.
 			if(!ad->newGame && hasSaveState) {
 				DArray<VoxelMesh>* voxels = &ad->voxelData.voxels;
 				voxels->clear();
@@ -1371,23 +1376,54 @@ extern "C" APPMAINFUNCTION(appMain) {
 				if(file) {
 					fread(ad->entityList.e, ad->entityList.size * sizeof(Entity), 1, file);
 
+					fread(&startX, sizeof(int), 1, file);
+					fread(&startY, sizeof(int), 1, file);
+
 					int count = 0;
 					fread(&count, sizeof(int), 1, file);
 
 					voxels->reserve(count);
 					voxels->count = count;
 
-					for(int i = 0; i < voxels->count; i++) {
-						VoxelMesh* m = voxels->data + i;
-						initVoxelMesh(m, vec2i(0,0));
+					// for(int i = 0; i < voxels->count; i++) {
+					// 	VoxelMesh* m = voxels->data + i;
+					// 	initVoxelMesh(m, vec2i(0,0));
 
-						fread(&m->coord, sizeof(Vec2i), 1, file);
-						fread(m->voxels, VOXEL_SIZE * sizeof(uchar), 1, file);
-						fread(m->lighting, VOXEL_SIZE * sizeof(uchar), 1, file);
+					// 	fread(&m->coord, sizeof(Vec2i), 1, file);
+					// 	fread(m->voxels, VOXEL_SIZE * sizeof(uchar), 1, file);
+					// 	fread(m->lighting, VOXEL_SIZE * sizeof(uchar), 1, file);
+					// }
+
+					char* buffer = getTArray(char, VOXEL_SIZE);
+
+					for(int i = 0; i < voxels->count; i++) {
+						VoxelMesh* mesh = voxels->data + i;
+						initVoxelMesh(mesh, vec2i(0,0));
+
+						fread(&mesh->coord, sizeof(Vec2i), 1, file);
+
+						// Decompress.
+						for(int i = 0; i < 2; i++) {
+
+							uchar* data = i == 0 ? mesh->voxels : mesh->lighting;
+
+							int bufferCount;
+							fread(&bufferCount, sizeof(int), 1, file);
+							fread(buffer, bufferCount * (sizeof(uchar) + sizeof(uchar)), 1, file);
+
+							char* buf = buffer;
+							int pos = 0;
+							for(int i = 0; i < bufferCount; i++) {
+								uchar count = readTypeAndAdvance(buf, uchar);
+								uchar type = readTypeAndAdvance(buf, uchar);
+
+								for(int i = 0; i < count; i++) data[pos+i] = type;
+								pos += count;
+							}
+
+						}
 					}
 
-					fread(&startX, sizeof(int), 1, file);
-					fread(&startY, sizeof(int), 1, file);
 				}
 
 				for(int i = 0; i < voxels->count; i++) {
@@ -3089,20 +3125,74 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		DArray<VoxelMesh>* voxels = &ad->voxelData.voxels;
 
+		char* buffer = getTArray(char, VOXEL_SIZE);
+
 		FILE* file = fopen(saveFile, "wb");
 		if(file) {
 			fwrite(ad->entityList.e, ad->entityList.size * sizeof(Entity), 1, file);
 
-			fwrite(&voxels->count, sizeof(int), 1, file);
-
-			for(int i = 0; i < voxels->count; i++) {
-				fwrite(&voxels->data[i].coord, sizeof(Vec2i), 1, file);
-				fwrite(voxels->data[i].voxels, VOXEL_SIZE * sizeof(uchar), 1, file);
-				fwrite(voxels->data[i].lighting, VOXEL_SIZE * sizeof(uchar), 1, file);
-			}
-
 			fwrite(&startX, sizeof(int), 1, file);
 			fwrite(&startY, sizeof(int), 1, file);
+
+			fwrite(&voxels->count, sizeof(int), 1, file);
+
+			// for(int i = 0; i < voxels->count; i++) {
+			// 	fwrite(&voxels->data[i].coord, sizeof(Vec2i), 1, file);
+			// 	fwrite(voxels->data[i].voxels, VOXEL_SIZE * sizeof(uchar), 1, file);
+			// 	fwrite(voxels->data[i].lighting, VOXEL_SIZE * sizeof(uchar), 1, file);
+			// }
+
+			for(int i = 0; i < voxels->count; i++) {
+				VoxelMesh* mesh = voxels->data + i;
+
+				fwrite(&mesh->coord, sizeof(Vec2i), 1, file);
+
+				// // Compress with awesome compressing method.
+				// for(int i = 0; i < 2; i++) {
+
+				// 	uchar* data = i == 0 ? mesh->voxels : mesh->lighting;
+
+				// 	int size;
+				// 	uchar* result = stbi_zlib_compress(data, VOXEL_SIZE, &size, 0);
+
+				// 	fwrite(&size, sizeof(int), 1, file);
+				// 	fwrite(result, size * sizeof(char), 1, file);
+
+   	// 				STBIW_FREE(result);
+				// }
+
+				// Compress with awesome compressing method.
+				for(int i = 0; i < 2; i++) {
+
+					uchar* data = i == 0 ? mesh->voxels : mesh->lighting;
+
+					int bufferCount = 0;
+					uchar count = 1;
+					uchar blockType = data[0];
+					char* buf = buffer;
+					for(int i = 1; i < VOXEL_SIZE; i++) {
+						if(data[i] != blockType || count == UCHAR_MAX || i == VOXEL_SIZE-1) {
+							writeTypeAndAdvance(buf, count, uchar);
+							writeTypeAndAdvance(buf, blockType, uchar);
+
+							count = 1;
+							blockType = data[i];
+
+							bufferCount++;
+						} else {
+							count++;
+						}
+					}
+					// Handle last element.
+					writeTypeAndAdvance(buf, (short)1, uchar);
+					writeTypeAndAdvance(buf, data[VOXEL_SIZE-1], uchar);
+					bufferCount++;
+
+					fwrite(&bufferCount, sizeof(int), 1, file);
+					fwrite(buffer, bufferCount * (sizeof(uchar) + sizeof(uchar)), 1, file);
+				}
+			}
+
 		}
 	}
 

@@ -68,6 +68,8 @@ struct Track {
 	bool paused;
 	int index;
 	float speed;
+
+	i64 startTime;
 };
 
 struct AudioState {
@@ -92,7 +94,7 @@ struct AudioState {
 	// Mixer.
 
 	float masterVolume;
-	Track tracks[10];
+	Track tracks[20];
 };
 
 void addAudio(AudioState* as, char* filePath, char* name) {
@@ -167,7 +169,16 @@ void addTrack(Audio* audio, float volume = 1.0f, bool modulate = false) {
 		}
 	}
 
-	if(!track) return;
+	// Get oldest track and overwrite with new one.
+	if(!track) {
+		i64 oldestStartTime = LLONG_MAX;
+		for(int i = 0; i < arrayCount(as->tracks); i++) {
+			if(as->tracks[i].startTime < oldestStartTime) {
+				oldestStartTime = as->tracks[i].startTime;
+				track = as->tracks + i;
+			}
+		}
+	}
 
 	track->used = true;
 	track->audio = audio;
@@ -175,6 +186,10 @@ void addTrack(Audio* audio, float volume = 1.0f, bool modulate = false) {
 	track->paused = false;
 	track->index = 0;
 	track->speed = 1;
+
+	LARGE_INTEGER timeStamp;
+	QueryPerformanceCounter(&timeStamp);
+	track->startTime = timeStamp.QuadPart;
 
 	if(modulate) {
 		float percent = 1 + (PITCH_PERCENT * 0.25f);

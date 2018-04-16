@@ -16,6 +16,8 @@ Vec3 voxelFogColor = colorSRGB(vec3(0.43f,0.38f,0.44f));
 // #define VIEW_DISTANCE 512  // 8
 #define VIEW_DISTANCE 256 // 4
 // #define VIEW_DISTANCE 128 // 2
+// #define VIEW_DISTANCE 64 // 1
+
 
 #define USE_MALLOC 1
 
@@ -33,8 +35,6 @@ uchar* voxelLightingCache[8];
 
 #define voxelArray(x, y, z) (x)*VOXEL_Y*VOXEL_Z + (y)*VOXEL_Z + (z)
 #define getVoxelCache(x, y, z) (x)*VC_Y*VC_Z + (y)*VC_Z + (z)
-
-
 
 // int startX = 37800;
 // int startY = 48000;
