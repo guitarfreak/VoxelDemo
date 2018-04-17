@@ -14,21 +14,28 @@ Vec3 voxelFogColor = colorSRGB(vec3(0.43f,0.38f,0.44f));
 // #define VIEW_DISTANCE 2048 // 32
 // #define VIEW_DISTANCE 1024 // 16
 // #define VIEW_DISTANCE 512  // 8
-#define VIEW_DISTANCE 256 // 4
+// #define VIEW_DISTANCE 256 // 4
 // #define VIEW_DISTANCE 128 // 2
 // #define VIEW_DISTANCE 64 // 1
+
+#define VIEW_DISTANCE 2
 
 
 #define USE_MALLOC 1
 
-#define VOXEL_X 64
-#define VOXEL_Y 64
+// #define VOXEL_X 64
+// #define VOXEL_Y 64
+// #define VOXEL_Z 254
+
+#define VOXEL_X 1
+#define VOXEL_Y 1
 #define VOXEL_Z 254
-#define VOXEL_SIZE VOXEL_X*VOXEL_Y*VOXEL_Z
-#define VC_X 66
-#define VC_Y 66
-#define VC_Z 256
-#define VOXEL_CACHE_SIZE VC_X*VC_Y*VC_Z
+
+#define VOXEL_SIZE (VOXEL_X*VOXEL_Y*VOXEL_Z)
+#define VC_X (VOXEL_X + 2)
+#define VC_Y (VOXEL_Y + 2)
+#define VC_Z (VOXEL_Z + 2)
+#define VOXEL_CACHE_SIZE (VC_X*VC_Y*VC_Z)
 
 uchar* voxelCache[8];
 uchar* voxelLightingCache[8];

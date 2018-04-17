@@ -39,7 +39,7 @@
 - simd voxel generation
 - simd on vectors as a test first?
 
-- experiment with directx 11
+- experiment with directx 10
 - font drawing bold
 
 gui stuff: 
@@ -94,6 +94,9 @@ Changing course for now:
 	using namedBufferSubData vs uniforms for vertices -> 2400 ticks vs 400 ticks
 */
 
+/*
+
+*/
 
 
 // Intrinsics.
@@ -179,6 +182,7 @@ Timer* globalTimer;
 #include "voxel.cpp"
 
 #include "debug.cpp"
+
 
 
 
@@ -1366,6 +1370,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 					voxels->clear();
 				}
 			}
+
+			ad->newGame = true;
 
 			// Load game.
 			if(!ad->newGame && hasSaveState) {
@@ -3119,7 +3125,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// debugUpdatePlayback(ds, appMemory);
 
 	// Save game.
-	if(*isRunning == false)
+	// if(*isRunning == false)
+	if(false)
 	{
 		char* saveFile = fillString("%s%s", SAVES_FOLDER, SAVE_STATE1);
 

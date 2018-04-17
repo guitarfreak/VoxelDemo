@@ -2136,7 +2136,8 @@ static const char *stbvox_fragment_program =
       #else
       // "   return rlerp(f, color.xyz, ambient[3].xyz);\n"
       // "   return vec4(rlerp(f, color.xyz, ambient[3].xyz), fogAlpha);\n"
-      "   return vec4(rlerp(colorRange, color.xyz, ambient[3].xyz), fogAlpha);\n"
+      // "   return vec4(rlerp(colorRange, color.xyz, ambient[3].xyz), fogAlpha);\n"
+      "   return vec4(color.xyz, 1);\n"
       #endif
       "}\n"
    #endif
