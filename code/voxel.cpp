@@ -18,7 +18,11 @@ Vec3 voxelFogColor = colorSRGB(vec3(0.43f,0.38f,0.44f));
 // #define VIEW_DISTANCE 128 // 2
 // #define VIEW_DISTANCE 64 // 1
 
-#define VIEW_DISTANCE 2
+#define VIEW_DISTANCE  10
+#define STORE_DISTANCE (VIEW_DISTANCE + 2)
+
+#define TEXTURE_CACHE_DISTANCE (VIEW_DISTANCE + 2)
+#define DATA_CACHE_DISTANCE (VIEW_DISTANCE / 2)
 
 
 #define USE_MALLOC 1
@@ -27,8 +31,8 @@ Vec3 voxelFogColor = colorSRGB(vec3(0.43f,0.38f,0.44f));
 // #define VOXEL_Y 64
 // #define VOXEL_Z 254
 
-#define VOXEL_X 1
-#define VOXEL_Y 1
+#define VOXEL_X 64
+#define VOXEL_Y 64
 #define VOXEL_Z 254
 
 #define VOXEL_SIZE (VOXEL_X*VOXEL_Y*VOXEL_Z)
@@ -79,53 +83,66 @@ bool* treeNoise;
 struct MakeMeshThreadedData;
 MakeMeshThreadedData* voxelThreadData;
 
-
-
 struct VoxelMesh {
+	Vec2i coord;
+	uchar* data;
+	uchar* voxels;
+	uchar* lighting;
+
+	uchar* compressedData;
+	int compressedVoxelsSize;
+	int compressedLightingSize;
+
+	//
+
+	bool compressed;
+	bool stored;
+
 	bool generated;
 	bool upToDate;
 	bool meshUploaded;
 
-	volatile uint activeGeneration;
-	volatile uint activeMaking;
-
 	bool modifiedByUser;
 
-	Vec2i coord;
-	uchar* voxels;
-	uchar* lighting;
+	volatile uint activeGeneration;
+	volatile uint activeMaking;
+	volatile uint activeCompressing;
 
-	float transform[3][3];
-	int quadCount;
-
-	int quadCountTrans;
+	//
 
 	char* meshBuffer;
-	int meshBufferSize;
-	int meshBufferCapacity;
 	uint bufferId;
 
 	char* texBuffer;
-	int texBufferSize;
-	int texBufferCapacity;
 	uint textureId;
 	uint texBufferId;
 
 	char* meshBufferTrans;
-	int meshBufferTransCapacity;
 	uint bufferTransId;
+
 	char* texBufferTrans;
-	int texBufferTransCapacity;
 	uint textureTransId;
 	uint texBufferTransId;
 
+	//
+
+	float transform[3][3];
+	int quadCount;
+	int quadCountTrans;
 	int bufferSizePerQuad;
 	int textureBufferSizePerQuad;
 };
 
+struct VoxelArray {
+	int data[10];
+	int count;
+};
+
 struct VoxelData {
+	int size;
 	DArray<VoxelMesh> voxels;
-	DArray<int>* voxelHash;
+	// DArray<int>* voxelHash;
+	VoxelArray* voxelHash;
 	int voxelHashSize;
 };
 
@@ -135,6 +152,7 @@ struct MakeMeshThreadedData {
 
 	int inProgress;
 };
+
 
 enum BlockTypes {
 	BT_None = 0,
@@ -276,15 +294,14 @@ void buildColorPalette() {
 }
 
 
-void initVoxelMesh(VoxelMesh* m, Vec2i coord) {
-	TIMER_BLOCK();
-
-	*m = {};
-	m->coord = coord;
-
+void allocVoxelMesh(VoxelMesh* m) {
 	if(USE_MALLOC) {
-		m->voxels = (uchar*)malloc(VOXEL_SIZE);
-		m->lighting = (uchar*)malloc(VOXEL_SIZE);
+		// m->voxels = (uchar*)malloc(VOXEL_SIZE);
+		// m->lighting = (uchar*)malloc(VOXEL_SIZE);
+
+		m->data = mallocArray(uchar, VOXEL_SIZE*2);
+		m->voxels = m->data;
+		m->lighting = m->voxels + VOXEL_SIZE;
 	} else {
 		// m->meshBufferCapacity = kiloBytes(200);
 		// m->meshBuffer = (char*)getPMemory(m->meshBufferCapacity);
@@ -296,8 +313,8 @@ void initVoxelMesh(VoxelMesh* m, Vec2i coord) {
 		// m->texBufferTransCapacity = m->meshBufferTransCapacity/4;
 		// m->texBufferTrans = (char*)getPMemory(m->texBufferTransCapacity);
 
-		m->voxels = (uchar*)getPMemory(VOXEL_SIZE);
-		m->lighting = (uchar*)getPMemory(VOXEL_SIZE);
+			// m->voxels = (uchar*)getPMemory(VOXEL_SIZE);
+			// m->lighting = (uchar*)getPMemory(VOXEL_SIZE);
 	}
 
 	glCreateBuffers(1, &m->bufferId);
@@ -313,34 +330,64 @@ void initVoxelMesh(VoxelMesh* m, Vec2i coord) {
 }
 
 void freeVoxelMesh(VoxelMesh* m) {
-	if(!m->voxels) return;
+	// if(!m->voxels) return;
 
-	if(USE_MALLOC) {
-		free(m->voxels);
-		free(m->lighting);
+	if(m->generated) {
+		if(USE_MALLOC) {
+			// free(m->voxels);
+			// free(m->lighting);
+
+			free(m->data);
+			m->voxels = 0;
+			m->lighting = 0;
+		}
 	}
 
-	glDeleteBuffers(1, &m->bufferId);
-	glDeleteBuffers(1, &m->bufferTransId);
+	if(m->meshUploaded) {
+		glDeleteBuffers(1, &m->bufferId);
+		glDeleteBuffers(1, &m->bufferTransId);
 
-	if(STBVOX_CONFIG_MODE == 1) {
-		glDeleteBuffers(1, &m->texBufferId);
-		glDeleteBuffers(1, &m->texBufferTransId);
+		if(STBVOX_CONFIG_MODE == 1) {
+			glDeleteBuffers(1, &m->texBufferId);
+			glDeleteBuffers(1, &m->texBufferTransId);
+			glDeleteTextures(1, &m->textureId);
+			glDeleteTextures(1, &m->textureTransId);
+		}
 	}
+}
+
+void initVoxelMesh(VoxelMesh* m, Vec2i coord) {
+	TIMER_BLOCK();
+
+	*m = {};
+	m->coord = coord;
+
+	allocVoxelMesh(m);
+}
+
+void addVoxelMesh(VoxelData* voxelData, int hashIndex, int index) {
+	// DArray<int>* voxelList = voxelData->voxelHash + hashIndex;
+	// voxelList->push(index);
+
+	VoxelArray* voxelList = voxelData->voxelHash + hashIndex;
+
+	assert(voxelList->count < arrayCount(voxelList->data));
+
+	voxelList->data[voxelList->count++] = index;
 }
 
 void addVoxelMesh(VoxelData* voxelData, Vec2i coord, int index) {
 	int hashIndex = mod(coord.x*9 + coord.y*23, voxelData->voxelHashSize);
-	
-	DArray<int>* voxelList = voxelData->voxelHash + hashIndex;
-	voxelList->push(index);
+
+	return addVoxelMesh(voxelData, hashIndex, index);
 }
 
-VoxelMesh* getVoxelMesh(VoxelData* voxelData, Vec2i coord) {
+VoxelMesh* getVoxelMesh(VoxelData* voxelData, Vec2i coord, bool create = true) {
 	int hashIndex = mod(coord.x*9 + coord.y*23, voxelData->voxelHashSize);
 
 	VoxelMesh* m = 0;
-	DArray<int>* voxelList = voxelData->voxelHash + hashIndex;
+	// DArray<int>* voxelList = voxelData->voxelHash + hashIndex;
+	VoxelArray* voxelList = voxelData->voxelHash + hashIndex;
 	for(int i = 0; i < voxelList->count; i++) {
 		VoxelMesh* mesh = voxelData->voxels.data + voxelList->data[i];
 		if(mesh->coord == coord) {
@@ -349,28 +396,36 @@ VoxelMesh* getVoxelMesh(VoxelData* voxelData, Vec2i coord) {
 		}
 	}
 
-	if(!m) {
+	// Initialise new mesh.
+
+	if(!m && create) {
 		VoxelMesh mesh;
 		initVoxelMesh(&mesh, coord);
 		voxelData->voxels.push(mesh);
 		m = voxelData->voxels.data + voxelData->voxels.count-1;
+
 		int index = voxelData->voxels.count-1;
-		voxelList->push(index);
+		addVoxelMesh(voxelData, hashIndex, index);
 	}
 
 	return m;
 }
 
+void decompressVoxelData(VoxelMesh* mesh);
 void generateVoxelMeshThreaded(void* data) {
 	TIMER_BLOCK();
 
 	VoxelMesh* m = (VoxelMesh*)data;
 	Vec2i coord = m->coord;
 
-	// float worldHeightOffset = -0.1f;
-	float worldHeightOffset = -0.1f;
+	// Restore.
+	if(m->stored) {
+		decompressVoxelData(m);
 
-	if(!m->generated) {
+	} else if(!m->generated) {
+		// float worldHeightOffset = -0.1f;
+		float worldHeightOffset = -0.1f;
+
 		Vec3i min = vec3i(0,0,0);
 		Vec3i max = vec3i(VOXEL_X,VOXEL_Y,VOXEL_Z);
 
@@ -478,6 +533,7 @@ void generateVoxelMeshThreaded(void* data) {
 		}
 	}
 
+	if(m->stored) m->stored = false;
 	if(THREADING) atomicSub(&m->activeGeneration);
 	m->generated = true;
 }
@@ -537,52 +593,34 @@ void makeMeshThreaded(void* data) {
 	stbvox_input_description* inputDesc = stbvox_get_input_description(&mm);
 	*inputDesc = {};
 
-	if(USE_MALLOC) {
-		m->meshBufferCapacity = kiloBytes(500);
-		m->meshBuffer = (char*)malloc(m->meshBufferCapacity);
-		m->texBufferCapacity = m->meshBufferCapacity/4;
-		m->texBuffer = (char*)malloc(m->texBufferCapacity);
+	int meshBufferCapacity;
+	int texBufferCapacity;
+	int meshBufferTransCapacity;
+	int texBufferTransCapacity;
 
-		m->meshBufferTransCapacity = kiloBytes(500);
-		m->meshBufferTrans = (char*)malloc(m->meshBufferTransCapacity);
-		m->texBufferTransCapacity = m->meshBufferTransCapacity/4;
-		m->texBufferTrans = (char*)malloc(m->texBufferTransCapacity);
-	} else {
-		// m->meshBufferCapacity = kiloBytes(500);
-		// m->meshBuffer = (char*)getDMemory(m->meshBufferCapacity);
-		// m->texBufferCapacity = m->meshBufferCapacity/4;
-		// m->texBuffer = (char*)getDMemory(m->texBufferCapacity);
+	{
+		meshBufferCapacity = kiloBytes(500);
+		m->meshBuffer = (char*)malloc(meshBufferCapacity);
+		texBufferCapacity = meshBufferCapacity/4;
+		m->texBuffer = (char*)malloc(texBufferCapacity);
 
-		// m->meshBufferTransCapacity = kiloBytes(500);
-		// m->meshBufferTrans = (char*)getDMemory(m->meshBufferTransCapacity);
-		// m->texBufferTransCapacity = m->meshBufferTransCapacity/4;
-		// m->texBufferTrans = (char*)getDMemory(m->texBufferTransCapacity);
+		meshBufferTransCapacity = kiloBytes(500);
+		m->meshBufferTrans = (char*)malloc(meshBufferTransCapacity);
+		texBufferTransCapacity = meshBufferTransCapacity/4;
+		m->texBufferTrans = (char*)malloc(texBufferTransCapacity);
+	} 
 
-		m->meshBufferCapacity = kiloBytes(500);
-		m->meshBuffer = (char*)malloc(m->meshBufferCapacity);
-		m->texBufferCapacity = m->meshBufferCapacity/4;
-		m->texBuffer = (char*)malloc(m->texBufferCapacity);
-
-		m->meshBufferTransCapacity = kiloBytes(500);
-		m->meshBufferTrans = (char*)malloc(m->meshBufferTransCapacity);
-		m->texBufferTransCapacity = m->meshBufferTransCapacity/4;
-		m->texBufferTrans = (char*)malloc(m->texBufferTransCapacity);
+	stbvox_set_buffer(&mm, 0, 0, m->meshBuffer, meshBufferCapacity);
+	if(STBVOX_CONFIG_MODE == 1) {
+		stbvox_set_buffer(&mm, 0, 1, m->texBuffer, texBufferCapacity);
 	}
 
-	stbvox_set_buffer(&mm, 0, 0, m->meshBuffer, m->meshBufferCapacity);
+	stbvox_set_buffer(&mm, 1, 0, m->meshBufferTrans, meshBufferTransCapacity);
 	if(STBVOX_CONFIG_MODE == 1) {
-		stbvox_set_buffer(&mm, 0, 1, m->texBuffer, m->texBufferCapacity);
-	}
-
-	stbvox_set_buffer(&mm, 1, 0, m->meshBufferTrans, m->meshBufferTransCapacity);
-	if(STBVOX_CONFIG_MODE == 1) {
-		stbvox_set_buffer(&mm, 1, 1, m->texBufferTrans, m->texBufferTransCapacity);
+		stbvox_set_buffer(&mm, 1, 1, m->texBufferTrans, texBufferTransCapacity);
 	}
 
 	// int count = stbvox_get_buffer_count(&mm);
-
-
-
 
 	inputDesc->block_tex2 = texture2;
 	inputDesc->block_tex1_face = texture1Faces;
@@ -642,6 +680,10 @@ void makeMesh(VoxelMesh* m, VoxelData* voxelData) {
 					if(!lm->activeGeneration && !threadQueueFull(globalThreadQueue)) {
 						// if(!lm->activeGeneration && threadQueueOpenJobs(globalThreadQueue) < threadJobsMax) {
 						atomicAdd(&lm->activeGeneration);
+
+						if(lm->stored) {
+							allocVoxelMesh(lm);
+						}
 						threadQueueAdd(globalThreadQueue, generateVoxelMeshThreaded, lm);
 					}
 					notAllMeshsAreReady = true;
@@ -700,19 +742,47 @@ void makeMesh(VoxelMesh* m, VoxelData* voxelData) {
 		free(m->texBuffer);
 		free(m->meshBufferTrans);
 		free(m->texBufferTrans);
-	} else {
-		// freeDMemory(m->meshBuffer);
-		// freeDMemory(m->texBuffer);
-		// freeDMemory(m->meshBufferTrans);
-		// freeDMemory(m->texBufferTrans);
-
-		free(m->meshBuffer);
-		free(m->texBuffer);
-		free(m->meshBufferTrans);
-		free(m->texBufferTrans);
-	}
+	} 
 
 	m->meshUploaded = true;
+}
+
+
+void compressVoxelData(VoxelMesh* mesh, uchar* buffer);
+void compressVoxelDataThreaded(void* data) {
+	VoxelMesh* m = (VoxelMesh*)data;
+
+	uchar* buffer = mallocArray(uchar, VOXEL_SIZE);
+	compressVoxelData(m, buffer);
+	free(buffer);
+
+	if(THREADING) atomicSub(&m->activeCompressing);
+	m->compressed = true;
+}
+
+void storeMesh(VoxelMesh* m, VoxelData* voxelData) {
+
+	bool compressed = true;
+
+	if(!m->compressed) {
+		if(THREADING) {
+			if(!m->activeCompressing && !threadQueueFull(globalThreadQueue)) {
+				atomicAdd(&m->activeCompressing);
+
+				threadQueueAdd(globalThreadQueue, compressVoxelDataThreaded, m);
+			}
+			compressed = false;
+		}
+	}
+
+	if(!compressed) return;
+
+	freeVoxelMesh(m);
+
+	m->generated = false;
+	m->upToDate = false;
+	m->meshUploaded = false;
+	m->stored = true;
 }
 
 // coord 		Vec3
@@ -789,6 +859,8 @@ Vec3 coordToMeshCoord(Vec3 coord) {
 // voxel -> block
 uchar* getBlockFromVoxel(VoxelData* voxelData, Vec3i voxel) {
 	VoxelMesh* vm = getVoxelMesh(voxelData, voxelToMesh(voxel));
+	if(!vm->generated) return 0;
+
 	Vec3i localCoord = voxelToLocalVoxel(voxel);
 	uchar* block = &vm->voxels[voxelArray(localCoord.x, localCoord.y, localCoord.z)];
 
@@ -803,6 +875,8 @@ uchar* getBlockFromCoord(VoxelData* voxelData, Vec3 coord) {
 // voxel -> lighting
 uchar* getLightingFromVoxel(VoxelData* voxelData, Vec3i voxel) {
 	VoxelMesh* vm = getVoxelMesh(voxelData, voxelToMesh(voxel));
+	if(!vm->generated) return 0;
+
 	Vec3i localCoord = voxelToLocalVoxel(voxel);
 	uchar* block = &vm->lighting[voxelArray(localCoord.x, localCoord.y, localCoord.z)];
 
@@ -881,7 +955,7 @@ void setupVoxelUniforms(Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit
 	al.e2[3][0] = fogColor.x, al.e2[3][1] = fogColor.y, al.e2[3][2] = fogColor.z;
 	// al.e2[3][3] = 1.0f / (view_distance - MESH_CHUNK_SIZE_X);
 	// al.e2[3][3] *= al.e2[3][3];
-	al.e2[3][3] = (float)1.0f/(VIEW_DISTANCE - VOXEL_X);
+		// al.e2[3][3] = (float)1.0f/((VIEW_DISTANCE*VOXEL_X) - VOXEL_X);
 	al.e2[3][3] *= al.e2[3][3];
 
 	ambientLighting = al;
@@ -1088,6 +1162,7 @@ bool collisionVoxelWidthBox(VoxelData* voxelData, Vec3 boxPos, Vec3 boxSize, flo
 			for(int z = voxelMin.z; z < voxelMax.z; z++) {
 				Vec3i coord = vec3i(x,y,z);
 				uchar* block = getBlockFromVoxel(voxelData, coord);
+				if(!block) continue;
 
 				if(*block > 0) {
 					if(checkDistance) {
@@ -1106,4 +1181,61 @@ bool collisionVoxelWidthBox(VoxelData* voxelData, Vec3 boxPos, Vec3 boxSize, flo
 	}
 
 	return collision;
+}
+
+void compressVoxelData(VoxelMesh* mesh, uchar* buffer) {
+	uchar* buf = buffer;
+	int bufferCount = 0;
+
+	for(int index = 0; index < 2; index++) {
+
+		uchar* data = index == 0 ? mesh->voxels : mesh->lighting;
+
+		uchar count = 1;
+		uchar blockType = data[0];
+		for(int i = 1; i < VOXEL_SIZE; i++) {
+			if(data[i] != blockType || count == UCHAR_MAX || i == VOXEL_SIZE-1) {
+				writeTypeAndAdvance(buf, count, uchar);
+				writeTypeAndAdvance(buf, blockType, uchar);
+
+				count = 1;
+				blockType = data[i];
+
+				bufferCount++;
+			} else {
+				count++;
+			}
+		}
+		// Handle last element.
+		writeTypeAndAdvance(buf, (uchar)1, uchar);
+		writeTypeAndAdvance(buf, data[VOXEL_SIZE-1], uchar);
+		bufferCount++;
+
+		if(index == 0) mesh->compressedVoxelsSize = bufferCount;
+		else mesh->compressedLightingSize = bufferCount - mesh->compressedVoxelsSize;
+	}
+
+	mesh->compressedData = mallocArray(uchar, bufferCount * (sizeof(uchar)*2));
+	memcpy(mesh->compressedData, buffer, bufferCount * (sizeof(uchar)*2));
+}
+
+void decompressVoxelData(VoxelMesh* mesh) {
+	int s = VOXEL_SIZE;
+
+	uchar* buf = mesh->compressedData;
+	for(int i = 0; i < 2; i++) {
+		uchar* data = i == 0 ? mesh->voxels : mesh->lighting;
+		int count = i == 0 ? mesh->compressedVoxelsSize : mesh->compressedLightingSize;
+
+		int pos = 0;
+		for(int i = 0; i < count; i++) {
+			uchar count = readTypeAndAdvance(buf, uchar);
+			uchar type = readTypeAndAdvance(buf, uchar);
+
+			for(int i = 0; i < count; i++) data[pos+i] = type;
+			pos += count;
+		}
+
+	}
+
 }

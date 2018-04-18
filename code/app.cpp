@@ -73,6 +73,9 @@ Changing course for now:
 - Main Menu.
 - New game, load game, save game.
 - Settings.
+- atomicAdd sections are not thread proof. 
+  We could have multiple equal jobs in thread queue.
+
 
 //-------------------------------------
 //               BUGS
@@ -317,6 +320,7 @@ struct AppData {
 	Vec3 selectedBlockFaceDir;
 
 	VoxelData voxelData;
+	VoxelData storedVoxelData;
 
 	uchar* voxelCache[8];
 	uchar* voxelLightingCache[8];
@@ -799,8 +803,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// Hashes and thread data.
 		{
 			VoxelData* vd = &ad->voxelData;
-			vd->voxelHashSize = 1024;
-			vd->voxelHash = getPArray(DArray<int>, vd->voxelHashSize);
+			vd->size = 10000;
+			vd->voxelHashSize = vd->size * 10;
+			// vd->voxelHash = getPArray(DArray<int>, vd->voxelHashSize);
+			vd->voxelHash = getPArray(VoxelArray, vd->voxelHashSize);
+			vd->voxels.reserve(vd->size);
+
+			float hashSize = (vd->voxelHashSize * sizeof(VoxelArray)) / (float)(1024*1024);
+			float voxelsSize = (vd->size * sizeof(VoxelMesh)) / (float)(1024*1024);
+			float totalSize = hashSize + voxelsSize;
 
 			for(int i = 0; i < arrayCount(ad->threadData); i++) {
 				ad->threadData[i] = {};
@@ -815,8 +826,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 				voxelCache[i] = ad->voxelCache[i];
 				voxelLightingCache[i] = ad->voxelLightingCache[i];
 			}
-
-			ad->voxelData.voxels.reserve(10000);
 		}
 
 		// Trees.
@@ -1357,9 +1366,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 				// Clear voxel hash and meshes.
 				{
-					DArray<int>* voxelHash = ad->voxelData.voxelHash;
+					// DArray<int>* voxelHash = ad->voxelData.voxelHash;
+					VoxelArray* voxelHash = ad->voxelData.voxelHash;
 					for(int i = 0; i < ad->voxelData.voxelHashSize; i++) {
-						voxelHash[i].clear();
+						voxelHash[i].count = 0;
 					}
 
 					DArray<VoxelMesh>* voxels = &ad->voxelData.voxels;
@@ -1426,7 +1436,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 								for(int i = 0; i < count; i++) data[pos+i] = type;
 								pos += count;
 							}
-
 						}
 					}
 
@@ -1469,7 +1478,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 					Entity player;
 					Vec3 playerDim = vec3(0.8f, 0.8f, 1.8f);
 					float camOff = playerDim.z*0.5f - playerDim.x*0.25f;
-					initEntity(&player, ET_Player, vec3(0,0,40), playerDim, vec3(0,0,camOff));
+					initEntity(&player, ET_Player, vec3(0.5f,0.5f,40), playerDim, vec3(0,0,camOff));
 					player.rot = startRot;
 					player.playerOnGround = false;
 					strCpy(player.name, "Player");
@@ -1491,16 +1500,21 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			// Load voxel meshes around the player at startup.
 			{
-				Vec2i pPos = coordToMesh(ad->player->pos);
-				for(int y = -1; y < 2; y++) {
-					for(int x = -1; x < 2; x++) {
-						Vec2i coord = pPos - vec2i(x,y);
+				// Vec2i pPos = coordToMesh(ad->player->pos);
+				// for(int y = -1; y < 2; y++) {
+				// 	for(int x = -1; x < 2; x++) {
+				// 		Vec2i coord = pPos - vec2i(x,y);
 
-						VoxelMesh* m = getVoxelMesh(&ad->voxelData, coord);
-						makeMesh(m, &ad->voxelData);
-					}
-				}
+				// 		VoxelMesh* m = getVoxelMesh(&ad->voxelData, coord);
+				// 		makeMesh(m, &ad->voxelData);
+				// 	}
+				// }
+
+				Vec2i coord = coordToMesh(ad->player->pos);
+				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coord);
+				makeMesh(m, &ad->voxelData);
 			}
+
 		}
 
 		if(threadQueueFinished(globalThreadQueue)) {
@@ -1788,6 +1802,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 							Vec3 block = coordToVoxelCoord(gp);
 							uchar* blockType = getBlockFromCoord(&ad->voxelData, gp);
+							if(!blockType) continue;
 
 							if(*blockType > 0) {
 								groundCollision = true;
@@ -2004,7 +2019,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 	// Selecting blocks and modifying them.
-	if(ad->playerMode) {
+	// if(ad->playerMode) 
+	if(false)
+	{
 		ad->blockSelected = false;
 
 		// get block in line
@@ -2212,7 +2229,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->reloadWorld = false;
 
 		if(threadQueueFinished(threadQueue)) {
-			int radius = VIEW_DISTANCE/VOXEL_X;
+			int radius = VIEW_DISTANCE;
 
 			Vec3 pp = ad->activeCam.pos;
 			Vec2i worldPos = coordToMesh(pp);
@@ -2245,12 +2262,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->voxelDrawCount = 0;
 
 		Vec2i pPos = coordToMesh(ad->activeCam.pos);
-		int radius = VIEW_DISTANCE/VOXEL_X;
+		int radius = VIEW_DISTANCE;
 
 		// generate the meshes around the player in a spiral by drawing lines and rotating
 		// the directing every time we reach a corner
 		for(int r = 0; r < radius; r++) {
-			int lineLength = r == 0? 1 : 8*r;
+			int lineLength = r == 0 ? 1 : 8*r;
 			int segment = r*2;
 
 			Vec2i lPos = pPos+r;
@@ -2273,6 +2290,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 				radCounter++;
 
 				Vec2i coord = lPos;
+
+				// Throw away coordinates outside view circle.
+				float distance = lenVec2(vec2(coord - pPos));
+				if(distance > VIEW_DISTANCE) {
+					continue;
+				}
+
 				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coord);
 
 				if(!m->meshUploaded) {
@@ -2345,7 +2369,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 				}
 
 				if(isIntersecting) {
-					// drawVoxelMesh(m);
 					coordList[coordListSize++] = m->coord;
 
 					// triangleCount += m->quadCount*4;
@@ -2372,6 +2395,28 @@ extern "C" APPMAINFUNCTION(appMain) {
 		for(int i = 0; i < sortListSize-1; i++) {
 			assert(sortList[i].key <= sortList[i+1].key);
 		}
+	}
+
+	// Store chunks that are in store region.
+	// if(false)
+	{
+		uchar* buffer = getTArray(uchar, VOXEL_SIZE);
+
+		Vec2i playerPos = coordToMesh(ad->activeCam.pos);
+
+		int dist = STORE_DISTANCE;
+		Vec2i startPos = vec2i(dist, dist);
+		Vec2i dir = vec2i(0,-1);
+		Vec2i pos = startPos;
+		do {
+			VoxelMesh* mesh = getVoxelMesh(&ad->voxelData, playerPos + pos, false);
+			if(mesh && !mesh->stored) {
+				storeMesh(mesh, &ad->voxelData);
+			}
+
+			pos += dir;
+			if(abs(pos.x) == dist && abs(pos.y) == dist) dir = vec2i(dir.y, -dir.x);
+		} while(pos != startPos);
 	}
 
 	TIMER_BLOCK_END(world);
@@ -2912,6 +2957,49 @@ extern "C" APPMAINFUNCTION(appMain) {
 		#endif 
 	}
 
+	}
+
+	if(true)
+	{
+		VoxelData* vd = &ad->voxelData;
+
+		printf("Count: %i.\n", vd->voxels.count);
+		// for(int i = 0; i < vd->voxels.count; i++) {
+		// 	VoxelMesh* mesh = vd->voxels.data + i;
+		// 	if(!mesh->stored)
+		// 		printf(" %i, %i\n", PVEC2(mesh->coord));
+		// }
+		// for(int i = 0; i < vd->voxels.count; i++) {
+		// 	VoxelMesh* mesh = vd->voxels.data + i;
+		// 	if(mesh->stored)
+		// 		printf(" S: %i, %i\n", PVEC2(mesh->coord));
+		// }
+
+		// printf("\n");
+	}
+
+	{
+		dcState(STATE_POLYGONMODE, POLYGON_MODE_LINE);
+
+		VoxelData* vd = &ad->voxelData;
+		for(int i = 0; i < vd->voxels.count; i++) {
+			VoxelMesh* mesh = vd->voxels.data + i;
+
+			Vec3 pos = meshToMeshCoord(mesh->coord);
+			pos.z = ad->player->pos.z-1-0.3;
+			Vec4 c = vec4(0.5f,1);
+			if(mesh->generated) c.r += 0.5f;
+			if(mesh->upToDate) c.g += 0.5f;
+			if(mesh->meshUploaded) c.b += 0.5f;
+
+			// if(mesh->activeGeneration) c.r += 0.5f;
+			// if(mesh->activeMaking) c.g += 0.5f;
+			if(mesh->stored) c.rgb -= vec3(0.5f);
+
+			dcCube(pos, vec3(VOXEL_X, VOXEL_Y, 1)*0.95f, c);
+		}
+
+		dcState(STATE_POLYGONMODE, POLYGON_MODE_FILL);
 	}
 
 	endOfMainLabel:
@@ -5444,6 +5532,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 		dcText(fillString("Fps  : %i", fps), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
 		dcText(fillString("Pos  : (%f,%f,%f)", PVEC3(ad->activeCam.pos)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
+		dcText(fillString("Chunk: (%i,%i)", PVEC2(coordToMesh(ad->player->pos))), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
 		dcText(fillString("Pos  : (%f,%f,%f)", PVEC3(ad->selectedBlock)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
 		dcText(fillString("Look : (%f,%f,%f)", PVEC3(ad->activeCam.look)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
 		dcText(fillString("Up   : (%f,%f,%f)", PVEC3(ad->activeCam.up)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;

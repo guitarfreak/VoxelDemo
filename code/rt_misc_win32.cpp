@@ -11,6 +11,8 @@ void* mallocWithBaseAddress(void* baseAddress, int sizeInBytes) {
 struct ThreadJob {
     void (*function)(void* data);
     void* data;
+    // char dataBuffer[100];
+    // int dataSize;
 };
 
 struct ThreadQueue {
