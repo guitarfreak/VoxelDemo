@@ -11,8 +11,8 @@ void* mallocWithBaseAddress(void* baseAddress, int sizeInBytes) {
 struct ThreadJob {
     void (*function)(void* data);
     void* data;
-    // char dataBuffer[100];
-    // int dataSize;
+    int dataType;
+    char dataBuffer[100];
 };
 
 struct ThreadQueue {
@@ -25,7 +25,8 @@ struct ThreadQueue {
     int threadIds[16];
     int threadCount;
 
-    ThreadJob jobs[256];
+    ThreadJob* jobs;
+    int jobCount;
 };
 
 int getThreadQueueId(ThreadQueue* queue) {
@@ -47,14 +48,15 @@ bool doNextThreadJob(ThreadQueue* queue) {
     bool shouldSleep = false;
 
     volatile uint currentReadIndex = queue->readIndex;
-    volatile uint newReadIndex = (currentReadIndex + 1) % arrayCount(queue->jobs);
+    volatile uint newReadIndex = (currentReadIndex + 1) % queue->jobCount;
 
     if(currentReadIndex != queue->writeIndex) {
         LONG oldValue = InterlockedCompareExchange((LONG volatile*)&queue->readIndex, newReadIndex, currentReadIndex);
         // if(newReadIndex == queue->readIndex) {
         if(oldValue == currentReadIndex) { // Holy Shit.
             ThreadJob job = queue->jobs[currentReadIndex];
-            job.function(job.data);
+            if(job.dataType == 0) job.function(job.data);
+            else job.function(job.dataBuffer);
             InterlockedIncrement((LONG volatile*)&queue->completionCount);
             // printf("COUNT: %i \n", queue->completionCount);
         }
@@ -76,7 +78,7 @@ DWORD WINAPI threadProcess(LPVOID data) {
     return 0;
 }
 
-void threadInit(ThreadQueue* queue, int numOfThreads) {
+void threadInit(ThreadQueue* queue, int numOfThreads, int jobCount) {
     queue->completionGoal = 0;
     queue->completionCount = 0;
     queue->writeIndex = 0;
@@ -85,6 +87,9 @@ void threadInit(ThreadQueue* queue, int numOfThreads) {
     queue->semaphore = CreateSemaphoreEx(0, 0, 255, "Semaphore", 0, SEMAPHORE_ALL_ACCESS);
 
     queue->threadCount = numOfThreads + 1;
+
+    queue->jobCount = jobCount;
+    queue->jobs = mallocArray(ThreadJob, jobCount);
 
     int id = GetCurrentThreadId();
     queue->threadIds[0] = id;
@@ -108,16 +113,24 @@ void threadInit(ThreadQueue* queue, int numOfThreads) {
 }
 
 #include <intrin.h>
-bool threadQueueAdd(ThreadQueue* queue, void (*function)(void*), void* data, bool skipIfFull = false) {
-    int newWriteIndex = (queue->writeIndex + 1) % arrayCount(queue->jobs);
+bool threadQueueAdd(ThreadQueue* queue, void (*function)(void*), void* data, int dataSize = 0, bool skipIfFull = false) {
+    int newWriteIndex = (queue->writeIndex + 1) % queue->jobCount;
     // if(skipIfFull) {
     	// if(newWriteIndex == queue->readIndex) return false;
-    // } else {
-	    myAssert(newWriteIndex != queue->readIndex);
+    // } 
+    // else {
+	    // myAssert(newWriteIndex != queue->readIndex);
     // }
+
     ThreadJob* job = queue->jobs + queue->writeIndex;
     job->function = function;
-    job->data = data;
+    if(dataSize == 0) {
+    	job->dataType = 0;
+	    job->data = data;
+    } else {
+    	job->dataType = 1;
+	    memcpy(job->dataBuffer, data, dataSize);
+    }
 
     InterlockedIncrement(&queue->completionGoal);
     // printf("GOAL: %i \n", queue->completionCount);
@@ -135,7 +148,7 @@ bool threadQueueAdd(ThreadQueue* queue, void (*function)(void*), void* data, boo
 }
 
 bool threadQueueFull(ThreadQueue* queue) {
-	int newWriteIndex = (queue->writeIndex + 1) % arrayCount(queue->jobs);
+	int newWriteIndex = (queue->writeIndex + 1) % queue->jobCount;
     bool result = newWriteIndex == queue->readIndex;
     return result;
 }

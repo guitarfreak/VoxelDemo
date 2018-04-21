@@ -2094,13 +2094,24 @@ static const char *stbvox_fragment_program =
 
    #ifdef STBVOX_CONFIG_FOG_SMOOTHSTEP
       "\n"
+      "float mapRange(float value, float mi, float ma, float rangeMin, float rangeMax) {\n"
+      "	float off = mi < 0 ? abs(mi) : -abs(mi);\n"
+      "	return ((value+off)/((ma+off)-(mi+off))) * (rangeMax-rangeMin) + rangeMin;\n"
+      "};\n"
+      "\n"
       "vec4 compute_fog(vec3 color, vec3 relative_pos, float fragment_alpha)\n"
       "{\n"
+      "   relative_pos.z = 0;\n"
       "   float f = dot(relative_pos,relative_pos)*ambient[3].w;\n"
-      //"   f = rlerp(f, -2,1);\n"
+
       "   f = clamp(f, 0.0, 1.0);\n" 
+
+      "   float dist = 0.8f;\n" 
+      "   if(f <= dist) f = 0;\n" 
+      "   else f = mapRange(f, dist, 1, 0, 1);\n" 
+
       "   f = 3.0*f*f - 2.0*f*f*f;\n" // smoothstep
-      "   f = f*f;\n"  // fade in more smoothly
+      // "   f = f*f;\n"  // fade in more smoothly
 
       // "float fogAlpha = fragment_alpha;\n"
       // "fogAlpha = rlerp(f, fragment_alpha, 0);\n"
@@ -2112,16 +2123,25 @@ static const char *stbvox_fragment_program =
 
       // f : 0 -> 0.5f, lerp(0..1, color, ambientColor)
 
-		"float fogAlpha, colorRange;\n"
-		"float off = 0.99f;\n"
-		"if(f <= off) {\n"
-		"	float nf = f*1/off;\n"
-		"	fogAlpha = rlerp(nf, fragment_alpha, 1);\n"
-		"	colorRange = nf;\n"
-		"} else {\n"
-		"	fogAlpha = rlerp((f-off) * 1/(1-off), 1, 0);\n"
-		"	colorRange = 1;\n"
-		"}\n"
+		// "float fogAlpha, colorRange;\n"
+		// "float off = 0.99f;\n"
+		// "if(f <= off) {\n"
+		// "	float nf = f*1/off;\n"
+		// "	fogAlpha = rlerp(nf, fragment_alpha, 1);\n"
+		// "	colorRange = nf;\n"
+		// "} else {\n"
+		// "	fogAlpha = rlerp((f-off) * 1/(1-off), 1, 0);\n"
+		// "	colorRange = 1;\n"
+		// "}\n"
+
+	      "float fogAlpha, colorRange;\n"
+	      "{\n"
+	      "	float nf = f;\n"
+	      "	fogAlpha = rlerp(nf, fragment_alpha, 1);\n"
+	      "	colorRange = nf;\n"
+	      "}\n"
+
+	      "	if(f == 1) fogAlpha = 0;\n"
 
       // "float fogAlpha = fragment_alpha;\n"
       // "if(f >= 1.0f) fogAlpha = 0;\n"
@@ -2136,8 +2156,9 @@ static const char *stbvox_fragment_program =
       #else
       // "   return rlerp(f, color.xyz, ambient[3].xyz);\n"
       // "   return vec4(rlerp(f, color.xyz, ambient[3].xyz), fogAlpha);\n"
-      // "   return vec4(rlerp(colorRange, color.xyz, ambient[3].xyz), fogAlpha);\n"
-      "   return vec4(color.xyz, 1);\n"
+      "   return vec4(rlerp(colorRange, color.xyz, ambient[3].xyz), fogAlpha);\n"
+      // "   return vec4(rlerp(colorRange, color.xyz, ambient[3].xyz), 1);\n"
+      // "   return vec4(color.xyz, 1);\n"
       #endif
       "}\n"
    #endif

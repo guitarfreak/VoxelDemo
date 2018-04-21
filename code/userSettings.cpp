@@ -695,10 +695,29 @@ const char* fragmentShaderCubeMap = GLSL (
 
 	uniform bool clipPlane = false;
 
+	vec4 fogColor = vec4(1,1,1,1);
+
+	float mapRange01(float value, float min, float max) {
+		float off = min < 0 ? abs(min) : -min;
+		return ((value+off)/((max+off)-(min+off)));
+	};
+
 	void main() {
 		vec3 clipPos = pos;
 		if(clipPlane) clipPos.y *= -1;
-		color = texture(s, vec4(clipPos, 0));
+		// color = texture(s, vec4(clipPos, 0));
+
+		float d0 = -0.01f;
+		if(clipPos.y <= 0) {
+			vec4 c = texture(s, vec4(clipPos, 0));
+			
+			if(clipPos.y >= d0) {
+				float f = mapRange01(clipPos.y, d0, 0);
+				color = mix(fogColor, c, f);
+
+			} else color = fogColor;
+
+		} else color = texture(s, vec4(clipPos, 0));
 
 		// color = texture(s, vec4(pos, 0));
 	}

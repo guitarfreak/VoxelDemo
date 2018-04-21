@@ -35,7 +35,8 @@ int CALLBACK WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR commandLi
 	int coreCount = sysinfo.dwNumberOfProcessors;
 
 	ThreadQueue threadQueue;
-	threadInit(&threadQueue, coreCount-1);
+	threadInit(&threadQueue, coreCount-1, 200);
+	// threadInit(&threadQueue, 1, 1000);
 
 	AppMemory appMemory = {};
 

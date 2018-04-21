@@ -320,12 +320,9 @@ struct AppData {
 	Vec3 selectedBlockFaceDir;
 
 	VoxelData voxelData;
-	VoxelData storedVoxelData;
 
 	uchar* voxelCache[8];
 	uchar* voxelLightingCache[8];
-
-	MakeMeshThreadedData threadData[256];
 
 	bool reloadWorld;
 
@@ -416,7 +413,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// AppGlobals.
 
-	voxelThreadData = ad->threadData;
 	treeNoise = ad->treeNoise;
 
 	for(int i = 0; i < 8; i++) {
@@ -812,10 +808,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 			float hashSize = (vd->voxelHashSize * sizeof(VoxelArray)) / (float)(1024*1024);
 			float voxelsSize = (vd->size * sizeof(VoxelMesh)) / (float)(1024*1024);
 			float totalSize = hashSize + voxelsSize;
-
-			for(int i = 0; i < arrayCount(ad->threadData); i++) {
-				ad->threadData[i] = {};
-			} 
 
 			for(int i = 0; i < arrayCount(ad->voxelCache); i++) {
 				ad->voxelCache[i] = (uchar*)getPMemory(sizeof(uchar)*VOXEL_CACHE_SIZE);
@@ -1512,7 +1504,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 				Vec2i coord = coordToMesh(ad->player->pos);
 				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coord);
-				makeMesh(m, &ad->voxelData);
+				makeMesh(m, &ad->voxelData, coordToMesh(ad->activeCam.pos));
 			}
 
 		}
@@ -2242,7 +2234,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 					m->meshUploaded = false;
 					m->generated = false;
 
-					makeMesh(m, &ad->voxelData);
+					makeMesh(m, &ad->voxelData, coordToMesh(ad->activeCam.pos));
 				}
 			}
 		} 
@@ -2262,7 +2254,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->voxelDrawCount = 0;
 
 		Vec2i pPos = coordToMesh(ad->activeCam.pos);
-		int radius = VIEW_DISTANCE;
+		// int radius = VIEW_DISTANCE;
+		int radius = STORE_DISTANCE + STORE_SIZE;
 
 		// generate the meshes around the player in a spiral by drawing lines and rotating
 		// the directing every time we reach a corner
@@ -2291,20 +2284,41 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 				Vec2i coord = lPos;
 
-				// Throw away coordinates outside view circle.
+				// Throw away coordinates outside store circle.
 				float distance = lenVec2(vec2(coord - pPos));
-				if(distance > VIEW_DISTANCE) {
+				if((distance >= STORE_DISTANCE) && distance <= (STORE_DISTANCE+STORE_SIZE)) {
+
+					VoxelMesh* mesh = getVoxelMesh(&ad->voxelData, coord, false);
+					if(mesh && !mesh->stored && mesh->generated && !mesh->activeMaking) {
+						if(!mesh->compressionStep) {
+							if(!mesh->activeStoring && !threadQueueFull(globalThreadQueue)) {
+								atomicAdd(&mesh->activeStoring);
+								threadQueueAdd(globalThreadQueue, storeMeshThreaded, mesh);
+							}
+						} else {
+							freeVoxelMesh(mesh);
+							mesh->compressionStep = false;
+							mesh->stored = true;
+						}
+					}
+
 					continue;
 				}
+
+				// Throw away coordinates outside view circle.
+				if(distance >= VIEW_DISTANCE+1) continue;
 
 				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coord);
 
 				if(!m->meshUploaded) {
-					makeMesh(m, &ad->voxelData);
+					makeMesh(m, &ad->voxelData, coordToMesh(ad->activeCam.pos));
 					meshGenerationCount++;
 
 					if(!m->modifiedByUser) continue;
 				}
+
+				// Throw away coordinates outside view circle.
+				if(distance > VIEW_DISTANCE) continue;
 
 				// frustum culling
 				Vec3 cp = ad->activeCam.pos;
@@ -2397,30 +2411,81 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 	}
 
+	// // Store chunks that are in store region.
+	// {
+	// 	Vec2i playerPos = coordToMesh(ad->activeCam.pos);
+
+	// 	int dist = STORE_DISTANCE;
+	// 	Vec2i startPos = vec2i(dist, dist);
+	// 	Vec2i dir = vec2i(0,-1);
+	// 	Vec2i pos = startPos;
+	// 	do {
+	// 		VoxelMesh* mesh = getVoxelMesh(&ad->voxelData, playerPos + pos, false);
+	// 		if(mesh && !mesh->stored) {
+	// 			if(!mesh->compressionStep) {
+	// 				if(!mesh->activeStoring && !threadQueueFull(globalThreadQueue)) {
+	// 					atomicAdd(&mesh->activeStoring);
+	// 					threadQueueAdd(globalThreadQueue, storeMeshThreaded, mesh);
+	// 				}
+	// 			} else {
+	// 				freeVoxelMesh(mesh);
+	// 				mesh->compressionStep = false;
+	// 				mesh->stored = true;
+	// 			}
+	// 		}
+
+	// 		pos += dir;
+	// 		if(abs(pos.x) == dist && abs(pos.y) == dist) dir = vec2i(dir.y, -dir.x);
+	// 	} while(pos != startPos);
+	// }
+
 	// Store chunks that are in store region.
 	// if(false)
-	{
-		uchar* buffer = getTArray(uchar, VOXEL_SIZE);
+	// {
+	// 	Vec2i playerPos = coordToMesh(ad->activeCam.pos);
 
-		Vec2i playerPos = coordToMesh(ad->activeCam.pos);
+	// 	for(int i = 0; i < 3; i++) {
+	// 		int dist;
+	// 		if(i == 0) dist = TEXTURE_CACHE_DISTANCE;
+	// 		else if(i == 1) dist = STORE_DISTANCE;
+	// 		else if(i == 2) dist = DATA_CACHE_DISTANCE;
 
-		int dist = STORE_DISTANCE;
-		Vec2i startPos = vec2i(dist, dist);
-		Vec2i dir = vec2i(0,-1);
-		Vec2i pos = startPos;
-		do {
-			VoxelMesh* mesh = getVoxelMesh(&ad->voxelData, playerPos + pos, false);
-			if(mesh && !mesh->stored) {
-				storeMesh(mesh, &ad->voxelData);
-			}
+	// 		Vec2i startPos = vec2i(dist, dist);
+	// 		Vec2i dir = vec2i(0,-1);
+	// 		Vec2i pos = startPos;
+	// 		do {
+	// 			VoxelMesh* mesh = getVoxelMesh(&ad->voxelData, playerPos + pos, false);
+	// 			if(mesh) {
+	// 				if(i == 0) {
+	// 					freeVoxelGPUData(mesh);
+	// 					mesh->upToDate = false;
+	// 					mesh->meshUploaded = false;
+	// 				} else if(i == 1 && !mesh->stored && mesh->generated && !mesh->activeGeneration
+	// 				          && !mesh->activeMaking && mesh->meshUploaded) {
+	// 					if(!threadQueueFull(globalThreadQueue)) {
+	// 						threadQueueAdd(globalThreadQueue, storeMesh, mesh);
+	// 					}
+	// 				} else if(i == 2 && mesh->stored && mesh->generated && !mesh->activeGeneration
+	// 				          && !mesh->activeMaking && mesh->meshUploaded) {
+	// 					if(!threadQueueFull(globalThreadQueue)) {
+	// 						threadQueueAdd(globalThreadQueue, restoreMesh, mesh);
+	// 					}
+	// 				}
+	// 			}
 
-			pos += dir;
-			if(abs(pos.x) == dist && abs(pos.y) == dist) dir = vec2i(dir.y, -dir.x);
-		} while(pos != startPos);
-	}
+	// 			pos += dir;
+	// 			if(abs(pos.x) == dist && abs(pos.y) == dist) dir = vec2i(dir.y, -dir.x);
+	// 		} while(pos != startPos);
+	// 	}
+	// }
 
 	TIMER_BLOCK_END(world);
 
+	// {
+	// 	dcDisable(STATE_DEPTH_TEST);
+	// 	dcCube(vec3(0,0,0), vec3(1000000,1000000,0.1), vec4(1,0,0,1));
+	// 	dcEnable(STATE_DEPTH_TEST);
+	// }
 
 	TIMER_BLOCK_BEGIN_NAMED(worldDraw, "Draw World");
 
@@ -2959,7 +3024,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	}
 
-	if(true)
+	if(false)
 	{
 		VoxelData* vd = &ad->voxelData;
 
@@ -2978,6 +3043,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// printf("\n");
 	}
 
+	if(false)
 	{
 		dcState(STATE_POLYGONMODE, POLYGON_MODE_LINE);
 

@@ -133,6 +133,7 @@ enum CommandState {
 	STATE_POLYGONMODE, 
 	STATE_LINEWIDTH,
 	STATE_CULL,
+	STATE_DEPTH_TEST
 };
 
 enum Polygon_Mode {
@@ -1905,6 +1906,7 @@ int stateSwitch(int state) {
 	switch(state) {
 		case STATE_CULL: return GL_CULL_FACE;
 		case STATE_SCISSOR: return GL_SCISSOR_TEST;
+		case STATE_DEPTH_TEST: return GL_DEPTH_TEST;
 	}
 	return 0;
 }

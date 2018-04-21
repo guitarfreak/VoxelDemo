@@ -3,33 +3,21 @@ extern ThreadQueue* globalThreadQueue;
 const char* minecraftTextureFolderPath = DATA_FOLDER("Textures\\Minecraft\\");
 
 
-Vec3 voxelFogColor = colorSRGB(vec3(0.43f,0.38f,0.44f));
+// Vec3 voxelFogColor = colorSRGB(vec3(0.43f,0.38f,0.44f));
+Vec3 voxelFogColor = colorSRGB(vec3(1,1,1));
 
 #define SELECTION_RADIUS 5
 
-// #define VIEW_DISTANCE 4096 // 64
-// #define VIEW_DISTANCE 3072 // 32
+#define VIEW_DISTANCE  32
+// #define VIEW_DISTANCE  10
+#define STORE_DISTANCE (VIEW_DISTANCE + 3)
+#define STORE_SIZE 2
 
-// #define VIEW_DISTANCE 2500 // 32
-// #define VIEW_DISTANCE 2048 // 32
-// #define VIEW_DISTANCE 1024 // 16
-// #define VIEW_DISTANCE 512  // 8
-// #define VIEW_DISTANCE 256 // 4
-// #define VIEW_DISTANCE 128 // 2
-// #define VIEW_DISTANCE 64 // 1
-
-#define VIEW_DISTANCE  10
-#define STORE_DISTANCE (VIEW_DISTANCE + 2)
-
-#define TEXTURE_CACHE_DISTANCE (VIEW_DISTANCE + 2)
-#define DATA_CACHE_DISTANCE (VIEW_DISTANCE / 2)
-
+// #define TEXTURE_CACHE_DISTANCE (VIEW_DISTANCE + 2)
+// #define DATA_CACHE_DISTANCE (VIEW_DISTANCE / 2)
+// #define STORE_DISTANCE (DATA_CACHE_DISTANCE + 2)
 
 #define USE_MALLOC 1
-
-// #define VOXEL_X 64
-// #define VOXEL_Y 64
-// #define VOXEL_Z 254
 
 #define VOXEL_X 64
 #define VOXEL_Y 64
@@ -75,13 +63,8 @@ float modOffset = 0.1f;
 float heightLevels[4] = {0.4, 0.6, 0.8, 1.0f};
 float worldPowCurve = 4;
 
-#define THREADING 1
-
 bool* treeNoise;
 
-
-struct MakeMeshThreadedData;
-MakeMeshThreadedData* voxelThreadData;
 
 struct VoxelMesh {
 	Vec2i coord;
@@ -95,9 +78,7 @@ struct VoxelMesh {
 
 	//
 
-	bool compressed;
 	bool stored;
-
 	bool generated;
 	bool upToDate;
 	bool meshUploaded;
@@ -106,7 +87,9 @@ struct VoxelMesh {
 
 	volatile uint activeGeneration;
 	volatile uint activeMaking;
-	volatile uint activeCompressing;
+	volatile uint activeStoring;
+
+	bool compressionStep;
 
 	//
 
@@ -141,7 +124,6 @@ struct VoxelArray {
 struct VoxelData {
 	int size;
 	DArray<VoxelMesh> voxels;
-	// DArray<int>* voxelHash;
 	VoxelArray* voxelHash;
 	int voxelHashSize;
 };
@@ -149,8 +131,6 @@ struct VoxelData {
 struct MakeMeshThreadedData {
 	VoxelMesh* m;
 	VoxelData* voxelData;
-
-	int inProgress;
 };
 
 
@@ -293,6 +273,18 @@ void buildColorPalette() {
    }
 }
 
+void allocVoxelGPUData(VoxelMesh* m) {
+	glCreateBuffers(1, &m->bufferId);
+	glCreateBuffers(1, &m->bufferTransId);
+
+	if(STBVOX_CONFIG_MODE == 1) {
+		glCreateBuffers(1, &m->texBufferId);
+		glCreateTextures(GL_TEXTURE_BUFFER, 1, &m->textureId);
+
+		glCreateBuffers(1, &m->texBufferTransId);
+		glCreateTextures(GL_TEXTURE_BUFFER, 1, &m->textureTransId);
+	}
+}
 
 void allocVoxelMesh(VoxelMesh* m) {
 	if(USE_MALLOC) {
@@ -317,43 +309,42 @@ void allocVoxelMesh(VoxelMesh* m) {
 			// m->lighting = (uchar*)getPMemory(VOXEL_SIZE);
 	}
 
-	glCreateBuffers(1, &m->bufferId);
-	glCreateBuffers(1, &m->bufferTransId);
-
-	if(STBVOX_CONFIG_MODE == 1) {
-		glCreateBuffers(1, &m->texBufferId);
-		glCreateTextures(GL_TEXTURE_BUFFER, 1, &m->textureId);
-
-		glCreateBuffers(1, &m->texBufferTransId);
-		glCreateTextures(GL_TEXTURE_BUFFER, 1, &m->textureTransId);
-	}
+	allocVoxelGPUData(m);
 }
 
-void freeVoxelMesh(VoxelMesh* m) {
-	// if(!m->voxels) return;
-
+void freeVoxelData(VoxelMesh* m) {
 	if(m->generated) {
 		if(USE_MALLOC) {
-			// free(m->voxels);
-			// free(m->lighting);
-
 			free(m->data);
 			m->voxels = 0;
 			m->lighting = 0;
 		}
 	}
+}
 
+void freeVoxelCompressedData(VoxelMesh* m) {
+	free(m->compressedData);
+	m->compressedVoxelsSize = 0;
+	m->compressedLightingSize = 0;
+}
+
+void freeVoxelGPUData(VoxelMesh* m) {
 	if(m->meshUploaded) {
-		glDeleteBuffers(1, &m->bufferId);
-		glDeleteBuffers(1, &m->bufferTransId);
+		glDeleteBuffers(1, &m->bufferId); m->bufferId = 0;
+		glDeleteBuffers(1, &m->bufferTransId); m->bufferTransId = 0;
 
 		if(STBVOX_CONFIG_MODE == 1) {
-			glDeleteBuffers(1, &m->texBufferId);
-			glDeleteBuffers(1, &m->texBufferTransId);
-			glDeleteTextures(1, &m->textureId);
-			glDeleteTextures(1, &m->textureTransId);
+			glDeleteBuffers(1, &m->texBufferId); m->texBufferId = 0;
+			glDeleteBuffers(1, &m->texBufferTransId); m->texBufferTransId = 0;
+			glDeleteTextures(1, &m->textureId); m->textureId = 0;
+			glDeleteTextures(1, &m->textureTransId); m->textureTransId = 0;
 		}
-	}
+	}	
+}
+
+void freeVoxelMesh(VoxelMesh* m) {
+	freeVoxelData(m);
+	freeVoxelGPUData(m);
 }
 
 void initVoxelMesh(VoxelMesh* m, Vec2i coord) {
@@ -418,11 +409,7 @@ void generateVoxelMeshThreaded(void* data) {
 	VoxelMesh* m = (VoxelMesh*)data;
 	Vec2i coord = m->coord;
 
-	// Restore.
-	if(m->stored) {
-		decompressVoxelData(m);
-
-	} else if(!m->generated) {
+	if(!m->generated) {
 		// float worldHeightOffset = -0.1f;
 		float worldHeightOffset = -0.1f;
 
@@ -533,8 +520,7 @@ void generateVoxelMeshThreaded(void* data) {
 		}
 	}
 
-	if(m->stored) m->stored = false;
-	if(THREADING) atomicSub(&m->activeGeneration);
+	atomicSub(&m->activeGeneration);
 	m->generated = true;
 }
 
@@ -544,7 +530,10 @@ void makeMeshThreaded(void* data) {
 	MakeMeshThreadedData* d = (MakeMeshThreadedData*)data;
 	VoxelMesh* m = d->m;
 
-	int cacheId = THREADING ? getThreadQueueId(globalThreadQueue) : 1;
+	int cacheId = getThreadQueueId(globalThreadQueue);
+
+	uchar* cache = voxelCache[cacheId];
+	uchar* lightingCache = voxelLightingCache[cacheId];
 
 	// gather voxel data in radius and copy to cache
 	Vec2i coord = m->coord;
@@ -552,6 +541,8 @@ void makeMeshThreaded(void* data) {
 		for(int x = -1; x < 2; x++) {
 			Vec2i c = coord + vec2i(x,y);
 			VoxelMesh* lm = getVoxelMesh(d->voxelData, c);
+			uchar* voxels = lm->voxels;
+			uchar* lighting = lm->lighting;
 
 			assert(lm->generated);
 
@@ -571,10 +562,25 @@ void makeMeshThreaded(void* data) {
 			else if(y ==  1) lPos.y = VOXEL_Y+1;
 
 			for(int z = 0; z < VOXEL_Z; z++) {
+				int indexZ = z;
+				int cacheIndexZ = z+1;
+
 				for(int y = 0; y < h; y++) {
+					int indexY = (y+mPos.y)*VOXEL_Z;
+					int cacheIndexY = (y+lPos.y)*VC_Z;
+
 					for(int x = 0; x < w; x++) {
-						voxelCache[cacheId][getVoxelCache(x+lPos.x, y+lPos.y, z+1)] = lm->voxels[(x+mPos.x)*VOXEL_Y*VOXEL_Z + (y+mPos.y)*VOXEL_Z + z];
-						voxelLightingCache[cacheId][getVoxelCache(x+lPos.x, y+lPos.y, z+1)] = lm->lighting[(x+mPos.x)*VOXEL_Y*VOXEL_Z + (y+mPos.y)*VOXEL_Z + z];
+						// voxelCache[cacheId][getVoxelCache(x+lPos.x, y+lPos.y, z+1)] = lm->voxels[(x+mPos.x)*VOXEL_Y*VOXEL_Z + (y+mPos.y)*VOXEL_Z + z];
+						// voxelLightingCache[cacheId][getVoxelCache(x+lPos.x, y+lPos.y, z+1)] = lm->lighting[(x+mPos.x)*VOXEL_Y*VOXEL_Z + (y+mPos.y)*VOXEL_Z + z];
+
+						// int index =      (x+mPos.x)*VOXEL_Y*VOXEL_Z + (y+mPos.y)*VOXEL_Z + z;
+						// int cacheIndex = (x+lPos.x)*VC_Y*VC_Z       + (y+lPos.y)*VC_Z    + (z+1);
+
+						int index =      (x+mPos.x)*VOXEL_Y*VOXEL_Z + indexY      + indexZ;
+						int cacheIndex = (x+lPos.x)*VC_Y*VC_Z       + cacheIndexY + cacheIndexZ;
+
+						cache[cacheIndex] = voxels[index];
+						lightingCache[cacheIndex] = lm->lighting[index];
 					}
 				}
 			}
@@ -582,7 +588,7 @@ void makeMeshThreaded(void* data) {
 			// make floor solid
 			for(int y = 0; y < VC_Y; y++) {
 				for(int x = 0; x < VC_X; x++) {
-					voxelCache[cacheId][getVoxelCache(x, y, 0)] = BT_Sand; // change
+					cache[getVoxelCache(x, y, 0)] = BT_Sand; // change
 				}
 			}
 		}
@@ -638,8 +644,8 @@ void makeMeshThreaded(void* data) {
 	stbvox_set_input_stride(&mm, VC_Y*VC_Z,VC_Z);
 	stbvox_set_input_range(&mm, 0,0,0, VOXEL_X, VOXEL_Y, VOXEL_Z);
 
-	inputDesc->blocktype = &voxelCache[cacheId][getVoxelCache(1,1,1)];
-	inputDesc->lighting = &voxelLightingCache[cacheId][getVoxelCache(1,1,1)];
+	inputDesc->blocktype = &cache[getVoxelCache(1,1,1)];
+	inputDesc->lighting = &lightingCache[getVoxelCache(1,1,1)];
 
 	// stbvox_set_default_mesh(&mm, 0);
 	int success = stbvox_make_mesh(&mm);
@@ -657,15 +663,24 @@ void makeMeshThreaded(void* data) {
 
 
 
-	if(THREADING) atomicSub(&m->activeMaking);
+	atomicSub(&m->activeMaking);
 	m->upToDate = true;
-	d->inProgress = false;
 }
 
-void makeMesh(VoxelMesh* m, VoxelData* voxelData) {
-	TIMER_BLOCK();
+/*
+	outer ring: 
+	generate, upload, store
+	restore, upload, store
 
-	// int threadJobsMax = 20;
+	inner ring:
+	generate
+	restore
+	store
+*/
+
+void restoreMeshThreaded(void* data);
+void makeMesh(VoxelMesh* m, VoxelData* voxelData, Vec2i pos) {
+	TIMER_BLOCK();
 
 	bool notAllMeshsAreReady = false;
 	Vec2i coord = m->coord;
@@ -675,56 +690,38 @@ void makeMesh(VoxelMesh* m, VoxelData* voxelData) {
 			VoxelMesh* lm = getVoxelMesh(voxelData, c);
 
 			if(!lm->generated) {
-				if(THREADING) {
-					// if(!lm->activeGeneration) {
-					if(!lm->activeGeneration && !threadQueueFull(globalThreadQueue)) {
-						// if(!lm->activeGeneration && threadQueueOpenJobs(globalThreadQueue) < threadJobsMax) {
-						atomicAdd(&lm->activeGeneration);
-
-						if(lm->stored) {
-							allocVoxelMesh(lm);
-						}
-						threadQueueAdd(globalThreadQueue, generateVoxelMeshThreaded, lm);
-					}
-					notAllMeshsAreReady = true;
-				} else {
-					// generateVoxelMeshThreaded(lm);
-
+				if(!threadQueueFull(globalThreadQueue) && !lm->activeGeneration) {
+					atomicAdd(&lm->activeGeneration);
 					threadQueueAdd(globalThreadQueue, generateVoxelMeshThreaded, lm);
 				}
+				notAllMeshsAreReady = true;
+
 			} 
+
+			if(lm->stored) {
+				if(!threadQueueFull(globalThreadQueue) && !lm->activeStoring) {
+					atomicAdd(&lm->activeStoring);
+					allocVoxelMesh(lm);
+					threadQueueAdd(globalThreadQueue, restoreMeshThreaded, lm);
+				}
+
+				notAllMeshsAreReady = true;
+			}
+
 		}
 	}
-
-	if(!THREADING) threadQueueComplete(globalThreadQueue);
 
 	if(notAllMeshsAreReady) return;
 
 	if(!m->upToDate) {
-		if(!m->activeMaking) {
-			if(THREADING) {
-				if(threadQueueFull(globalThreadQueue)) return;
-				// if(threadQueueOpenJobs(globalThreadQueue) < threadJobsMax) return;
+		if(!threadQueueFull(globalThreadQueue) && !m->activeMaking) {
 
-				MakeMeshThreadedData* data;
-				for(int i = 0; i < 256; i++) {
-					if(!voxelThreadData[i].inProgress) {
-						voxelThreadData[i] = {m, voxelData, true};
-						// data = voxelThreadData + i;
-						
-						atomicAdd(&m->activeMaking);
-						threadQueueAdd(globalThreadQueue, makeMeshThreaded, &voxelThreadData[i]);
-
-						break;
-					}
-				}
-			} else {
-				voxelThreadData[1] = {m, voxelData, true};
-				makeMeshThreaded(&voxelThreadData[1]);
-			}
+			atomicAdd(&m->activeMaking);
+			MakeMeshThreadedData data = {m, voxelData};
+			threadQueueAdd(globalThreadQueue, makeMeshThreaded, &data, sizeof(data));
 		}
 
-		if(THREADING) return;
+		return;
 	} 
 
 	glNamedBufferData(m->bufferId, m->bufferSizePerQuad*m->quadCount, m->meshBuffer, GL_STATIC_DRAW);
@@ -747,43 +744,34 @@ void makeMesh(VoxelMesh* m, VoxelData* voxelData) {
 	m->meshUploaded = true;
 }
 
-
 void compressVoxelData(VoxelMesh* mesh, uchar* buffer);
-void compressVoxelDataThreaded(void* data) {
+void storeMeshThreaded(void* data) {
+
 	VoxelMesh* m = (VoxelMesh*)data;
 
 	uchar* buffer = mallocArray(uchar, VOXEL_SIZE);
 	compressVoxelData(m, buffer);
 	free(buffer);
 
-	if(THREADING) atomicSub(&m->activeCompressing);
-	m->compressed = true;
-}
-
-void storeMesh(VoxelMesh* m, VoxelData* voxelData) {
-
-	bool compressed = true;
-
-	if(!m->compressed) {
-		if(THREADING) {
-			if(!m->activeCompressing && !threadQueueFull(globalThreadQueue)) {
-				atomicAdd(&m->activeCompressing);
-
-				threadQueueAdd(globalThreadQueue, compressVoxelDataThreaded, m);
-			}
-			compressed = false;
-		}
-	}
-
-	if(!compressed) return;
-
-	freeVoxelMesh(m);
-
-	m->generated = false;
 	m->upToDate = false;
 	m->meshUploaded = false;
-	m->stored = true;
+
+	atomicSub(&m->activeStoring);
+	m->compressionStep = true;
 }
+
+void decompressVoxelData(VoxelMesh* mesh);
+void restoreMeshThreaded(void* data) {
+
+	VoxelMesh* m = (VoxelMesh*)data;
+
+	decompressVoxelData(m);
+	freeVoxelCompressedData(m);
+
+	atomicSub(&m->activeStoring);
+	m->stored = false;
+}
+
 
 // coord 		Vec3
 // voxel 		Vec3i -> based on voxel size
@@ -955,7 +943,11 @@ void setupVoxelUniforms(Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit
 	al.e2[3][0] = fogColor.x, al.e2[3][1] = fogColor.y, al.e2[3][2] = fogColor.z;
 	// al.e2[3][3] = 1.0f / (view_distance - MESH_CHUNK_SIZE_X);
 	// al.e2[3][3] *= al.e2[3][3];
-		// al.e2[3][3] = (float)1.0f/((VIEW_DISTANCE*VOXEL_X) - VOXEL_X);
+	
+	// al.e2[3][3] = (float)1.0f/((VIEW_DISTANCE*VOXEL_X) - VOXEL_X);
+	// al.e2[3][3] *= al.e2[3][3];
+
+	al.e2[3][3] = (float)1.0f/((VIEW_DISTANCE*VOXEL_X) - VOXEL_X);
 	al.e2[3][3] *= al.e2[3][3];
 
 	ambientLighting = al;
