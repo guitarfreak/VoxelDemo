@@ -75,7 +75,7 @@ Changing course for now:
 - Settings.
 - atomicAdd sections are not thread proof. 
   We could have multiple equal jobs in thread queue.
-
+- Simluate earth curvature in shader.
 
 //-------------------------------------
 //               BUGS
@@ -125,9 +125,9 @@ Changing course for now:
 #define STBI_ONLY_JPEG
 #include "external\stb_image.h"
 
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#define STBI_ONLY_PNG
-#include "external\stb_image_write.h"
+// #define STB_IMAGE_WRITE_IMPLEMENTATION
+// #define STBI_ONLY_PNG
+// #include "external\stb_image_write.h"
 
 
 #include <ft2build.h>
@@ -1345,7 +1345,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		// @InitNewGame.
 
-		if(!ad->loading) {
+		if(!ad->loading && threadQueueFinished(globalThreadQueue)) {
 			ad->loading = true;
 
 			bool hasSaveState;
@@ -1373,8 +1373,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 				}
 			}
 
-			ad->newGame = true;
-
 			// Load game.
 			if(!ad->newGame && hasSaveState) {
 				DArray<VoxelMesh>* voxels = &ad->voxelData.voxels;
@@ -1393,48 +1391,26 @@ extern "C" APPMAINFUNCTION(appMain) {
 					voxels->reserve(count);
 					voxels->count = count;
 
-					// for(int i = 0; i < voxels->count; i++) {
-					// 	VoxelMesh* m = voxels->data + i;
-					// 	initVoxelMesh(m, vec2i(0,0));
-
-					// 	fread(&m->coord, sizeof(Vec2i), 1, file);
-					// 	fread(m->voxels, VOXEL_SIZE * sizeof(uchar), 1, file);
-					// 	fread(m->lighting, VOXEL_SIZE * sizeof(uchar), 1, file);
-					// }
-
-					char* buffer = getTArray(char, VOXEL_SIZE);
-
 					for(int i = 0; i < voxels->count; i++) {
 						VoxelMesh* mesh = voxels->data + i;
 						initVoxelMesh(mesh, vec2i(0,0));
 
 						fread(&mesh->coord, sizeof(Vec2i), 1, file);
 
-						// Decompress.
-						for(int i = 0; i < 2; i++) {
+						fread(&mesh->compressedVoxelsSize, sizeof(int), 1, file);
+						fread(&mesh->compressedLightingSize, sizeof(int), 1, file);
 
-							uchar* data = i == 0 ? mesh->voxels : mesh->lighting;
+						int compressedDataCountTotal = mesh->compressedVoxelsSize + mesh->compressedLightingSize;
+						mesh->compressedData = mallocArray(uchar, compressedDataCountTotal * (sizeof(uchar)*2));
 
-							int bufferCount;
-							fread(&bufferCount, sizeof(int), 1, file);
-							fread(buffer, bufferCount * (sizeof(uchar) + sizeof(uchar)), 1, file);
-
-							char* buf = buffer;
-							int pos = 0;
-							for(int i = 0; i < bufferCount; i++) {
-								uchar count = readTypeAndAdvance(buf, uchar);
-								uchar type = readTypeAndAdvance(buf, uchar);
-
-								for(int i = 0; i < count; i++) data[pos+i] = type;
-								pos += count;
-							}
-						}
+						fread(mesh->compressedData, compressedDataCountTotal * (sizeof(uchar)*2), 1, file);
 					}
 
 				}
 
 				for(int i = 0; i < voxels->count; i++) {
 					VoxelMesh* m = voxels->data + i;
+					m->stored = true;
 					m->generated = true;
 					m->upToDate = false;
 					m->meshUploaded = false;
@@ -1492,19 +1468,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			// Load voxel meshes around the player at startup.
 			{
-				// Vec2i pPos = coordToMesh(ad->player->pos);
-				// for(int y = -1; y < 2; y++) {
-				// 	for(int x = -1; x < 2; x++) {
-				// 		Vec2i coord = pPos - vec2i(x,y);
+				Vec2i pPos = coordToMesh(ad->player->pos);
+				for(int y = -1; y < 2; y++) {
+					for(int x = -1; x < 2; x++) {
+						Vec2i coord = pPos - vec2i(x,y);
 
-				// 		VoxelMesh* m = getVoxelMesh(&ad->voxelData, coord);
-				// 		makeMesh(m, &ad->voxelData);
-				// 	}
-				// }
-
-				Vec2i coord = coordToMesh(ad->player->pos);
-				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coord);
-				makeMesh(m, &ad->voxelData, coordToMesh(ad->activeCam.pos));
+						VoxelMesh* m = getVoxelMesh(&ad->voxelData, coord);
+						makeMesh(m, &ad->voxelData);
+					}
+				}
 			}
 
 		}
@@ -2011,8 +1983,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 	// Selecting blocks and modifying them.
-	// if(ad->playerMode) 
-	if(false)
+	if(ad->playerMode) 
 	{
 		ad->blockSelected = false;
 
@@ -2207,6 +2178,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_VIEW, viewMatrix(skyBoxCam.pos, -skyBoxCam.look, skyBoxCam.up, skyBoxCam.right));
 		pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_PROJ, projMatrix(degreeToRadian(ad->fieldOfView), ad->aspectRatio, 0.001f, 2));
 		pushUniform(SHADER_CUBEMAP, 2, CUBEMAP_UNIFORM_CLIPPLANE, false);
+		pushUniform(SHADER_CUBEMAP, 2, CUBEMAP_UNIFORM_FOGCOLOR, voxelFogColor);
 
 		glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 		glDepthMask(false);
@@ -2234,7 +2206,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 					m->meshUploaded = false;
 					m->generated = false;
 
-					makeMesh(m, &ad->voxelData, coordToMesh(ad->activeCam.pos));
+					makeMesh(m, &ad->voxelData);
 				}
 			}
 		} 
@@ -2311,7 +2283,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coord);
 
 				if(!m->meshUploaded) {
-					makeMesh(m, &ad->voxelData, coordToMesh(ad->activeCam.pos));
+					makeMesh(m, &ad->voxelData);
 					meshGenerationCount++;
 
 					if(!m->modifiedByUser) continue;
@@ -2491,7 +2463,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// Draw voxel world and reflection.
 	{
-		setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, voxelFogColor);
+		setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, voxelFogColor.rgb);
 
 		// TIMER_BLOCK_NAMED("D World");
 		// draw world without water
@@ -2577,7 +2549,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				glDepthMask(true);
 				glDisable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 
-			setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, voxelFogColor, vec3(0,0,WATER_LEVEL_HEIGHT*2 + 0.01f), vec3(1,1,-1));
+			setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, voxelFogColor.rgb, vec3(0,0,WATER_LEVEL_HEIGHT*2 + 0.01f), vec3(1,1,-1));
 			pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CLIPPLANE, true);
 			pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CPLANE1, 0,0,-1,WATER_LEVEL_HEIGHT);
 
@@ -2645,7 +2617,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		// draw water
 		{
-			setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, voxelFogColor);
+			setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, voxelFogColor.rgb);
 			pushUniform(SHADER_VOXEL, 1, VOXEL_UNIFORM_ALPHATEST, 0.5f);
 
 			for(int i = sortListSize-1; i >= 0; i--) {
@@ -3279,15 +3251,35 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// debugUpdatePlayback(ds, appMemory);
 
 	// Save game.
-	// if(*isRunning == false)
-	if(false)
+	if(*isRunning == false)
+	// if(false)
 	{
-		char* saveFile = fillString("%s%s", SAVES_FOLDER, SAVE_STATE1);
+		threadQueueComplete(globalThreadQueue);
+
+		MSTimer timer;
+		timerInit(&timer);
+		timerStart(&timer);
 
 		DArray<VoxelMesh>* voxels = &ad->voxelData.voxels;
 
-		char* buffer = getTArray(char, VOXEL_SIZE);
+		char* buffer = getTArray(char, VOXEL_CACHE_SIZE);
 
+		// Store all meshs that are cached.
+		for(int i = 0; i < voxels->count; i++) {
+			VoxelMesh* m = voxels->data + i;
+			if(!m->stored && m->generated) {
+
+				if(threadQueueFull(globalThreadQueue)) threadQueueComplete(globalThreadQueue);
+
+				threadQueueAdd(globalThreadQueue, storeMeshThreaded, m);
+			}
+		}
+
+		threadQueueComplete(globalThreadQueue);
+
+		float dt = timerUpdate(&timer);
+
+		char* saveFile = fillString("%s%s", SAVES_FOLDER, SAVE_STATE1);
 		FILE* file = fopen(saveFile, "wb");
 		if(file) {
 			fwrite(ad->entityList.e, ad->entityList.size * sizeof(Entity), 1, file);
@@ -3297,18 +3289,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			fwrite(&voxels->count, sizeof(int), 1, file);
 
-			// for(int i = 0; i < voxels->count; i++) {
-			// 	fwrite(&voxels->data[i].coord, sizeof(Vec2i), 1, file);
-			// 	fwrite(voxels->data[i].voxels, VOXEL_SIZE * sizeof(uchar), 1, file);
-			// 	fwrite(voxels->data[i].lighting, VOXEL_SIZE * sizeof(uchar), 1, file);
-			// }
-
 			for(int i = 0; i < voxels->count; i++) {
 				VoxelMesh* mesh = voxels->data + i;
 
+				mesh->compressionStep = false;
+				mesh->stored = true;
+
 				fwrite(&mesh->coord, sizeof(Vec2i), 1, file);
 
-				// // Compress with awesome compressing method.
+				// Using zlib.
 				// for(int i = 0; i < 2; i++) {
 
 				// 	uchar* data = i == 0 ? mesh->voxels : mesh->lighting;
@@ -3319,42 +3308,51 @@ extern "C" APPMAINFUNCTION(appMain) {
 				// 	fwrite(&size, sizeof(int), 1, file);
 				// 	fwrite(result, size * sizeof(char), 1, file);
 
-   	// 				STBIW_FREE(result);
+   				//  STBIW_FREE(result);
 				// }
 
-				// Compress with awesome compressing method.
-				for(int i = 0; i < 2; i++) {
+				fwrite(&mesh->compressedVoxelsSize, sizeof(int), 1, file);
+				fwrite(&mesh->compressedLightingSize, sizeof(int), 1, file);
+				int compressedDataCountTotal = mesh->compressedVoxelsSize + mesh->compressedLightingSize;
+				fwrite(mesh->compressedData, compressedDataCountTotal * (sizeof(uchar)*2), 1, file);
 
-					uchar* data = i == 0 ? mesh->voxels : mesh->lighting;
+				// // Compress with awesome compressing method.
+				// for(int i = 0; i < 2; i++) {
 
-					int bufferCount = 0;
-					uchar count = 1;
-					uchar blockType = data[0];
-					char* buf = buffer;
-					for(int i = 1; i < VOXEL_SIZE; i++) {
-						if(data[i] != blockType || count == UCHAR_MAX || i == VOXEL_SIZE-1) {
-							writeTypeAndAdvance(buf, count, uchar);
-							writeTypeAndAdvance(buf, blockType, uchar);
+				// 	uchar* data = i == 0 ? mesh->voxels : mesh->lighting;
 
-							count = 1;
-							blockType = data[i];
+				// 	int bufferCount = 0;
+				// 	uchar count = 1;
+				// 	uchar blockType = data[0];
+				// 	char* buf = buffer;
+				// 	for(int i = 1; i < VOXEL_SIZE; i++) {
+				// 		if(data[i] != blockType || count == UCHAR_MAX || i == VOXEL_SIZE-1) {
+				// 			writeTypeAndAdvance(buf, count, uchar);
+				// 			writeTypeAndAdvance(buf, blockType, uchar);
 
-							bufferCount++;
-						} else {
-							count++;
-						}
-					}
-					// Handle last element.
-					writeTypeAndAdvance(buf, (short)1, uchar);
-					writeTypeAndAdvance(buf, data[VOXEL_SIZE-1], uchar);
-					bufferCount++;
+				// 			count = 1;
+				// 			blockType = data[i];
 
-					fwrite(&bufferCount, sizeof(int), 1, file);
-					fwrite(buffer, bufferCount * (sizeof(uchar) + sizeof(uchar)), 1, file);
-				}
+				// 			bufferCount++;
+				// 		} else {
+				// 			count++;
+				// 		}
+				// 	}
+				// 	// Handle last element.
+				// 	writeTypeAndAdvance(buf, (short)1, uchar);
+				// 	writeTypeAndAdvance(buf, data[VOXEL_SIZE-1], uchar);
+				// 	bufferCount++;
+
+				// 	fwrite(&bufferCount, sizeof(int), 1, file);
+				// 	fwrite(buffer, bufferCount * (sizeof(uchar) + sizeof(uchar)), 1, file);
+				// }
+
 			}
 
 		}
+
+		float dt2 = timerUpdate(&timer);
+		printf("%f %f\n", dt, dt2);
 	}
 
 	// @AppSessionWrite

@@ -1634,6 +1634,15 @@ static const char *stbvox_vertex_program =
          "      position += vnormal.xyz * camera_pos.w;\n"
       #endif
 
+     // "   float viewDistance = 64*20;\n"
+     // "   float globeRadius = viewDistance * 100;\n"
+
+     // "   vec2 distToCam = position.xy - camera_pos.xy;\n"
+     // "   float curvature = length(distToCam.xy) / globeRadius;\n"
+     // "   curvature = min(curvature, 1);\n"
+     // "   float a = sin(acos(curvature)) - 1;\n"
+     // "   position.z += a * globeRadius;\n"
+
       #ifndef STBVOX_CONFIG_OPENGL_MODELVIEW
          "   gl_Position = model_view * vec4(position,1.0);\n"
       #else

@@ -4,12 +4,14 @@ const char* minecraftTextureFolderPath = DATA_FOLDER("Textures\\Minecraft\\");
 
 
 // Vec3 voxelFogColor = colorSRGB(vec3(0.43f,0.38f,0.44f));
-Vec3 voxelFogColor = colorSRGB(vec3(1,1,1));
+// Vec4 voxelFogColor = colorSRGB(vec4(1,1,1,1)w);
+Vec4 voxelFogColor = colorSRGB(vec4(hslToRgbFloat(0.55f,0.5f,0.8f),1));
 
 #define SELECTION_RADIUS 5
 
-#define VIEW_DISTANCE  32
-// #define VIEW_DISTANCE  10
+// #define VIEW_DISTANCE  32
+#define VIEW_DISTANCE  15
+// #define VIEW_DISTANCE  5
 #define STORE_DISTANCE (VIEW_DISTANCE + 3)
 #define STORE_SIZE 2
 
@@ -32,8 +34,8 @@ Vec3 voxelFogColor = colorSRGB(vec3(1,1,1));
 uchar* voxelCache[8];
 uchar* voxelLightingCache[8];
 
-#define voxelArray(x, y, z) (x)*VOXEL_Y*VOXEL_Z + (y)*VOXEL_Z + (z)
-#define getVoxelCache(x, y, z) (x)*VC_Y*VC_Z + (y)*VC_Z + (z)
+// #define voxelArray(x, y, z) (x)*VOXEL_Y*VOXEL_Z + (y)*VOXEL_Z + (z)
+#define voxelCacheArray(x, y, z) (x)*VC_Y*VC_Z + (y)*VC_Z + (z)
 
 // int startX = 37800;
 // int startY = 48000;
@@ -288,12 +290,9 @@ void allocVoxelGPUData(VoxelMesh* m) {
 
 void allocVoxelMesh(VoxelMesh* m) {
 	if(USE_MALLOC) {
-		// m->voxels = (uchar*)malloc(VOXEL_SIZE);
-		// m->lighting = (uchar*)malloc(VOXEL_SIZE);
-
-		m->data = mallocArray(uchar, VOXEL_SIZE*2);
+		m->data = mallocArray(uchar, VOXEL_CACHE_SIZE*2);
 		m->voxels = m->data;
-		m->lighting = m->voxels + VOXEL_SIZE;
+		m->lighting = m->voxels + VOXEL_CACHE_SIZE;
 	} else {
 		// m->meshBufferCapacity = kiloBytes(200);
 		// m->meshBuffer = (char*)getPMemory(m->meshBufferCapacity);
@@ -409,6 +408,11 @@ void generateVoxelMeshThreaded(void* data) {
 	VoxelMesh* m = (VoxelMesh*)data;
 	Vec2i coord = m->coord;
 
+	// Start of at 1,1,1 because cache is 2 wider.
+
+	uchar* voxels   = &m->voxels[voxelCacheArray(1,1,1)];
+	uchar* lighting = &m->lighting[voxelCacheArray(1,1,1)];
+
 	if(!m->generated) {
 		// float worldHeightOffset = -0.1f;
 		float worldHeightOffset = -0.1f;
@@ -444,13 +448,13 @@ void generateVoxelMeshThreaded(void* data) {
 	    		int blockHeight = lerp(height, WORLD_MIN, WORLD_MAX);
 
 	    		for(int z = 0; z < blockHeight; z++) {
-	    			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = blockType;
-	    			m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 0;
+	    			voxels[voxelCacheArray(x,y,z)] = blockType;
+	    			lighting[voxelCacheArray(x,y,z)] = 0;
 	    		}
 
 	    		for(int z = blockHeight; z < VOXEL_Z; z++) {
-	    			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = 0;
-	    			m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = globalLumen;
+	    			voxels[voxelCacheArray(x,y,z)] = 0;
+	    			lighting[voxelCacheArray(x,y,z)] = globalLumen;
 	    		}
 
 	    		if(blockType == BT_Grass && treeNoise[y*VOXEL_Y + x] == 1 && 
@@ -461,11 +465,11 @@ void generateVoxelMeshThreaded(void* data) {
 
 		    	if(blockHeight < WATER_LEVEL_HEIGHT) {
 		    		for(int z = blockHeight; z < WATER_LEVEL_HEIGHT; z++) {
-		    			m->voxels[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = BT_Water;
+		    			voxels[voxelCacheArray(x,y,z)] = BT_Water;
 
 		    			Vec2i waterLightRange = vec2i(0,globalLumen);
 		    			int lightValue = mapRange(blockHeight, WORLD_MIN, WATER_LEVEL_HEIGHT, waterLightRange.x, waterLightRange.y);
-		    			m->lighting[x*VOXEL_Y*VOXEL_Z + y*VOXEL_Z + z] = lightValue;
+		    			lighting[voxelCacheArray(x,y,z)] = lightValue;
 		    		}
 		    	}
 		    }
@@ -490,32 +494,32 @@ void generateVoxelMeshThreaded(void* data) {
 			for(int x = min.x; x <= max.x; x++) {
 				for(int y = min.y; y <= max.y; y++) {
 					for(int z = min.z; z <= max.z; z++) {
-						m->voxels[voxelArray(x,y,z)] = BT_Leaves;    			
-						m->lighting[voxelArray(x,y,z)] = 0;    			
+						voxels[voxelCacheArray(x,y,z)] = BT_Leaves;    			
+						lighting[voxelCacheArray(x,y,z)] = 0;    			
 					}
 				}
 			}
 
-			m->voxels[voxelArray(min.x, min.y, max.z)] = 0;
-			m->voxels[voxelArray(min.x, min.y, min.z)] = 0;
-			m->voxels[voxelArray(min.x, max.y, max.z)] = 0;
-			m->voxels[voxelArray(min.x, max.y, min.z)] = 0;
-			m->voxels[voxelArray(max.x, min.y, max.z)] = 0;
-			m->voxels[voxelArray(max.x, min.y, min.z)] = 0;
-			m->voxels[voxelArray(max.x, max.y, max.z)] = 0;
-			m->voxels[voxelArray(max.x, max.y, min.z)] = 0;
-			m->lighting[voxelArray(min.x, min.y, max.z)] = globalLumen;
-			m->lighting[voxelArray(min.x, min.y, min.z)] = globalLumen;
-			m->lighting[voxelArray(min.x, max.y, max.z)] = globalLumen;
-			m->lighting[voxelArray(min.x, max.y, min.z)] = globalLumen;
-			m->lighting[voxelArray(max.x, min.y, max.z)] = globalLumen;
-			m->lighting[voxelArray(max.x, min.y, min.z)] = globalLumen;
-			m->lighting[voxelArray(max.x, max.y, max.z)] = globalLumen;
-			m->lighting[voxelArray(max.x, max.y, min.z)] = globalLumen;
+			voxels[voxelCacheArray(min.x, min.y, max.z)] = 0;
+			voxels[voxelCacheArray(min.x, min.y, min.z)] = 0;
+			voxels[voxelCacheArray(min.x, max.y, max.z)] = 0;
+			voxels[voxelCacheArray(min.x, max.y, min.z)] = 0;
+			voxels[voxelCacheArray(max.x, min.y, max.z)] = 0;
+			voxels[voxelCacheArray(max.x, min.y, min.z)] = 0;
+			voxels[voxelCacheArray(max.x, max.y, max.z)] = 0;
+			voxels[voxelCacheArray(max.x, max.y, min.z)] = 0;
+			lighting[voxelCacheArray(min.x, min.y, max.z)] = globalLumen;
+			lighting[voxelCacheArray(min.x, min.y, min.z)] = globalLumen;
+			lighting[voxelCacheArray(min.x, max.y, max.z)] = globalLumen;
+			lighting[voxelCacheArray(min.x, max.y, min.z)] = globalLumen;
+			lighting[voxelCacheArray(max.x, min.y, max.z)] = globalLumen;
+			lighting[voxelCacheArray(max.x, min.y, min.z)] = globalLumen;
+			lighting[voxelCacheArray(max.x, max.y, max.z)] = globalLumen;
+			lighting[voxelCacheArray(max.x, max.y, min.z)] = globalLumen;
 
 			for(int i = 0; i < treeHeight; i++) {
-				m->voxels[voxelArray(p.x,p.y,p.z+i)] = BT_TreeLog;
-				m->lighting[voxelArray(p.x,p.y,p.z+i)] = 0;
+				voxels[voxelCacheArray(p.x,p.y,p.z+i)] = BT_TreeLog;
+				lighting[voxelCacheArray(p.x,p.y,p.z+i)] = 0;
 			}
 		}
 	}
@@ -530,19 +534,19 @@ void makeMeshThreaded(void* data) {
 	MakeMeshThreadedData* d = (MakeMeshThreadedData*)data;
 	VoxelMesh* m = d->m;
 
-	int cacheId = getThreadQueueId(globalThreadQueue);
-
-	uchar* cache = voxelCache[cacheId];
-	uchar* lightingCache = voxelLightingCache[cacheId];
+	uchar* cache = m->voxels;
+	uchar* lightingCache = m->lighting;
 
 	// gather voxel data in radius and copy to cache
 	Vec2i coord = m->coord;
 	for(int y = -1; y < 2; y++) {
 		for(int x = -1; x < 2; x++) {
+			if(x == 0 && y == 0) continue;
+
 			Vec2i c = coord + vec2i(x,y);
 			VoxelMesh* lm = getVoxelMesh(d->voxelData, c);
-			uchar* voxels = lm->voxels;
-			uchar* lighting = lm->lighting;
+			uchar* voxels = &lm->voxels[voxelCacheArray(1,1,1)];
+			uchar* lighting = &lm->lighting[voxelCacheArray(1,1,1)];
 
 			assert(lm->generated);
 
@@ -562,25 +566,22 @@ void makeMeshThreaded(void* data) {
 			else if(y ==  1) lPos.y = VOXEL_Y+1;
 
 			for(int z = 0; z < VOXEL_Z; z++) {
-				int indexZ = z;
-				int cacheIndexZ = z+1;
+				// int indexZ = z;
+				// int cacheIndexZ = z+1;
 
 				for(int y = 0; y < h; y++) {
-					int indexY = (y+mPos.y)*VOXEL_Z;
-					int cacheIndexY = (y+lPos.y)*VC_Z;
+					// int indexY = (y+mPos.y)*VOXEL_Z;
+					// int cacheIndexY = (y+lPos.y)*VC_Z;
 
 					for(int x = 0; x < w; x++) {
-						// voxelCache[cacheId][getVoxelCache(x+lPos.x, y+lPos.y, z+1)] = lm->voxels[(x+mPos.x)*VOXEL_Y*VOXEL_Z + (y+mPos.y)*VOXEL_Z + z];
-						// voxelLightingCache[cacheId][getVoxelCache(x+lPos.x, y+lPos.y, z+1)] = lm->lighting[(x+mPos.x)*VOXEL_Y*VOXEL_Z + (y+mPos.y)*VOXEL_Z + z];
+						// int index =      (x+mPos.x)*VOXEL_Y*VOXEL_Z + indexY      + indexZ;
+						// int cacheIndex = (x+lPos.x)*VC_Y*VC_Z       + cacheIndexY + cacheIndexZ;
 
-						// int index =      (x+mPos.x)*VOXEL_Y*VOXEL_Z + (y+mPos.y)*VOXEL_Z + z;
-						// int cacheIndex = (x+lPos.x)*VC_Y*VC_Z       + (y+lPos.y)*VC_Z    + (z+1);
-
-						int index =      (x+mPos.x)*VOXEL_Y*VOXEL_Z + indexY      + indexZ;
-						int cacheIndex = (x+lPos.x)*VC_Y*VC_Z       + cacheIndexY + cacheIndexZ;
+						int index = voxelCacheArray(x + mPos.x, y + mPos.y, z);
+						int cacheIndex = voxelCacheArray(x + lPos.x, y + lPos.y, z+1);
 
 						cache[cacheIndex] = voxels[index];
-						lightingCache[cacheIndex] = lm->lighting[index];
+						lightingCache[cacheIndex] = lighting[index];
 					}
 				}
 			}
@@ -588,7 +589,7 @@ void makeMeshThreaded(void* data) {
 			// make floor solid
 			for(int y = 0; y < VC_Y; y++) {
 				for(int x = 0; x < VC_X; x++) {
-					cache[getVoxelCache(x, y, 0)] = BT_Sand; // change
+					cache[voxelCacheArray(x, y, 0)] = BT_Sand; // change
 				}
 			}
 		}
@@ -644,8 +645,8 @@ void makeMeshThreaded(void* data) {
 	stbvox_set_input_stride(&mm, VC_Y*VC_Z,VC_Z);
 	stbvox_set_input_range(&mm, 0,0,0, VOXEL_X, VOXEL_Y, VOXEL_Z);
 
-	inputDesc->blocktype = &cache[getVoxelCache(1,1,1)];
-	inputDesc->lighting = &lightingCache[getVoxelCache(1,1,1)];
+	inputDesc->blocktype = &cache[voxelCacheArray(1,1,1)];
+	inputDesc->lighting = &lightingCache[voxelCacheArray(1,1,1)];
 
 	// stbvox_set_default_mesh(&mm, 0);
 	int success = stbvox_make_mesh(&mm);
@@ -679,7 +680,7 @@ void makeMeshThreaded(void* data) {
 */
 
 void restoreMeshThreaded(void* data);
-void makeMesh(VoxelMesh* m, VoxelData* voxelData, Vec2i pos) {
+void makeMesh(VoxelMesh* m, VoxelData* voxelData) {
 	TIMER_BLOCK();
 
 	bool notAllMeshsAreReady = false;
@@ -749,7 +750,7 @@ void storeMeshThreaded(void* data) {
 
 	VoxelMesh* m = (VoxelMesh*)data;
 
-	uchar* buffer = mallocArray(uchar, VOXEL_SIZE);
+	uchar* buffer = mallocArray(uchar, VOXEL_CACHE_SIZE);
 	compressVoxelData(m, buffer);
 	free(buffer);
 
@@ -850,7 +851,7 @@ uchar* getBlockFromVoxel(VoxelData* voxelData, Vec3i voxel) {
 	if(!vm->generated) return 0;
 
 	Vec3i localCoord = voxelToLocalVoxel(voxel);
-	uchar* block = &vm->voxels[voxelArray(localCoord.x, localCoord.y, localCoord.z)];
+	uchar* block = &vm->voxels[voxelCacheArray(1 + localCoord.x, 1 + localCoord.y, 1 + localCoord.z)];
 
 	return block;
 }
@@ -866,7 +867,7 @@ uchar* getLightingFromVoxel(VoxelData* voxelData, Vec3i voxel) {
 	if(!vm->generated) return 0;
 
 	Vec3i localCoord = voxelToLocalVoxel(voxel);
-	uchar* block = &vm->lighting[voxelArray(localCoord.x, localCoord.y, localCoord.z)];
+	uchar* block = &vm->lighting[voxelCacheArray(1 + localCoord.x, 1 + localCoord.y, 1 + localCoord.z)];
 
 	return block;
 }
@@ -1185,8 +1186,8 @@ void compressVoxelData(VoxelMesh* mesh, uchar* buffer) {
 
 		uchar count = 1;
 		uchar blockType = data[0];
-		for(int i = 1; i < VOXEL_SIZE; i++) {
-			if(data[i] != blockType || count == UCHAR_MAX || i == VOXEL_SIZE-1) {
+		for(int i = 1; i < VOXEL_CACHE_SIZE; i++) {
+			if(data[i] != blockType || count == UCHAR_MAX || i == VOXEL_CACHE_SIZE-1) {
 				writeTypeAndAdvance(buf, count, uchar);
 				writeTypeAndAdvance(buf, blockType, uchar);
 
@@ -1200,7 +1201,7 @@ void compressVoxelData(VoxelMesh* mesh, uchar* buffer) {
 		}
 		// Handle last element.
 		writeTypeAndAdvance(buf, (uchar)1, uchar);
-		writeTypeAndAdvance(buf, data[VOXEL_SIZE-1], uchar);
+		writeTypeAndAdvance(buf, data[VOXEL_CACHE_SIZE-1], uchar);
 		bufferCount++;
 
 		if(index == 0) mesh->compressedVoxelsSize = bufferCount;
@@ -1212,7 +1213,6 @@ void compressVoxelData(VoxelMesh* mesh, uchar* buffer) {
 }
 
 void decompressVoxelData(VoxelMesh* mesh) {
-	int s = VOXEL_SIZE;
 
 	uchar* buf = mesh->compressedData;
 	for(int i = 0; i < 2; i++) {

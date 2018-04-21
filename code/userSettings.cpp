@@ -607,6 +607,7 @@ enum CubemapUniforms {
 	CUBEMAP_UNIFORM_PROJ,
 	CUBEMAP_UNIFORM_CLIPPLANE,
 	CUBEMAP_UNIFORM_CPLANE1,
+	CUBEMAP_UNIFORM_FOGCOLOR,
 
 	CUBEMAP_UNIFORM_SIZE,
 };
@@ -616,6 +617,7 @@ ShaderUniformType cubemapShaderUniformType[] = {
 	{UNIFORM_TYPE_MAT4, "proj"},
 	{UNIFORM_TYPE_INT, "clipPlane"},
 	{UNIFORM_TYPE_VEC4, "cPlane"},
+	{UNIFORM_TYPE_VEC4, "fogColor"},
 };
 
 const char* vertexShaderCubeMap = GLSL (
@@ -695,7 +697,7 @@ const char* fragmentShaderCubeMap = GLSL (
 
 	uniform bool clipPlane = false;
 
-	vec4 fogColor = vec4(1,1,1,1);
+	uniform vec4 fogColor;
 
 	float mapRange01(float value, float min, float max) {
 		float off = min < 0 ? abs(min) : -min;
@@ -710,7 +712,7 @@ const char* fragmentShaderCubeMap = GLSL (
 		float d0 = -0.01f;
 		if(clipPos.y <= 0) {
 			vec4 c = texture(s, vec4(clipPos, 0));
-			
+
 			if(clipPos.y >= d0) {
 				float f = mapRange01(clipPos.y, d0, 0);
 				color = mix(fogColor, c, f);
@@ -744,6 +746,7 @@ enum VoxelUniforms {
 	VOXEL_UNIFORM_CPLANE1,
 	VOXEL_UNIFORM_CPLANE2,
 	VOXEL_UNIFORM_ALPHATEST,
+
 	VOXEL_UNIFORM_SIZE,
 };
 
