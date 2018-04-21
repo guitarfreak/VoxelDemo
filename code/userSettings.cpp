@@ -40,6 +40,9 @@ const int INTERNAL_TEXTURE_FORMAT = USE_SRGB ? GL_SRGB8_ALPHA8 : GL_RGBA8;
 #define Windows_Font_Folder "\\Fonts\\"
 #define Windows_Font_Path_Variable "windir"
 
+// #define minecraftTextureFolderPath = DATA_FOLDER("Textures\\Minecraft\\");
+#define MINECRAFT_TEXTURE_FOLDER DATA_FOLDER("Textures\\Minecraft\\")
+
 //
 
 const char* watchFolders[] = {

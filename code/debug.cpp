@@ -497,7 +497,7 @@ void reloadChangedFiles(HANDLE* folderHandles, Asset* assets, int assetCount) {
 						loadCubeMapFromFile(globalGraphicsState->cubeMaps + asset->index, (char*)cubeMapPaths[asset->index], 5, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE, true);
 
 				} else if(folderIndex == 2) {
-					loadVoxelTextures((char*)minecraftTextureFolderPath, INTERNAL_TEXTURE_FORMAT, true, asset->index);
+					loadVoxelTextures(MINECRAFT_TEXTURE_FOLDER, INTERNAL_TEXTURE_FORMAT, true, asset->index);
 
 				}
 

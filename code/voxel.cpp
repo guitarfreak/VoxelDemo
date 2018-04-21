@@ -1,44 +1,26 @@
-extern ThreadQueue* globalThreadQueue;
-
-const char* minecraftTextureFolderPath = DATA_FOLDER("Textures\\Minecraft\\");
-
-
-// Vec3 voxelFogColor = colorSRGB(vec3(0.43f,0.38f,0.44f));
-// Vec4 voxelFogColor = colorSRGB(vec4(1,1,1,1)w);
-Vec4 voxelFogColor = colorSRGB(vec4(hslToRgbFloat(0.55f,0.5f,0.8f),1));
-
-#define SELECTION_RADIUS 5
-
-// #define VIEW_DISTANCE  32
-#define VIEW_DISTANCE  15
-// #define VIEW_DISTANCE  5
-#define STORE_DISTANCE (VIEW_DISTANCE + 3)
-#define STORE_SIZE 2
-
-// #define TEXTURE_CACHE_DISTANCE (VIEW_DISTANCE + 2)
-// #define DATA_CACHE_DISTANCE (VIEW_DISTANCE / 2)
-// #define STORE_DISTANCE (DATA_CACHE_DISTANCE + 2)
-
-#define USE_MALLOC 1
+extern ThreadQueue* theThreadQueue;
 
 #define VOXEL_X 64
 #define VOXEL_Y 64
 #define VOXEL_Z 254
 
-#define VOXEL_SIZE (VOXEL_X*VOXEL_Y*VOXEL_Z)
 #define VC_X (VOXEL_X + 2)
 #define VC_Y (VOXEL_Y + 2)
 #define VC_Z (VOXEL_Z + 2)
 #define VOXEL_CACHE_SIZE (VC_X*VC_Y*VC_Z)
 
-uchar* voxelCache[8];
-uchar* voxelLightingCache[8];
-
 // #define voxelArray(x, y, z) (x)*VOXEL_Y*VOXEL_Z + (y)*VOXEL_Z + (z)
 #define voxelCacheArray(x, y, z) (x)*VC_Y*VC_Z + (y)*VC_Z + (z)
 
-// int startX = 37800;
-// int startY = 48000;
+
+
+// #define TEXTURE_CACHE_DISTANCE (VIEW_DISTANCE + 2)
+// #define DATA_CACHE_DISTANCE (VIEW_DISTANCE / 2)
+// #define STORE_DISTANCE (DATA_CACHE_DISTANCE + 2)
+
+#define VIEW_DISTANCE 15
+#define STORE_DISTANCE (VIEW_DISTANCE + 3)
+#define STORE_SIZE 2
 
 // float reflectionAlpha = 0.75f;
 float reflectionAlpha = 0.5f;
@@ -65,8 +47,42 @@ float modOffset = 0.1f;
 float heightLevels[4] = {0.4, 0.6, 0.8, 1.0f};
 float worldPowCurve = 4;
 
-bool* treeNoise;
 
+
+struct VoxelWorldSettings {
+	Vec4 fogColor = colorSRGB(vec4(hslToRgbFloat(0.55f,0.5f,0.8f),1));
+
+	int viewDistance = 15;
+	int storeDistance = viewDistance + 3;
+	int storeSize = 2;
+
+	//
+
+	float reflectionAlpha = 0.5f;
+	float waterAlpha = 0.75f;
+	int globalLumen = 210;
+
+	int startX = 37750;
+	int startY = 47850;
+	int startXMod = 58000;
+	int startYMod = 68000;
+
+	int worldMin = 60;
+	int worldMax = 255;
+
+	float waterLevelValue = 0.017f;
+	int waterLevelHeight = lerp(waterLevelValue, worldMin, worldMax);
+
+	float worldFreq = 0.004f;
+	int worldDepth = 6;
+	float modFreq = 0.02f;
+	int modDepth = 4;
+	float modOffset = 0.1f;
+	float heightLevels[4];
+	float worldPowCurve = 4;
+
+	bool* treeNoise;
+};
 
 struct VoxelMesh {
 	Vec2i coord;
@@ -135,6 +151,17 @@ struct MakeMeshThreadedData {
 	VoxelData* voxelData;
 };
 
+struct GenerateMeshThreadedData {
+	VoxelMesh* m;
+	VoxelWorldSettings* vs;
+};
+
+void voxelWorldSettingsInit(VoxelWorldSettings* vs) {
+	float heightLevels[] = {0.4, 0.6, 0.8, 1.0f};
+	for(int i = 0; i < arrayCount(vs->heightLevels); i++) 
+		vs->heightLevels[i] = heightLevels[i];
+
+}
 
 enum BlockTypes {
 	BT_None = 0,
@@ -289,35 +316,18 @@ void allocVoxelGPUData(VoxelMesh* m) {
 }
 
 void allocVoxelMesh(VoxelMesh* m) {
-	if(USE_MALLOC) {
-		m->data = mallocArray(uchar, VOXEL_CACHE_SIZE*2);
-		m->voxels = m->data;
-		m->lighting = m->voxels + VOXEL_CACHE_SIZE;
-	} else {
-		// m->meshBufferCapacity = kiloBytes(200);
-		// m->meshBuffer = (char*)getPMemory(m->meshBufferCapacity);
-		// m->texBufferCapacity = m->meshBufferCapacity/4;
-		// m->texBuffer = (char*)getPMemory(m->texBufferCapacity);
-
-		// m->meshBufferTransCapacity = kiloBytes(200);
-		// m->meshBufferTrans = (char*)getPMemory(m->meshBufferTransCapacity);
-		// m->texBufferTransCapacity = m->meshBufferTransCapacity/4;
-		// m->texBufferTrans = (char*)getPMemory(m->texBufferTransCapacity);
-
-			// m->voxels = (uchar*)getPMemory(VOXEL_SIZE);
-			// m->lighting = (uchar*)getPMemory(VOXEL_SIZE);
-	}
+	m->data = mallocArray(uchar, VOXEL_CACHE_SIZE*2);
+	m->voxels = m->data;
+	m->lighting = m->voxels + VOXEL_CACHE_SIZE;
 
 	allocVoxelGPUData(m);
 }
 
 void freeVoxelData(VoxelMesh* m) {
 	if(m->generated) {
-		if(USE_MALLOC) {
-			free(m->data);
-			m->voxels = 0;
-			m->lighting = 0;
-		}
+		free(m->data);
+		m->voxels = 0;
+		m->lighting = 0;
 	}
 }
 
@@ -356,9 +366,6 @@ void initVoxelMesh(VoxelMesh* m, Vec2i coord) {
 }
 
 void addVoxelMesh(VoxelData* voxelData, int hashIndex, int index) {
-	// DArray<int>* voxelList = voxelData->voxelHash + hashIndex;
-	// voxelList->push(index);
-
 	VoxelArray* voxelList = voxelData->voxelHash + hashIndex;
 
 	assert(voxelList->count < arrayCount(voxelList->data));
@@ -401,15 +408,15 @@ VoxelMesh* getVoxelMesh(VoxelData* voxelData, Vec2i coord, bool create = true) {
 	return m;
 }
 
-void decompressVoxelData(VoxelMesh* mesh);
 void generateVoxelMeshThreaded(void* data) {
 	TIMER_BLOCK();
 
-	VoxelMesh* m = (VoxelMesh*)data;
+	GenerateMeshThreadedData* d = (GenerateMeshThreadedData*)data;
+	VoxelWorldSettings* vs = d->vs;
+	VoxelMesh* m = d->m;
 	Vec2i coord = m->coord;
 
 	// Start of at 1,1,1 because cache is 2 wider.
-
 	uchar* voxels   = &m->voxels[voxelCacheArray(1,1,1)];
 	uchar* lighting = &m->lighting[voxelCacheArray(1,1,1)];
 
@@ -457,7 +464,7 @@ void generateVoxelMeshThreaded(void* data) {
 	    			lighting[voxelCacheArray(x,y,z)] = globalLumen;
 	    		}
 
-	    		if(blockType == BT_Grass && treeNoise[y*VOXEL_Y + x] == 1 && 
+	    		if(blockType == BT_Grass && vs->treeNoise[y*VOXEL_Y + x] == 1 && 
 	    			valueBetween(y, min.y+3, max.y-3) && valueBetween(x, min.x+3, max.x-3) && 
 	    			valueBetween(perlinMod, 0.2f, 0.4f)) {
 	    			treePositions[treePositionsSize++] = vec3i(x,y,blockHeight);
@@ -566,16 +573,8 @@ void makeMeshThreaded(void* data) {
 			else if(y ==  1) lPos.y = VOXEL_Y+1;
 
 			for(int z = 0; z < VOXEL_Z; z++) {
-				// int indexZ = z;
-				// int cacheIndexZ = z+1;
-
 				for(int y = 0; y < h; y++) {
-					// int indexY = (y+mPos.y)*VOXEL_Z;
-					// int cacheIndexY = (y+lPos.y)*VC_Z;
-
 					for(int x = 0; x < w; x++) {
-						// int index =      (x+mPos.x)*VOXEL_Y*VOXEL_Z + indexY      + indexZ;
-						// int cacheIndex = (x+lPos.x)*VC_Y*VC_Z       + cacheIndexY + cacheIndexZ;
 
 						int index = voxelCacheArray(x + mPos.x, y + mPos.y, z);
 						int cacheIndex = voxelCacheArray(x + lPos.x, y + lPos.y, z+1);
@@ -639,9 +638,6 @@ void makeMeshThreaded(void* data) {
 	for(int i = 0; i < BT_Size; i++) color[i] = STBVOX_MAKE_COLOR(blockColor[i], 1, 0);
 		inputDesc->block_color = color;
 
-
-
-
 	stbvox_set_input_stride(&mm, VC_Y*VC_Z,VC_Z);
 	stbvox_set_input_range(&mm, 0,0,0, VOXEL_X, VOXEL_Y, VOXEL_Z);
 
@@ -650,6 +646,8 @@ void makeMeshThreaded(void* data) {
 
 	// stbvox_set_default_mesh(&mm, 0);
 	int success = stbvox_make_mesh(&mm);
+
+
 
 	stbvox_set_mesh_coordinates(&mm, coord.x*VOXEL_X, coord.y*VOXEL_Y,0);
 
@@ -668,19 +666,8 @@ void makeMeshThreaded(void* data) {
 	m->upToDate = true;
 }
 
-/*
-	outer ring: 
-	generate, upload, store
-	restore, upload, store
-
-	inner ring:
-	generate
-	restore
-	store
-*/
-
 void restoreMeshThreaded(void* data);
-void makeMesh(VoxelMesh* m, VoxelData* voxelData) {
+void makeMesh(VoxelMesh* m, VoxelData* voxelData, VoxelWorldSettings* vs) {
 	TIMER_BLOCK();
 
 	bool notAllMeshsAreReady = false;
@@ -691,19 +678,21 @@ void makeMesh(VoxelMesh* m, VoxelData* voxelData) {
 			VoxelMesh* lm = getVoxelMesh(voxelData, c);
 
 			if(!lm->generated) {
-				if(!threadQueueFull(globalThreadQueue) && !lm->activeGeneration) {
+				if(!threadQueueFull(theThreadQueue) && !lm->activeGeneration) {
 					atomicAdd(&lm->activeGeneration);
-					threadQueueAdd(globalThreadQueue, generateVoxelMeshThreaded, lm);
+
+					GenerateMeshThreadedData data = {lm, vs};
+					threadQueueAdd(theThreadQueue, generateVoxelMeshThreaded, &data, sizeof(data));
 				}
 				notAllMeshsAreReady = true;
 
 			} 
 
 			if(lm->stored) {
-				if(!threadQueueFull(globalThreadQueue) && !lm->activeStoring) {
+				if(!threadQueueFull(theThreadQueue) && !lm->activeStoring) {
 					atomicAdd(&lm->activeStoring);
 					allocVoxelMesh(lm);
-					threadQueueAdd(globalThreadQueue, restoreMeshThreaded, lm);
+					threadQueueAdd(theThreadQueue, restoreMeshThreaded, lm);
 				}
 
 				notAllMeshsAreReady = true;
@@ -715,11 +704,11 @@ void makeMesh(VoxelMesh* m, VoxelData* voxelData) {
 	if(notAllMeshsAreReady) return;
 
 	if(!m->upToDate) {
-		if(!threadQueueFull(globalThreadQueue) && !m->activeMaking) {
+		if(!threadQueueFull(theThreadQueue) && !m->activeMaking) {
 
 			atomicAdd(&m->activeMaking);
 			MakeMeshThreadedData data = {m, voxelData};
-			threadQueueAdd(globalThreadQueue, makeMeshThreaded, &data, sizeof(data));
+			threadQueueAdd(theThreadQueue, makeMeshThreaded, &data, sizeof(data));
 		}
 
 		return;
@@ -735,12 +724,10 @@ void makeMesh(VoxelMesh* m, VoxelData* voxelData) {
 	glNamedBufferData(m->texBufferTransId, m->textureBufferSizePerQuad*m->quadCountTrans, m->texBufferTrans, GL_STATIC_DRAW);
 	glTextureBuffer(m->textureTransId, GL_RGBA8UI, m->texBufferTransId);
 
-	if(USE_MALLOC) {
-		free(m->meshBuffer);
-		free(m->texBuffer);
-		free(m->meshBufferTrans);
-		free(m->texBufferTrans);
-	} 
+	free(m->meshBuffer);
+	free(m->texBuffer);
+	free(m->meshBufferTrans);
+	free(m->texBufferTrans);
 
 	m->meshUploaded = true;
 }
@@ -772,7 +759,6 @@ void restoreMeshThreaded(void* data) {
 	atomicSub(&m->activeStoring);
 	m->stored = false;
 }
-
 
 // coord 		Vec3
 // voxel 		Vec3i -> based on voxel size
@@ -877,8 +863,12 @@ uchar* getLightingFromCoord(VoxelData* voxelData, Vec3 coord) {
 	return getLightingFromVoxel(voxelData, coordToVoxel(coord));
 }
 
-void setupVoxelUniforms(Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit, Mat4 view, Mat4 proj, Vec3 fogColor, Vec3 trans = vec3(0,0,0), Vec3 scale = vec3(1,1,1), Vec3 rotation = vec3(0,0,0)) {
+void setupVoxelUniforms(Vec3 cameraPos, Mat4 view, Mat4 proj, Vec3 fogColor, Vec3 trans = vec3(0,0,0), Vec3 scale = vec3(1,1,1), Vec3 rotation = vec3(0,0,0)) {
 	TIMER_BLOCK();
+
+	uint texUnit1 = 0; 
+	uint texUnit2 = 1; 
+	uint faceUnit = 2; 
 
 	buildColorPalette();
 
@@ -954,6 +944,8 @@ void setupVoxelUniforms(Vec4 camera, uint texUnit1, uint texUnit2, uint faceUnit
 	ambientLighting = al;
 
 	int texUnit[2] = {texUnit1, texUnit2};
+
+	Vec4 camera = vec4(cameraPos, 1);
 
 	for(int i = 0; i < STBVOX_UNIFORM_count; ++i) {
 		stbvox_uniform_info sui;
@@ -1133,7 +1125,6 @@ void loadVoxelTextures(char* folderPath, int internalFormat, bool reload = false
 	glGenerateTextureMipmap(texture->id);
 
 }
-
 
 bool collisionVoxelWidthBox(VoxelData* voxelData, Vec3 boxPos, Vec3 boxSize, float* minDistance = 0, Vec3* collisionVoxel = 0) {
 

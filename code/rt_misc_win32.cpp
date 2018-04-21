@@ -12,7 +12,7 @@ struct ThreadJob {
     void (*function)(void* data);
     void* data;
     int dataType;
-    char dataBuffer[100];
+    char dataBuffer[150];
 };
 
 struct ThreadQueue {

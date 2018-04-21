@@ -2864,8 +2864,8 @@ float polygonArea(Vec2* polygon, int count) {
 
 void whiteNoise(Rect region, int sampleCount, Vec2* samples) {
 	for(int i = 0; i < sampleCount; ++i) {
-		Vec2 randomPos = vec2(randomInt(region.min.x, region.max.x), 
-		                      randomInt(region.min.y, region.max.y));
+		Vec2 randomPos = vec2(randomIntPCG(region.min.x, region.max.x), 
+		                      randomIntPCG(region.min.y, region.max.y));
 		samples[i] = randomPos;
 	}
 }
@@ -2891,7 +2891,7 @@ int blueNoise(Rect region, float radius, Vec2** noiseSamples, int numOfSamples =
 	// int* activeList = (int*)malloc(sizeof(int) * max(gridH, gridW));
 	int* activeList = (int*)malloc(sizeof(int) * gridH * gridW);
 	int sampleCount = 1;
-	samples[0] = vec2(randomInt(0, regionDim.w), randomInt(0, regionDim.h));
+	samples[0] = vec2(randomIntPCG(0, regionDim.w), randomIntPCG(0, regionDim.h));
 	activeList[0] = 0;
 	int activeListSize = 1;
 	Vec2 pos = samples[0];
@@ -2900,7 +2900,7 @@ int blueNoise(Rect region, float radius, Vec2** noiseSamples, int numOfSamples =
 	Rect regionOrigin = rectTrans(region, region.min*-1);
 	while(activeListSize > 0) {
 
-		int activeIndex = randomInt(0,activeListSize-1);
+		int activeIndex = randomIntPCG(0,activeListSize-1);
 		int sampleIndex = activeList[activeIndex];
 		// assert(activeIndex <= max(gridH, gridW));
 		Vec2 sample = samples[sampleIndex];

@@ -154,7 +154,7 @@ struct DrawCommandList;
 struct MemoryBlock;
 struct DebugState;
 struct Timer;
-ThreadQueue* globalThreadQueue;
+ThreadQueue* theThreadQueue;
 GraphicsState* globalGraphicsState;
 AudioState* theAudioState;
 DrawCommandList* globalCommandList;
@@ -302,10 +302,11 @@ struct AppData {
 	Entity* player;
 	Entity* cameraEntity;
 
-	bool* treeNoise;
+	// bool* treeNoise;
 
 	bool playerMode;
 	bool pickMode;
+	int selectionRadius;
 
 	bool playerOnGround;
 	int blockMenu[10];
@@ -319,6 +320,7 @@ struct AppData {
 	Vec3 selectedBlock;
 	Vec3 selectedBlockFaceDir;
 
+	VoxelWorldSettings voxelSettings;
 	VoxelData voxelData;
 
 	uchar* voxelCache[8];
@@ -405,20 +407,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 	HWND windowHandle = sd->windowHandle;
 	WindowSettings* ws = &ad->wSettings;
 
-	globalThreadQueue = threadQueue;
+	theThreadQueue = threadQueue;
 	globalGraphicsState = &ad->graphicsState;
 	theAudioState = &ad->audioState;
 	globalDebugState = ds;
 	globalTimer = ds->timer;
-
-	// AppGlobals.
-
-	treeNoise = ad->treeNoise;
-
-	for(int i = 0; i < 8; i++) {
-		voxelCache[i] = ad->voxelCache[i];
-		voxelLightingCache[i] = ad->voxelLightingCache[i];
-	}
 
 	// Init.
 
@@ -530,7 +523,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			loadCubeMapFromFile(gs->cubeMaps + i, (char*)cubeMapPaths[i], 5, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE);
 		}
 
-		loadVoxelTextures((char*)minecraftTextureFolderPath, INTERNAL_TEXTURE_FORMAT);
+		loadVoxelTextures(MINECRAFT_TEXTURE_FOLDER, INTERNAL_TEXTURE_FORMAT);
 
 		//
 		// Setup shaders and uniforms.
@@ -786,6 +779,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->playerMode = true;
 		ad->pickMode = true;
 
+		ad->selectionRadius = 5;
+
 		ad->entityList.size = 1000;
 		ad->entityList.e = (Entity*)getPMemory(sizeof(Entity)*ad->entityList.size);
 		for(int i = 0; i < ad->entityList.size; i++) ad->entityList.e[i].init = false;
@@ -814,17 +809,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 				ad->voxelLightingCache[i] = (uchar*)getPMemory(sizeof(uchar)*VOXEL_CACHE_SIZE);
 			}
 
-			for(int i = 0; i < 8; i++) {
-				voxelCache[i] = ad->voxelCache[i];
-				voxelLightingCache[i] = ad->voxelLightingCache[i];
-			}
+			voxelWorldSettingsInit(&ad->voxelSettings);
 		}
 
 		// Trees.
 		{
 			int treeRadius = 4;
-			ad->treeNoise = (bool*)getPMemory(VOXEL_X*VOXEL_Y);
-			zeroMemory(ad->treeNoise, VOXEL_X*VOXEL_Y);
+			ad->voxelSettings.treeNoise = (bool*)getPMemory(VOXEL_X*VOXEL_Y);
+			zeroMemory(ad->voxelSettings.treeNoise, VOXEL_X*VOXEL_Y);
 
 			Rect bounds = rect(0, 0, 64, 64);
 			Vec2* noiseSamples;
@@ -836,10 +828,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 				// Vec2i p = vec2i((int)(s.x/gridCell) * gridCell, (int)(s.y/gridCell) * gridCell);
 				// drawRect(rectCenDim(vec2(p), vec2(5,5)), rect(0,0,1,1), vec4(1,0,1,1), ad->textures[0]);
 				Vec2i index = vec2i(s);
-				ad->treeNoise[index.y*VOXEL_X + index.x] = 1;
+				ad->voxelSettings.treeNoise[index.y*VOXEL_X + index.x] = 1;
 			}
 			free(noiseSamples);
-			treeNoise = ad->treeNoise;
 		}
 	}
 
@@ -1345,7 +1336,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		// @InitNewGame.
 
-		if(!ad->loading && threadQueueFinished(globalThreadQueue)) {
+		if(!ad->loading && threadQueueFinished(theThreadQueue)) {
 			ad->loading = true;
 
 			bool hasSaveState;
@@ -1474,14 +1465,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 						Vec2i coord = pPos - vec2i(x,y);
 
 						VoxelMesh* m = getVoxelMesh(&ad->voxelData, coord);
-						makeMesh(m, &ad->voxelData);
+						makeMesh(m, &ad->voxelData, &ad->voxelSettings);
 					}
 				}
 			}
 
 		}
 
-		if(threadQueueFinished(globalThreadQueue)) {
+		if(threadQueueFinished(theThreadQueue)) {
 
 			// Push the player up until he is right above the ground.
 
@@ -2000,7 +1991,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		int intersectionFace;
 
-		for(int i = 0; i < SELECTION_RADIUS; i++) {
+		for(int i = 0; i < ad->selectionRadius; i++) {
 			newPos = newPos + normVec3(startDir);
 
 			Vec3 coords[9];
@@ -2178,7 +2169,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_VIEW, viewMatrix(skyBoxCam.pos, -skyBoxCam.look, skyBoxCam.up, skyBoxCam.right));
 		pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_PROJ, projMatrix(degreeToRadian(ad->fieldOfView), ad->aspectRatio, 0.001f, 2));
 		pushUniform(SHADER_CUBEMAP, 2, CUBEMAP_UNIFORM_CLIPPLANE, false);
-		pushUniform(SHADER_CUBEMAP, 2, CUBEMAP_UNIFORM_FOGCOLOR, voxelFogColor);
+		pushUniform(SHADER_CUBEMAP, 2, CUBEMAP_UNIFORM_FOGCOLOR, ad->voxelSettings.fogColor);
 
 		glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 		glDepthMask(false);
@@ -2206,7 +2197,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 					m->meshUploaded = false;
 					m->generated = false;
 
-					makeMesh(m, &ad->voxelData);
+					makeMesh(m, &ad->voxelData, &ad->voxelSettings);
 				}
 			}
 		} 
@@ -2263,9 +2254,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 					VoxelMesh* mesh = getVoxelMesh(&ad->voxelData, coord, false);
 					if(mesh && !mesh->stored && mesh->generated && !mesh->activeMaking) {
 						if(!mesh->compressionStep) {
-							if(!mesh->activeStoring && !threadQueueFull(globalThreadQueue)) {
+							if(!mesh->activeStoring && !threadQueueFull(theThreadQueue)) {
 								atomicAdd(&mesh->activeStoring);
-								threadQueueAdd(globalThreadQueue, storeMeshThreaded, mesh);
+								threadQueueAdd(theThreadQueue, storeMeshThreaded, mesh);
 							}
 						} else {
 							freeVoxelMesh(mesh);
@@ -2283,7 +2274,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coord);
 
 				if(!m->meshUploaded) {
-					makeMesh(m, &ad->voxelData);
+					makeMesh(m, &ad->voxelData, &ad->voxelSettings);
 					meshGenerationCount++;
 
 					if(!m->modifiedByUser) continue;
@@ -2395,9 +2386,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// 		VoxelMesh* mesh = getVoxelMesh(&ad->voxelData, playerPos + pos, false);
 	// 		if(mesh && !mesh->stored) {
 	// 			if(!mesh->compressionStep) {
-	// 				if(!mesh->activeStoring && !threadQueueFull(globalThreadQueue)) {
+	// 				if(!mesh->activeStoring && !threadQueueFull(theThreadQueue)) {
 	// 					atomicAdd(&mesh->activeStoring);
-	// 					threadQueueAdd(globalThreadQueue, storeMeshThreaded, mesh);
+	// 					threadQueueAdd(theThreadQueue, storeMeshThreaded, mesh);
 	// 				}
 	// 			} else {
 	// 				freeVoxelMesh(mesh);
@@ -2434,13 +2425,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// 					mesh->meshUploaded = false;
 	// 				} else if(i == 1 && !mesh->stored && mesh->generated && !mesh->activeGeneration
 	// 				          && !mesh->activeMaking && mesh->meshUploaded) {
-	// 					if(!threadQueueFull(globalThreadQueue)) {
-	// 						threadQueueAdd(globalThreadQueue, storeMesh, mesh);
+	// 					if(!threadQueueFull(theThreadQueue)) {
+	// 						threadQueueAdd(theThreadQueue, storeMesh, mesh);
 	// 					}
 	// 				} else if(i == 2 && mesh->stored && mesh->generated && !mesh->activeGeneration
 	// 				          && !mesh->activeMaking && mesh->meshUploaded) {
-	// 					if(!threadQueueFull(globalThreadQueue)) {
-	// 						threadQueueAdd(globalThreadQueue, restoreMesh, mesh);
+	// 					if(!threadQueueFull(theThreadQueue)) {
+	// 						threadQueueAdd(theThreadQueue, restoreMesh, mesh);
 	// 					}
 	// 				}
 	// 			}
@@ -2463,7 +2454,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// Draw voxel world and reflection.
 	{
-		setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, voxelFogColor.rgb);
+		setupVoxelUniforms(ad->activeCam.pos, view, proj, ad->voxelSettings.fogColor.rgb);
+		// setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, voxelFogColor.rgb);
+		// setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, voxelFogColor.rgb, vec3(0,0,WATER_LEVEL_HEIGHT*2 + 0.01f), vec3(1,1,-1));
 
 		// TIMER_BLOCK_NAMED("D World");
 		// draw world without water
@@ -2549,7 +2542,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				glDepthMask(true);
 				glDisable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 
-			setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, voxelFogColor.rgb, vec3(0,0,WATER_LEVEL_HEIGHT*2 + 0.01f), vec3(1,1,-1));
+			setupVoxelUniforms(ad->activeCam.pos, view, proj, ad->voxelSettings.fogColor.rgb, vec3(0,0,WATER_LEVEL_HEIGHT*2 + 0.01f), vec3(1,1,-1));
 			pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CLIPPLANE, true);
 			pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CPLANE1, 0,0,-1,WATER_LEVEL_HEIGHT);
 
@@ -2617,7 +2610,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		// draw water
 		{
-			setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, voxelFogColor.rgb);
+			setupVoxelUniforms(ad->activeCam.pos, view, proj, ad->voxelSettings.fogColor.rgb);
 			pushUniform(SHADER_VOXEL, 1, VOXEL_UNIFORM_ALPHATEST, 0.5f);
 
 			for(int i = sortListSize-1; i >= 0; i--) {
@@ -3251,10 +3244,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// debugUpdatePlayback(ds, appMemory);
 
 	// Save game.
-	if(*isRunning == false)
-	// if(false)
+	// if(*isRunning == false)
+	if(false)
 	{
-		threadQueueComplete(globalThreadQueue);
+		threadQueueComplete(theThreadQueue);
 
 		MSTimer timer;
 		timerInit(&timer);
@@ -3269,13 +3262,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 			VoxelMesh* m = voxels->data + i;
 			if(!m->stored && m->generated) {
 
-				if(threadQueueFull(globalThreadQueue)) threadQueueComplete(globalThreadQueue);
+				if(threadQueueFull(theThreadQueue)) threadQueueComplete(theThreadQueue);
 
-				threadQueueAdd(globalThreadQueue, storeMeshThreaded, m);
+				threadQueueAdd(theThreadQueue, storeMeshThreaded, m);
 			}
 		}
 
-		threadQueueComplete(globalThreadQueue);
+		threadQueueComplete(theThreadQueue);
 
 		float dt = timerUpdate(&timer);
 
