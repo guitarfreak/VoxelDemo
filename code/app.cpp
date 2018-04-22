@@ -79,6 +79,7 @@ Changing course for now:
 - Sound buffer glitch when game laggy.
 - Opengl.
 - DirectX.
+- Fix selection algorithm.
 
 //-------------------------------------
 //               BUGS
@@ -298,6 +299,10 @@ struct AppData {
 	float startFade;
 
 	GameSettings settings;
+
+	float volumeFootsteps;
+	float volumeGeneral;
+	float volumeMenu;
 
 	//
 
@@ -619,7 +624,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		{
 			int hr;
 
-			as->latency = 1.5f;
+			// as->latency = 1.5f;
+			as->latency = 2.0f;
 			// as->latency = 4.0f;
 
 			const CLSID CLSID_MMDeviceEnumerator = __uuidof(MMDeviceEnumerator);
@@ -637,8 +643,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
 
 			int referenceTimeToSeconds = 10 * 1000 * 1000;
-			// REFERENCE_TIME referenceTime = referenceTimeToSeconds; // 100 nano-seconds -> 1 second.
 			REFERENCE_TIME referenceTime = referenceTimeToSeconds * ((float)1/ws->frameRate) * as->latency; // 100 nano-seconds -> 1 second.
+			// REFERENCE_TIME referenceTime = referenceTimeToSeconds * 1; // 100 nano-seconds -> 1 second.
 			hr = as->audioClient->GetMixFormat(&as->waveFormat);
 
 			{
@@ -775,6 +781,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 		showCursor(false);
 
 		folderExistsCreate(SAVES_FOLDER);	
+
+		ad->volumeFootsteps = 0.2f;
+		ad->volumeGeneral = 0.5f;
+		ad->volumeMenu = 0.7f;
 
 		//
 
@@ -1171,6 +1181,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// addTrack("footsteps\\water1.wav", 1.0f);
 		// addTrack("footsteps\\dirst1.wav", 1.0f);
 		// addTrack("ui\\select.wav", 1);
+		addTrack("aphex.wav", 1);
 	}
 
 	if(ad->gameMode == GAME_MODE_MENU) {
@@ -1207,7 +1218,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		MainMenu* menu = &ad->menu;
 
-		float volumeMid = 0.5f;
+		float volumeMid = ad->volumeMenu;
 
 		bool selectionChange = false;
 
@@ -1368,6 +1379,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			}
 
 			// Load game.
+
 			if(!ad->newGame && hasSaveState) {
 				DArray<VoxelMesh>* voxels = &ad->voxelData.voxels;
 				voxels->clear();
@@ -1441,7 +1453,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 					float v = randomFloatPCG(0,M_2PI,0.001f);
 					Vec3 startRot = vec3(v,0,0);
 
-					Entity player;
+					Entity player = {};
 					Vec3 playerDim = vec3(0.8f, 0.8f, 1.8f);
 					float camOff = playerDim.z*0.5f - playerDim.x*0.25f;
 					initEntity(&player, ET_Player, vec3(0.5f,0.5f,40), playerDim, vec3(0,0,camOff));
@@ -1803,8 +1815,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 					// Footstep sound.
 					if(e->vel != vec3(0,0,0) && groundCollisionBlockType) {
-						float volume = 0.5f;
-
 						float moveLength = lenVec2(positionOffset);
 						if(player->playerOnGround) ad->footstepSoundValue += moveLength;
 
@@ -1819,8 +1829,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 							int soundId = randomInt(0,filesCount-1);
 							if(soundId == ad->lastFootstepSoundId) 
 								soundId = (soundId+1)%(filesCount-1);
-							
-							addTrack(files[soundId], volume, true, 2.0f);
+
+							addTrack(files[soundId], ad->volumeFootsteps, true, 2.0f);
 							ad->footstepSoundValue = 0;
 							
 							ad->lastFootstepSoundId = soundId;
@@ -2080,7 +2090,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 				// glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 				// drawCube(&ad->pipelineIds, temp, vec3(1.0f,1.0f,1.0f), c, 0, vec3(0,0,0));
 
-				// if(blockType > 0) {
 				if(*blockType > 0) {
 					Vec3 iBox = voxelToVoxelCoord(coordToVoxel(block));
 					float distance;
@@ -2186,11 +2195,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 						*sideBlockType = ad->blockMenu[ad->blockMenuSelected];
 						*sideBlockLighting = 0;
+
+						addTrack("general\\place.wav", ad->volumeGeneral, true, 1);
 					}
 				} else if(removeBlock) {
 					if(*block > 0) {
 						*block = 0;
 						*lighting = ad->voxelSettings.globalLumen;
+
+						addTrack("general\\remove.wav", ad->volumeGeneral, true, 1);
 					}
 				}
 			}
@@ -3108,9 +3121,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 		uint numFramesAvailable = as->bufferFrameCount - numFramesPadding;
 		framesPerFrame = min(framesPerFrame, numFramesAvailable);
 
-		numFramesPadding = framesPerFrame;
+		// int framesToPush = framesPerFrame - numFramesPadding;
+		// printf("%i %i %i %i\n", numFramesAvailable, numFramesPadding, as->bufferFrameCount, framesToPush);
 
-		if(framesPerFrame) {
+		// numFramesPadding = framesPerFrame;
+
+		// if(framesPerFrame && framesToPush > 0) 
+		if(framesPerFrame) 
+		{
 
 			float* buffer;
 			as->renderClient->GetBuffer(numFramesAvailable, (BYTE**)&buffer);

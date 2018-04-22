@@ -17,7 +17,7 @@ extern ThreadQueue* theThreadQueue;
 // #define STORE_DISTANCE (DATA_CACHE_DISTANCE + 2)
 
 struct VoxelWorldSettings {
-	int viewDistance = 10;
+	int viewDistance = 5;
 	int storeDistance = viewDistance + 3;
 	int storeSize = 2;
 
@@ -164,6 +164,7 @@ enum BlockTextures {
 
 enum BlockTextures2 {
 	BX2_None = 0,
+	BX2_Grass,
 	BX2_Leaves,
 
 	BX2_Size,
@@ -190,6 +191,7 @@ const char* textureFilePaths[BX_Size] = {
 
 const char* textureFilePaths2[BX2_Size] = {
 	DATA_FOLDER("Textures\\Minecraft\\none.png"),
+	DATA_FOLDER("Textures\\Minecraft\\grass_bottom.png"),
 	DATA_FOLDER("Textures\\Minecraft\\leaves.png"),
 };
 
@@ -211,8 +213,6 @@ char* footstepsGrass[] = {
 	"footsteps\\grass4.wav",
 	"footsteps\\grass5.wav",
 	"footsteps\\grass6.wav",
-	"footsteps\\grass7.wav",
-	"footsteps\\grass8.wav",
 };
 char* footstepsSand[] = {
 	"footsteps\\sand1.wav",
@@ -245,8 +245,8 @@ FootstepArray footstepFiles[] = {
 	{ footstepsDirt,  arrayCount(footstepsDirt) },
 	{ footstepsWater, arrayCount(footstepsWater) },
 	{ footstepsGrass, arrayCount(footstepsGrass) },
-	{ footstepsSand, arrayCount(footstepsSand) },
-	{ footstepsSnow, arrayCount(footstepsSnow) },
+	{ footstepsSand,  arrayCount(footstepsSand) },
+	{ footstepsSnow,  arrayCount(footstepsSnow) },
 };
 
 int blockTypeFootsteps[BT_Size] = {
@@ -267,7 +267,7 @@ int blockTypeFootsteps[BT_Size] = {
 
 // uchar blockColor[BT_Size] = {0,0,0,0,0,0,0,47,0,0,0};
 uchar blockColor[BT_Size] = {0,17,0,0,0,0,0,16,0,0,0};
-uchar texture2[BT_Size] = {0,1,1,1,1,1,1,BX_Leaves,1,1,1};
+uchar texture2[BT_Size] = {0,1,1,BX2_Grass,1,1,1,BX_Leaves,1,1,1};
 uchar textureLerp[BT_Size] = {0,0,0,0,0,0,0,0,0,0,0};
 
 
@@ -371,9 +371,11 @@ void freeVoxelData(VoxelMesh* m) {
 }
 
 void freeVoxelCompressedData(VoxelMesh* m) {
-	free(m->compressedData);
-	m->compressedVoxelsSize = 0;
-	m->compressedLightingSize = 0;
+	if(m->generated) {
+		free(m->compressedData);
+		m->compressedVoxelsSize = 0;
+		m->compressedLightingSize = 0;
+	}
 }
 
 void freeVoxelGPUData(VoxelMesh* m) {
@@ -391,8 +393,12 @@ void freeVoxelGPUData(VoxelMesh* m) {
 }
 
 void freeVoxelMesh(VoxelMesh* m) {
-	freeVoxelData(m);
-	freeVoxelGPUData(m);
+	if(m->generated) {
+		if(!m->stored) freeVoxelData(m);
+		else freeVoxelCompressedData(m);
+
+		freeVoxelGPUData(m);
+	}
 }
 
 void initVoxelMesh(VoxelMesh* m, Vec2i coord) {
