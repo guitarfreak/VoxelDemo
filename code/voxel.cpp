@@ -12,51 +12,18 @@ extern ThreadQueue* theThreadQueue;
 // #define voxelArray(x, y, z) (x)*VOXEL_Y*VOXEL_Z + (y)*VOXEL_Z + (z)
 #define voxelCacheArray(x, y, z) (x)*VC_Y*VC_Z + (y)*VC_Z + (z)
 
-
-
 // #define TEXTURE_CACHE_DISTANCE (VIEW_DISTANCE + 2)
 // #define DATA_CACHE_DISTANCE (VIEW_DISTANCE / 2)
 // #define STORE_DISTANCE (DATA_CACHE_DISTANCE + 2)
 
-#define VIEW_DISTANCE 15
-#define STORE_DISTANCE (VIEW_DISTANCE + 3)
-#define STORE_SIZE 2
-
-// float reflectionAlpha = 0.75f;
-float reflectionAlpha = 0.5f;
-float waterAlpha = 0.75f;
-int globalLumen = 210;
-
-int startX = 37750;
-int startY = 47850;
-int startXMod = 58000;
-int startYMod = 68000;
-
-int WORLD_MIN = 60;
-int WORLD_MAX = 255;
-// const int WATER_LEVEL_HEIGHT = WORLD_MIN*1.06f;
-float waterLevelValue = 0.017f;
-int WATER_LEVEL_HEIGHT = lerp(waterLevelValue, WORLD_MIN, WORLD_MAX);
-// #define WATER_LEVEL_HEIGHT 62
-
-float worldFreq = 0.004f;
-int worldDepth = 6;
-float modFreq = 0.02f;
-int modDepth = 4;
-float modOffset = 0.1f;
-float heightLevels[4] = {0.4, 0.6, 0.8, 1.0f};
-float worldPowCurve = 4;
-
-
-
 struct VoxelWorldSettings {
-	Vec4 fogColor = colorSRGB(vec4(hslToRgbFloat(0.55f,0.5f,0.8f),1));
-
-	int viewDistance = 15;
+	int viewDistance = 10;
 	int storeDistance = viewDistance + 3;
 	int storeSize = 2;
 
 	//
+
+	Vec4 fogColor = colorSRGB(vec4(hslToRgbFloat(0.55f,0.5f,0.8f),1));
 
 	float reflectionAlpha = 0.5f;
 	float waterAlpha = 0.75f;
@@ -96,18 +63,18 @@ struct VoxelMesh {
 
 	//
 
+	bool compressionStep;
 	bool stored;
+
 	bool generated;
 	bool upToDate;
-	bool meshUploaded;
+	bool uploaded;
 
-	bool modifiedByUser;
+	bool modified;
 
 	volatile uint activeGeneration;
 	volatile uint activeMaking;
 	volatile uint activeStoring;
-
-	bool compressionStep;
 
 	//
 
@@ -338,7 +305,7 @@ void freeVoxelCompressedData(VoxelMesh* m) {
 }
 
 void freeVoxelGPUData(VoxelMesh* m) {
-	if(m->meshUploaded) {
+	if(m->uploaded) {
 		glDeleteBuffers(1, &m->bufferId); m->bufferId = 0;
 		glDeleteBuffers(1, &m->bufferTransId); m->bufferTransId = 0;
 
@@ -435,24 +402,24 @@ void generateVoxelMeshThreaded(void* data) {
 				int gx = (coord.x*VOXEL_X)+x;
 				int gy = (coord.y*VOXEL_Y)+y;
 
-				float height = perlin2d(gx+4000+startX, gy+4000+startY, worldFreq, worldDepth);
+				float height = perlin2d(gx+4000+vs->startX, gy+4000+vs->startY, vs->worldFreq, vs->worldDepth);
 				height += worldHeightOffset; 
 
 				// float mod = perlin2d(gx+startXMod, gy+startYMod, 0.008f, 4);
-				float perlinMod = perlin2d(gx+startXMod, gy+startYMod, modFreq, modDepth);
-				float mod = lerp(perlinMod, -modOffset, modOffset);
+				float perlinMod = perlin2d(gx+vs->startXMod, gy+vs->startYMod, vs->modFreq, vs->modDepth);
+				float mod = lerp(perlinMod, -vs->modOffset, vs->modOffset);
 
 				float modHeight = height+mod;
 				int blockType;
-	    			 if(modHeight <  heightLevels[0]) blockType = BT_Sand; // sand
-	    		else if(modHeight <  heightLevels[1]) blockType = BT_Grass; // grass
-	    		else if(modHeight <  heightLevels[2]) blockType = BT_Stone; // stone
-	    		else if(modHeight <= heightLevels[3]) blockType = BT_Snow; // snow
+	    			 if(modHeight <  vs->heightLevels[0]) blockType = BT_Sand; // sand
+	    		else if(modHeight <  vs->heightLevels[1]) blockType = BT_Grass; // grass
+	    		else if(modHeight <  vs->heightLevels[2]) blockType = BT_Stone; // stone
+	    		else if(modHeight <= vs->heightLevels[3]) blockType = BT_Snow; // snow
 
 	    		height = clamp(height, 0, 1);
 	    		// height = pow(height,3.5f);
-	    		height = pow(height,worldPowCurve);
-	    		int blockHeight = lerp(height, WORLD_MIN, WORLD_MAX);
+	    		height = pow(height,vs->worldPowCurve);
+	    		int blockHeight = lerp(height, vs->worldMin, vs->worldMax);
 
 	    		for(int z = 0; z < blockHeight; z++) {
 	    			voxels[voxelCacheArray(x,y,z)] = blockType;
@@ -461,7 +428,7 @@ void generateVoxelMeshThreaded(void* data) {
 
 	    		for(int z = blockHeight; z < VOXEL_Z; z++) {
 	    			voxels[voxelCacheArray(x,y,z)] = 0;
-	    			lighting[voxelCacheArray(x,y,z)] = globalLumen;
+	    			lighting[voxelCacheArray(x,y,z)] = vs->globalLumen;
 	    		}
 
 	    		if(blockType == BT_Grass && vs->treeNoise[y*VOXEL_Y + x] == 1 && 
@@ -470,12 +437,13 @@ void generateVoxelMeshThreaded(void* data) {
 	    			treePositions[treePositionsSize++] = vec3i(x,y,blockHeight);
 		    	}
 
-		    	if(blockHeight < WATER_LEVEL_HEIGHT) {
-		    		for(int z = blockHeight; z < WATER_LEVEL_HEIGHT; z++) {
+		    	int waterLevelHeight = vs->waterLevelHeight;
+		    	if(blockHeight < waterLevelHeight) {
+		    		for(int z = blockHeight; z < waterLevelHeight; z++) {
 		    			voxels[voxelCacheArray(x,y,z)] = BT_Water;
 
-		    			Vec2i waterLightRange = vec2i(0,globalLumen);
-		    			int lightValue = mapRange(blockHeight, WORLD_MIN, WATER_LEVEL_HEIGHT, waterLightRange.x, waterLightRange.y);
+		    			Vec2i waterLightRange = vec2i(0,vs->globalLumen);
+		    			int lightValue = mapRange(blockHeight, vs->worldMin, waterLevelHeight, waterLightRange.x, waterLightRange.y);
 		    			lighting[voxelCacheArray(x,y,z)] = lightValue;
 		    		}
 		    	}
@@ -515,14 +483,14 @@ void generateVoxelMeshThreaded(void* data) {
 			voxels[voxelCacheArray(max.x, min.y, min.z)] = 0;
 			voxels[voxelCacheArray(max.x, max.y, max.z)] = 0;
 			voxels[voxelCacheArray(max.x, max.y, min.z)] = 0;
-			lighting[voxelCacheArray(min.x, min.y, max.z)] = globalLumen;
-			lighting[voxelCacheArray(min.x, min.y, min.z)] = globalLumen;
-			lighting[voxelCacheArray(min.x, max.y, max.z)] = globalLumen;
-			lighting[voxelCacheArray(min.x, max.y, min.z)] = globalLumen;
-			lighting[voxelCacheArray(max.x, min.y, max.z)] = globalLumen;
-			lighting[voxelCacheArray(max.x, min.y, min.z)] = globalLumen;
-			lighting[voxelCacheArray(max.x, max.y, max.z)] = globalLumen;
-			lighting[voxelCacheArray(max.x, max.y, min.z)] = globalLumen;
+			lighting[voxelCacheArray(min.x, min.y, max.z)] = vs->globalLumen;
+			lighting[voxelCacheArray(min.x, min.y, min.z)] = vs->globalLumen;
+			lighting[voxelCacheArray(min.x, max.y, max.z)] = vs->globalLumen;
+			lighting[voxelCacheArray(min.x, max.y, min.z)] = vs->globalLumen;
+			lighting[voxelCacheArray(max.x, min.y, max.z)] = vs->globalLumen;
+			lighting[voxelCacheArray(max.x, min.y, min.z)] = vs->globalLumen;
+			lighting[voxelCacheArray(max.x, max.y, max.z)] = vs->globalLumen;
+			lighting[voxelCacheArray(max.x, max.y, min.z)] = vs->globalLumen;
 
 			for(int i = 0; i < treeHeight; i++) {
 				voxels[voxelCacheArray(p.x,p.y,p.z+i)] = BT_TreeLog;
@@ -729,7 +697,7 @@ void makeMesh(VoxelMesh* m, VoxelData* voxelData, VoxelWorldSettings* vs) {
 	free(m->meshBufferTrans);
 	free(m->texBufferTrans);
 
-	m->meshUploaded = true;
+	m->uploaded = true;
 }
 
 void compressVoxelData(VoxelMesh* mesh, uchar* buffer);
@@ -742,7 +710,7 @@ void storeMeshThreaded(void* data) {
 	free(buffer);
 
 	m->upToDate = false;
-	m->meshUploaded = false;
+	m->uploaded = false;
 
 	atomicSub(&m->activeStoring);
 	m->compressionStep = true;
@@ -863,7 +831,7 @@ uchar* getLightingFromCoord(VoxelData* voxelData, Vec3 coord) {
 	return getLightingFromVoxel(voxelData, coordToVoxel(coord));
 }
 
-void setupVoxelUniforms(Vec3 cameraPos, Mat4 view, Mat4 proj, Vec3 fogColor, Vec3 trans = vec3(0,0,0), Vec3 scale = vec3(1,1,1), Vec3 rotation = vec3(0,0,0)) {
+void setupVoxelUniforms(Vec3 cameraPos, Mat4 view, Mat4 proj, Vec3 fogColor, int viewDistance, Vec3 trans = vec3(0,0,0), Vec3 scale = vec3(1,1,1), Vec3 rotation = vec3(0,0,0)) {
 	TIMER_BLOCK();
 
 	uint texUnit1 = 0; 
@@ -938,7 +906,7 @@ void setupVoxelUniforms(Vec3 cameraPos, Mat4 view, Mat4 proj, Vec3 fogColor, Vec
 	// al.e2[3][3] = (float)1.0f/((VIEW_DISTANCE*VOXEL_X) - VOXEL_X);
 	// al.e2[3][3] *= al.e2[3][3];
 
-	al.e2[3][3] = (float)1.0f/((VIEW_DISTANCE*VOXEL_X) - VOXEL_X);
+	al.e2[3][3] = (float)1.0f/((viewDistance*VOXEL_X) - VOXEL_X);
 	al.e2[3][3] *= al.e2[3][3];
 
 	ambientLighting = al;
@@ -1020,7 +988,7 @@ void drawVoxelMesh(VoxelMesh* m, int drawMode = 0) {
 }
 
 
-void loadVoxelTextures(char* folderPath, int internalFormat, bool reload = false, int levelToReload = 0) {
+void loadVoxelTextures(char* folderPath, float waterAlpha, int internalFormat, bool reload = false, int levelToReload = 0) {
 
 	const int mipMapCount = 5;
 	char* p = getTString(34);

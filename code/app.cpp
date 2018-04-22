@@ -71,11 +71,14 @@ Changing course for now:
  - Shadow mapping, start with cloud texture projection.
 
 - Main Menu.
-- New game, load game, save game.
-- Settings.
 - atomicAdd sections are not thread proof. 
   We could have multiple equal jobs in thread queue.
 - Simluate earth curvature in shader.
+- Make sides work on dirt voxels. (They all have grass on top.)
+- Make horizon work. The cubemap solution is not good.
+- Sound buffer glitch when game laggy.
+- Opengl.
+- DirectX.
 
 //-------------------------------------
 //               BUGS
@@ -302,13 +305,12 @@ struct AppData {
 	Entity* player;
 	Entity* cameraEntity;
 
-	// bool* treeNoise;
+	//
 
 	bool playerMode;
 	bool pickMode;
 	int selectionRadius;
 
-	bool playerOnGround;
 	int blockMenu[10];
 	int blockMenuSelected;
 
@@ -320,18 +322,20 @@ struct AppData {
 	Vec3 selectedBlock;
 	Vec3 selectedBlockFaceDir;
 
+	bool firstWalk;
+	float footstepSoundValue;
+
+	//
+
 	VoxelWorldSettings voxelSettings;
 	VoxelData voxelData;
 
-	uchar* voxelCache[8];
-	uchar* voxelLightingCache[8];
+	int skyBoxId;
 
 	bool reloadWorld;
 
 	int voxelDrawCount;
 	int voxelTriangleCount;
-
-	int skyBoxId;
 
 	// Particles.
 
@@ -523,7 +527,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			loadCubeMapFromFile(gs->cubeMaps + i, (char*)cubeMapPaths[i], 5, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE);
 		}
 
-		loadVoxelTextures(MINECRAFT_TEXTURE_FOLDER, INTERNAL_TEXTURE_FORMAT);
+		loadVoxelTextures(MINECRAFT_TEXTURE_FOLDER, ad->voxelSettings.waterAlpha, INTERNAL_TEXTURE_FORMAT);
 
 		//
 		// Setup shaders and uniforms.
@@ -615,6 +619,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			int hr;
 
 			as->latency = 1.5f;
+			// as->latency = 4.0f;
 
 			const CLSID CLSID_MMDeviceEnumerator = __uuidof(MMDeviceEnumerator);
 			const IID IID_IMMDeviceEnumerator = __uuidof(IMMDeviceEnumerator);
@@ -796,7 +801,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 			VoxelData* vd = &ad->voxelData;
 			vd->size = 10000;
 			vd->voxelHashSize = vd->size * 10;
-			// vd->voxelHash = getPArray(DArray<int>, vd->voxelHashSize);
 			vd->voxelHash = getPArray(VoxelArray, vd->voxelHashSize);
 			vd->voxels.reserve(vd->size);
 
@@ -804,17 +808,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 			float voxelsSize = (vd->size * sizeof(VoxelMesh)) / (float)(1024*1024);
 			float totalSize = hashSize + voxelsSize;
 
-			for(int i = 0; i < arrayCount(ad->voxelCache); i++) {
-				ad->voxelCache[i] = (uchar*)getPMemory(sizeof(uchar)*VOXEL_CACHE_SIZE);
-				ad->voxelLightingCache[i] = (uchar*)getPMemory(sizeof(uchar)*VOXEL_CACHE_SIZE);
-			}
-
 			voxelWorldSettingsInit(&ad->voxelSettings);
 		}
 
 		// Trees.
 		{
-			int treeRadius = 4;
+			int treeRadius = 10;
 			ad->voxelSettings.treeNoise = (bool*)getPMemory(VOXEL_X*VOXEL_Y);
 			zeroMemory(ad->voxelSettings.treeNoise, VOXEL_X*VOXEL_Y);
 
@@ -1181,7 +1180,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		int titleFontHeight = ds->fontHeight * ws->windowScale * 6.0f;
 		int optionFontHeight = titleFontHeight * 0.5f;
-		Font* titleFont = getFont(FONT_SOURCESANS_PRO, titleFontHeight);
+		// Font* titleFont = getFont(FONT_SOURCESANS_PRO, titleFontHeight);
+		Font* titleFont = getFont("Merriweather-Regular.ttf", titleFontHeight);
 		Font* font = getFont(FONT_SOURCESANS_PRO, optionFontHeight);
 
 		Vec4 cBackground = vec4(hslToRgbFloat(0.63f,0.3f,0.13f),1);
@@ -1327,7 +1327,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		globalCommandList = &ad->commandList2d;
 
 		int titleFontHeight = ds->fontHeight * ws->windowScale * 8.0f;
-		Font* titleFont = getFont(FONT_SOURCESANS_PRO, titleFontHeight);
+		Font* titleFont = getFont("Merriweather-Regular.ttf", titleFontHeight);
 
 		Rect sr = getScreenRect(ws);
 
@@ -1369,12 +1369,16 @@ extern "C" APPMAINFUNCTION(appMain) {
 				DArray<VoxelMesh>* voxels = &ad->voxelData.voxels;
 				voxels->clear();
 
+				VoxelWorldSettings* vs = &ad->voxelSettings;
+
 				FILE* file = fopen(saveFile, "rb");
 				if(file) {
 					fread(ad->entityList.e, ad->entityList.size * sizeof(Entity), 1, file);
 
-					fread(&startX, sizeof(int), 1, file);
-					fread(&startY, sizeof(int), 1, file);
+					fread(&vs->startX, sizeof(int), 1, file);
+					fread(&vs->startY, sizeof(int), 1, file);
+					fread(&vs->startXMod, sizeof(int), 1, file);
+					fread(&vs->startYMod, sizeof(int), 1, file);
 
 					int count = 0;
 					fread(&count, sizeof(int), 1, file);
@@ -1404,7 +1408,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 					m->stored = true;
 					m->generated = true;
 					m->upToDate = false;
-					m->meshUploaded = false;
+					m->uploaded = false;
 
 					addVoxelMesh(&ad->voxelData, m->coord, i);
 				}
@@ -1441,6 +1445,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 					player.rot = startRot;
 					player.playerOnGround = false;
 					strCpy(player.name, "Player");
+					ad->footstepSoundValue = 0;
 					
 					ad->player = addEntity(&ad->entityList, &player);
 				}
@@ -1453,8 +1458,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 					ad->cameraEntity = addEntity(&ad->entityList, &freeCam);
 				}
 
-				startX = randomIntPCG(0,1000000);
-				startY = randomIntPCG(0,1000000);
+				ad->voxelSettings.startX = randomIntPCG(0,1000000);
+				ad->voxelSettings.startY = randomIntPCG(0,1000000);
+				ad->voxelSettings.startXMod = randomIntPCG(0,1000000);
+				ad->voxelSettings.startYMod = randomIntPCG(0,1000000);
 			}
 
 			// Load voxel meshes around the player at startup.
@@ -1603,7 +1610,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				if( input->keysDown[KEYCODE_W] || input->keysDown[KEYCODE_A] || input->keysDown[KEYCODE_S] || 
 					input->keysDown[KEYCODE_D]) {
 
-					if(rightLock || input->keysDown[KEYCODE_CTRL]) cam.look = cross(up, cam.right);
+					if(rightLock) cam.look = cross(up, cam.right);
 
 					Vec3 acceleration = vec3(0,0,0);
 					if(input->keysDown[KEYCODE_SHIFT]) speed *= runBoost;
@@ -1615,6 +1622,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 				}
 
 				e->acc.z = 0;
+
+				bool playerOnGroundStart = player->playerOnGround;
+
+				printf("%i %f\n", player->playerOnGround, ad->footstepSoundValue);
 
 				if(ad->playerMode) {
 					// if(input->keysPressed[KEYCODE_SPACE]) {
@@ -1641,6 +1652,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 				bool playerSideCollision = false;
 
 				if(e->vel != vec3(0,0,0)) {
+					if(e->vel.xy != vec2(0,0)) ad->firstWalk = true;
+
 					Vec3 pPos = e->pos;
 					Vec3 pSize = e->dim;
 
@@ -1707,6 +1720,19 @@ extern "C" APPMAINFUNCTION(appMain) {
 						}
 					}
 
+					// Footstep sound.
+					{
+						Vec2 positionOffset = nPos.xy - e->pos.xy;
+						float moveLength = lenVec2(positionOffset);
+						if(player->playerOnGround) ad->footstepSoundValue += moveLength;
+
+						float stepDistance = 2.3f;
+						if(ad->footstepSoundValue > stepDistance) {
+							addTrack("ui\\select.wav", 1, true);
+							ad->footstepSoundValue = 0;
+						}
+					}
+
 					float stillnessThreshold = 0.0001f;
 					if(valueBetween(e->vel.z, -stillnessThreshold, stillnessThreshold)) {
 						e->vel.z = 0;
@@ -1731,6 +1757,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 				// raycast for touching ground
 				if(ad->playerMode) {
+
 					if(playerGroundCollision && e->vel.z <= 0) {
 						e->playerOnGround = true;
 						e->vel.z = 0;
@@ -1766,14 +1793,22 @@ extern "C" APPMAINFUNCTION(appMain) {
 						}
 
 						if(groundCollision) {
-							if(e->vel.z <= 0) e->playerOnGround = true;
+							if(e->vel.z <= 0) {
+								e->playerOnGround = true;
+							}
 						} else {
 							e->playerOnGround = false;
 						}
+
+						if(ad->firstWalk) {
+							// Hit the ground.
+							if(!playerOnGroundStart && player->playerOnGround) ad->footstepSoundValue = 100;
+
+							if(!e->playerOnGround) ad->footstepSoundValue = 0;
+						}
 					}
+
 				}
-
-
 			} break;
 
 			case ET_Camera: {
@@ -1904,6 +1939,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 									// dcCube({coordToVoxelCoord(pos + dir*rad), vec3(cubeSize), vec4(1,0.5f,0,1), 0, vec3(0,0,0)});
 									// dcCube({coordToVoxelCoord(pos - dir*rad), vec3(cubeSize), vec4(1,0.5f,0,1), 0, vec3(0,0,0)});
 
+									int globalLumen = ad->voxelSettings.globalLumen;
 									*getBlockFromCoord(&ad->voxelData, pos+dir*rad) = 0; 
 									*getLightingFromCoord(&ad->voxelData, pos+dir*rad) = globalLumen; 
 									*getBlockFromCoord(&ad->voxelData, pos-dir*rad) = 0; 
@@ -1949,8 +1985,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 						for(int i = 0; i < updateMeshListSize; i++) {
 							VoxelMesh* m = getVoxelMesh(&ad->voxelData, updateMeshList[i]);
 							m->upToDate = false;
-							m->meshUploaded = false;
-							m->modifiedByUser = true;
+							m->uploaded = false;
+							m->modified = true;
 						}
 					}
 
@@ -2078,8 +2114,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 				if(placeBlock || removeBlock) {
 					vm->upToDate = false;
-					vm->meshUploaded = false;
-					vm->modifiedByUser = true;
+					vm->uploaded = false;
+					vm->modified = true;
 
 					// if block at edge of mesh, we have to update the mesh on the other side too
 					Vec2i currentCoord = coordToMesh(intersectionBox);
@@ -2094,8 +2130,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 						if(mc != currentCoord) {
 							VoxelMesh* edgeMesh = getVoxelMesh(&ad->voxelData, mc);
 							edgeMesh->upToDate = false;
-							edgeMesh->meshUploaded = false;
-							edgeMesh->modifiedByUser = true;
+							edgeMesh->uploaded = false;
+							edgeMesh->modified = true;
 						}
 					}
 				}
@@ -2135,7 +2171,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				} else if(removeBlock) {
 					if(*block > 0) {
 						*block = 0;
-						*lighting = globalLumen;
+						*lighting = ad->voxelSettings.globalLumen;
 					}
 				}
 			}
@@ -2184,7 +2220,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->reloadWorld = false;
 
 		if(threadQueueFinished(threadQueue)) {
-			int radius = VIEW_DISTANCE;
+			int radius = ad->voxelSettings.viewDistance;
 
 			Vec3 pp = ad->activeCam.pos;
 			Vec2i worldPos = coordToMesh(pp);
@@ -2194,7 +2230,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 					Vec2i coord = vec2i(x, y);
 					VoxelMesh* m = getVoxelMesh(&ad->voxelData, coord);
 					m->upToDate = false;
-					m->meshUploaded = false;
+					m->uploaded = false;
 					m->generated = false;
 
 					makeMesh(m, &ad->voxelData, &ad->voxelSettings);
@@ -2208,6 +2244,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 	Vec2i* coordList = (Vec2i*)getTMemory(sizeof(Vec2i)*2000);
 	int coordListSize = 0;
 
+	VoxelWorldSettings* vs = &ad->voxelSettings;
+
 	// Collect voxel meshes to draw.
 	{
 		int meshGenerationCount = 0;
@@ -2218,7 +2256,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		Vec2i pPos = coordToMesh(ad->activeCam.pos);
 		// int radius = VIEW_DISTANCE;
-		int radius = STORE_DISTANCE + STORE_SIZE;
+		int radius = vs->storeDistance + vs->storeSize;
 
 		// generate the meshes around the player in a spiral by drawing lines and rotating
 		// the directing every time we reach a corner
@@ -2249,7 +2287,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 				// Throw away coordinates outside store circle.
 				float distance = lenVec2(vec2(coord - pPos));
-				if((distance >= STORE_DISTANCE) && distance <= (STORE_DISTANCE+STORE_SIZE)) {
+				if((distance >= vs->storeDistance) && distance <= (vs->storeDistance+vs->storeSize)) {
 
 					VoxelMesh* mesh = getVoxelMesh(&ad->voxelData, coord, false);
 					if(mesh && !mesh->stored && mesh->generated && !mesh->activeMaking) {
@@ -2269,19 +2307,19 @@ extern "C" APPMAINFUNCTION(appMain) {
 				}
 
 				// Throw away coordinates outside view circle.
-				if(distance >= VIEW_DISTANCE+1) continue;
+				if(distance >= vs->viewDistance+1) continue;
 
 				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coord);
 
-				if(!m->meshUploaded) {
+				if(!m->uploaded) {
 					makeMesh(m, &ad->voxelData, &ad->voxelSettings);
 					meshGenerationCount++;
 
-					if(!m->modifiedByUser) continue;
+					if(!m->modified) continue;
 				}
 
 				// Throw away coordinates outside view circle.
-				if(distance > VIEW_DISTANCE) continue;
+				if(distance > vs->viewDistance) continue;
 
 				// frustum culling
 				Vec3 cp = ad->activeCam.pos;
@@ -2422,14 +2460,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// 				if(i == 0) {
 	// 					freeVoxelGPUData(mesh);
 	// 					mesh->upToDate = false;
-	// 					mesh->meshUploaded = false;
+	// 					mesh->uploaded = false;
 	// 				} else if(i == 1 && !mesh->stored && mesh->generated && !mesh->activeGeneration
-	// 				          && !mesh->activeMaking && mesh->meshUploaded) {
+	// 				          && !mesh->activeMaking && mesh->uploaded) {
 	// 					if(!threadQueueFull(theThreadQueue)) {
 	// 						threadQueueAdd(theThreadQueue, storeMesh, mesh);
 	// 					}
 	// 				} else if(i == 2 && mesh->stored && mesh->generated && !mesh->activeGeneration
-	// 				          && !mesh->activeMaking && mesh->meshUploaded) {
+	// 				          && !mesh->activeMaking && mesh->uploaded) {
 	// 					if(!threadQueueFull(theThreadQueue)) {
 	// 						threadQueueAdd(theThreadQueue, restoreMesh, mesh);
 	// 					}
@@ -2454,9 +2492,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// Draw voxel world and reflection.
 	{
-		setupVoxelUniforms(ad->activeCam.pos, view, proj, ad->voxelSettings.fogColor.rgb);
+		VoxelWorldSettings* vs = &ad->voxelSettings;
+		int waterLevelHeight = vs->waterLevelHeight;
+
+		setupVoxelUniforms(ad->activeCam.pos, view, proj, vs->fogColor.rgb, vs->viewDistance);
 		// setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, voxelFogColor.rgb);
-		// setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, voxelFogColor.rgb, vec3(0,0,WATER_LEVEL_HEIGHT*2 + 0.01f), vec3(1,1,-1));
+		// setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, voxelFogColor.rgb, vec3(0,0,waterLevelHeight*2 + 0.01f), vec3(1,1,-1));
 
 		// TIMER_BLOCK_NAMED("D World");
 		// draw world without water
@@ -2481,8 +2522,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 			glEnable(GL_CLIP_DISTANCE1);
 
 			pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CLIPPLANE, true);
-			pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CPLANE1, 0,0,1,-WATER_LEVEL_HEIGHT);
-			pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CPLANE2, 0,0,-1,WATER_LEVEL_HEIGHT);
+			pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CPLANE1, 0,0,1,-waterLevelHeight);
+			pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CPLANE2, 0,0,-1,waterLevelHeight);
 
 			pushUniform(SHADER_VOXEL, 1, VOXEL_UNIFORM_ALPHATEST, 0.5f);
 
@@ -2533,7 +2574,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_PROJ, projMat.e);
 
 				pushUniform(SHADER_CUBEMAP, 2, CUBEMAP_UNIFORM_CLIPPLANE, true);
-				pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_CPLANE1, 0,0,-1,WATER_LEVEL_HEIGHT);
+				pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_CPLANE1, 0,0,-1,waterLevelHeight);
 
 				glDepthMask(false);
 				// glFrontFace(GL_CCW);
@@ -2542,9 +2583,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 				glDepthMask(true);
 				glDisable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 
-			setupVoxelUniforms(ad->activeCam.pos, view, proj, ad->voxelSettings.fogColor.rgb, vec3(0,0,WATER_LEVEL_HEIGHT*2 + 0.01f), vec3(1,1,-1));
+			setupVoxelUniforms(ad->activeCam.pos, view, proj, vs->fogColor.rgb, vs->viewDistance, vec3(0,0,waterLevelHeight*2 + 0.01f), vec3(1,1,-1));
 			pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CLIPPLANE, true);
-			pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CPLANE1, 0,0,-1,WATER_LEVEL_HEIGHT);
+			pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CPLANE1, 0,0,-1,waterLevelHeight);
 
 			for(int i = 0; i < sortListSize; i++) {
 				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coordList[sortList[i].index]);
@@ -2599,7 +2640,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			glDisable(GL_DEPTH_TEST);
 
 			bindShader(SHADER_QUAD);
-			drawRect(rect(0, -ws->currentRes.h, ws->currentRes.w, 0), vec4(1,1,1,reflectionAlpha), rect(0,1,1,0), 
+			drawRect(rect(0, -ws->currentRes.h, ws->currentRes.w, 0), vec4(1,1,1,ad->voxelSettings.reflectionAlpha), rect(0,1,1,0), 
 			         getFrameBuffer(FRAMEBUFFER_Reflection)->colorSlot[0]->id);
 
 			glEnable(GL_DEPTH_TEST);
@@ -2610,7 +2651,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		// draw water
 		{
-			setupVoxelUniforms(ad->activeCam.pos, view, proj, ad->voxelSettings.fogColor.rgb);
+			setupVoxelUniforms(ad->activeCam.pos, view, proj, vs->fogColor.rgb, vs->viewDistance);
 			pushUniform(SHADER_VOXEL, 1, VOXEL_UNIFORM_ALPHATEST, 0.5f);
 
 			for(int i = sortListSize-1; i >= 0; i--) {
@@ -3021,7 +3062,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			Vec4 c = vec4(0.5f,1);
 			if(mesh->generated) c.r += 0.5f;
 			if(mesh->upToDate) c.g += 0.5f;
-			if(mesh->meshUploaded) c.b += 0.5f;
+			if(mesh->uploaded) c.b += 0.5f;
 
 			// if(mesh->activeGeneration) c.r += 0.5f;
 			// if(mesh->activeMaking) c.g += 0.5f;
@@ -3268,6 +3309,20 @@ extern "C" APPMAINFUNCTION(appMain) {
 			}
 		}
 
+		// Using zlib.
+		// for(int i = 0; i < 2; i++) {
+
+		// 	uchar* data = i == 0 ? mesh->voxels : mesh->lighting;
+
+		// 	int size;
+		// 	uchar* result = stbi_zlib_compress(data, VOXEL_SIZE, &size, 0);
+
+		// 	fwrite(&size, sizeof(int), 1, file);
+		// 	fwrite(result, size * sizeof(char), 1, file);
+
+			//  STBIW_FREE(result);
+		// }
+
 		threadQueueComplete(theThreadQueue);
 
 		float dt = timerUpdate(&timer);
@@ -3277,8 +3332,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 		if(file) {
 			fwrite(ad->entityList.e, ad->entityList.size * sizeof(Entity), 1, file);
 
-			fwrite(&startX, sizeof(int), 1, file);
-			fwrite(&startY, sizeof(int), 1, file);
+			fwrite(&ad->voxelSettings.startX, sizeof(int), 1, file);
+			fwrite(&ad->voxelSettings.startY, sizeof(int), 1, file);
+			fwrite(&ad->voxelSettings.startXMod, sizeof(int), 1, file);
+			fwrite(&ad->voxelSettings.startYMod, sizeof(int), 1, file);
 
 			fwrite(&voxels->count, sizeof(int), 1, file);
 
@@ -3290,55 +3347,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 				fwrite(&mesh->coord, sizeof(Vec2i), 1, file);
 
-				// Using zlib.
-				// for(int i = 0; i < 2; i++) {
-
-				// 	uchar* data = i == 0 ? mesh->voxels : mesh->lighting;
-
-				// 	int size;
-				// 	uchar* result = stbi_zlib_compress(data, VOXEL_SIZE, &size, 0);
-
-				// 	fwrite(&size, sizeof(int), 1, file);
-				// 	fwrite(result, size * sizeof(char), 1, file);
-
-   				//  STBIW_FREE(result);
-				// }
-
 				fwrite(&mesh->compressedVoxelsSize, sizeof(int), 1, file);
 				fwrite(&mesh->compressedLightingSize, sizeof(int), 1, file);
 				int compressedDataCountTotal = mesh->compressedVoxelsSize + mesh->compressedLightingSize;
 				fwrite(mesh->compressedData, compressedDataCountTotal * (sizeof(uchar)*2), 1, file);
-
-				// // Compress with awesome compressing method.
-				// for(int i = 0; i < 2; i++) {
-
-				// 	uchar* data = i == 0 ? mesh->voxels : mesh->lighting;
-
-				// 	int bufferCount = 0;
-				// 	uchar count = 1;
-				// 	uchar blockType = data[0];
-				// 	char* buf = buffer;
-				// 	for(int i = 1; i < VOXEL_SIZE; i++) {
-				// 		if(data[i] != blockType || count == UCHAR_MAX || i == VOXEL_SIZE-1) {
-				// 			writeTypeAndAdvance(buf, count, uchar);
-				// 			writeTypeAndAdvance(buf, blockType, uchar);
-
-				// 			count = 1;
-				// 			blockType = data[i];
-
-				// 			bufferCount++;
-				// 		} else {
-				// 			count++;
-				// 		}
-				// 	}
-				// 	// Handle last element.
-				// 	writeTypeAndAdvance(buf, (short)1, uchar);
-				// 	writeTypeAndAdvance(buf, data[VOXEL_SIZE-1], uchar);
-				// 	bufferCount++;
-
-				// 	fwrite(&bufferCount, sizeof(int), 1, file);
-				// 	fwrite(buffer, bufferCount * (sizeof(uchar) + sizeof(uchar)), 1, file);
-				// }
 
 			}
 
@@ -3583,7 +3595,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 			gui->div(vec2(0,0)); gui->label("Light", 0); gui->slider(&globalLumen, 0, 255);
 			gui->div(0,0,0); gui->label("MinMax", 0); gui->slider(&WORLD_MIN, 0, 255); gui->slider(&WORLD_MAX, 0, 255);
 			gui->div(vec2(0,0)); gui->label("WaterLevel", 0); 
-				if(gui->slider(&waterLevelValue, 0, 0.2f)) WATER_LEVEL_HEIGHT = lerp(waterLevelValue, WORLD_MIN, WORLD_MAX);
+				if(gui->slider(&waterLevelValue, 0, 0.2f)) waterLevelHeight = lerp(waterLevelValue, WORLD_MIN, WORLD_MAX);
 
 			gui->div(vec2(0,0)); gui->label("WFreq", 0); gui->slider(&worldFreq, 0.0001f, 0.02f);
 			gui->div(vec2(0,0)); gui->label("WDepth", 0); gui->slider(&worldDepth, 1, 10);
@@ -4700,24 +4712,26 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 		addDebugInfo(fillString("%i", ad->entityList.size));
 
+		VoxelWorldSettings* vs = &ad->voxelSettings;
+
 		static bool sectionWorld = initSections;
 		if(gui->beginSection("World", &sectionWorld)) { 
 			if(gui->button("Reload World") || input->keysPressed[KEYCODE_TAB]) ad->reloadWorld = true;
 			
-			gui->div(vec2(0,0)); gui->label("RefAlpha", 0); gui->slider(&reflectionAlpha, 0, 1);
-			gui->div(vec2(0,0)); gui->label("Light", 0); gui->slider(&globalLumen, 0, 255);
-			gui->div(0,0,0); gui->label("MinMax", 0); gui->slider(&WORLD_MIN, 0, 255); gui->slider(&WORLD_MAX, 0, 255);
+			gui->div(vec2(0,0)); gui->label("RefAlpha", 0); gui->slider(&vs->reflectionAlpha, 0, 1);
+			gui->div(vec2(0,0)); gui->label("Light", 0); gui->slider(&vs->globalLumen, 0, 255);
+			gui->div(0,0,0);     gui->label("MinMax", 0); gui->slider(&vs->worldMin, 0, 255); gui->slider(&vs->worldMax, 0, 255);
 			gui->div(vec2(0,0)); gui->label("WaterLevel", 0); 
-				if(gui->slider(&waterLevelValue, 0, 0.2f)) WATER_LEVEL_HEIGHT = lerp(waterLevelValue, WORLD_MIN, WORLD_MAX);
+			                     if(gui->slider(&vs->waterLevelValue, 0, 0.2f)) vs->waterLevelHeight = lerp(vs->waterLevelValue, vs->worldMin, vs->worldMax);
 
-			gui->div(vec2(0,0)); gui->label("WFreq", 0); gui->slider(&worldFreq, 0.0001f, 0.02f);
-			gui->div(vec2(0,0)); gui->label("WDepth", 0); gui->slider(&worldDepth, 1, 10);
-			gui->div(vec2(0,0)); gui->label("MFreq", 0); gui->slider(&modFreq, 0.001f, 0.1f);
-			gui->div(vec2(0,0)); gui->label("MDepth", 0); gui->slider(&modDepth, 1, 10);
-			gui->div(vec2(0,0)); gui->label("MOffset", 0); gui->slider(&modOffset, 0, 1);
-			gui->div(vec2(0,0)); gui->label("PowCurve", 0); gui->slider(&worldPowCurve, 1, 6);
-			gui->div(0,0,0,0); gui->slider(heightLevels+0,0,1); gui->slider(heightLevels+1,0,1);
-								  gui->slider(heightLevels+2,0,1); gui->slider(heightLevels+3,0,1);
+			gui->div(vec2(0,0)); gui->label("WFreq", 0);          gui->slider(&vs->worldFreq, 0.0001f, 0.02f);
+			gui->div(vec2(0,0)); gui->label("WDepth", 0);         gui->slider(&vs->worldDepth, 1, 10);
+			gui->div(vec2(0,0)); gui->label("MFreq", 0);          gui->slider(&vs->modFreq, 0.001f, 0.1f);
+			gui->div(vec2(0,0)); gui->label("MDepth", 0);         gui->slider(&vs->modDepth, 1, 10);
+			gui->div(vec2(0,0)); gui->label("MOffset", 0);        gui->slider(&vs->modOffset, 0, 1);
+			gui->div(vec2(0,0)); gui->label("PowCurve", 0);       gui->slider(&vs->worldPowCurve, 1, 6);
+			gui->div(0,0,0,0);   gui->slider(vs->heightLevels+0,0,1); gui->slider(vs->heightLevels+1,0,1);
+								 gui->slider(vs->heightLevels+2,0,1); gui->slider(vs->heightLevels+3,0,1);
 		} gui->endSection();
 
 		gui->end();
