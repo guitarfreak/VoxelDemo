@@ -193,6 +193,77 @@ const char* textureFilePaths2[BX2_Size] = {
 	DATA_FOLDER("Textures\\Minecraft\\leaves.png"),
 };
 
+char* footstepsDirt[] = {
+	"footsteps\\dirt1.wav",
+	"footsteps\\dirt2.wav",
+	"footsteps\\dirt3.wav",
+	"footsteps\\dirt4.wav",
+};
+char* footstepsWater[] = {
+	"footsteps\\water1.wav",
+	"footsteps\\water2.wav",
+	"footsteps\\water3.wav",
+};
+char* footstepsGrass[] = {
+	"footsteps\\grass1.wav",
+	"footsteps\\grass2.wav",
+	"footsteps\\grass3.wav",
+	"footsteps\\grass4.wav",
+	"footsteps\\grass5.wav",
+	"footsteps\\grass6.wav",
+	"footsteps\\grass7.wav",
+	"footsteps\\grass8.wav",
+};
+char* footstepsSand[] = {
+	"footsteps\\sand1.wav",
+	"footsteps\\sand2.wav",
+	"footsteps\\sand3.wav",
+};
+char* footstepsSnow[] = {
+	"footsteps\\snow1.wav",
+	"footsteps\\snow2.wav",
+	"footsteps\\snow3.wav",
+	"footsteps\\snow4.wav",
+};
+
+struct FootstepArray {
+	char** files;
+	int count;
+};
+
+enum FootstepType {
+	FOOTSTEP_DIRT = 0,
+	FOOTSTEP_WATER,
+	FOOTSTEP_GRASS,
+	FOOTSTEP_SAND,
+	FOOTSTEP_SNOW,
+
+	FOOTSTEP_SIZE,
+};
+
+FootstepArray footstepFiles[] = {
+	{ footstepsDirt,  arrayCount(footstepsDirt) },
+	{ footstepsWater, arrayCount(footstepsWater) },
+	{ footstepsGrass, arrayCount(footstepsGrass) },
+	{ footstepsSand, arrayCount(footstepsSand) },
+	{ footstepsSnow, arrayCount(footstepsSnow) },
+};
+
+int blockTypeFootsteps[BT_Size] = {
+	FOOTSTEP_DIRT,
+	FOOTSTEP_WATER,
+	FOOTSTEP_SAND,
+	FOOTSTEP_GRASS,
+	FOOTSTEP_DIRT,
+	FOOTSTEP_SNOW,
+	FOOTSTEP_DIRT,
+	FOOTSTEP_GRASS,
+	FOOTSTEP_DIRT,
+	FOOTSTEP_DIRT,
+	FOOTSTEP_DIRT,
+};
+
+
 
 // uchar blockColor[BT_Size] = {0,0,0,0,0,0,0,47,0,0,0};
 uchar blockColor[BT_Size] = {0,17,0,0,0,0,0,16,0,0,0};
@@ -258,6 +329,7 @@ static unsigned char colorPaletteCompact[64][3] =
 };
 
 static float colorPalette[64][4];
+
 
 void buildColorPalette() {
    int i;

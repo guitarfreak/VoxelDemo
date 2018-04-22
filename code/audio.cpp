@@ -1,4 +1,6 @@
 
+#define PITCH_PERCENT 0.05946309435929526456
+
 struct AudioState;
 extern AudioState* theAudioState;
 
@@ -95,6 +97,8 @@ struct AudioState {
 
 	float masterVolume;
 	Track tracks[20];
+
+	float defaultModulation = 0.25;
 };
 
 void addAudio(AudioState* as, char* filePath, char* name) {
@@ -157,10 +161,11 @@ Audio* getAudio(AudioState* as, char* name) {
 	return 0;
 }
 
-#define PITCH_PERCENT 0.05946309435929526456
 
-void addTrack(Audio* audio, float volume = 1.0f, bool modulate = false) {
+void addTrack(Audio* audio, float volume = 1.0f, bool modulate = false, float modulationAmount = 0) {
 	AudioState* as = theAudioState;
+
+	if(modulate && modulationAmount == 0) modulationAmount = as->defaultModulation; 
 
 	Track* track = 0;
 	for(int i = 0; i < arrayCount(as->tracks); i++) {
@@ -192,16 +197,16 @@ void addTrack(Audio* audio, float volume = 1.0f, bool modulate = false) {
 	track->startTime = timeStamp.QuadPart;
 
 	if(modulate) {
-		float percent = 1 + (PITCH_PERCENT * 0.25f);
+		float percent = 1 + (PITCH_PERCENT * modulationAmount);
 		track->speed = randomFloatPCG(1/percent, percent, 0.00001f);
 	}
 
 	track->volume = volume;
 }
 
-void addTrack(char* name, float volume = 1.0f, bool modulate = false) {
+void addTrack(char* name, float volume = 1.0f, bool modulate = false, float modulationAmount = 0) {
 	Audio* audio = getAudio(theAudioState, name);
 	if(!audio) return;
 
-	return addTrack(audio, volume, modulate);
+	return addTrack(audio, volume, modulate, modulationAmount);
 }

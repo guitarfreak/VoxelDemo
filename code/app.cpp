@@ -324,6 +324,7 @@ struct AppData {
 
 	bool firstWalk;
 	float footstepSoundValue;
+	int lastFootstepSoundId;
 
 	//
 
@@ -1167,7 +1168,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// @GameMenu.
 
 	if(input->keysPressed[KEYCODE_U]) {
-		addTrack("366.wav", 0.3f);
+		// addTrack("footsteps\\water1.wav", 1.0f);
+		// addTrack("footsteps\\dirst1.wav", 1.0f);
+		// addTrack("ui\\select.wav", 1);
 	}
 
 	if(ad->gameMode == GAME_MODE_MENU) {
@@ -1625,8 +1628,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 				bool playerOnGroundStart = player->playerOnGround;
 
-				printf("%i %f\n", player->playerOnGround, ad->footstepSoundValue);
-
 				if(ad->playerMode) {
 					// if(input->keysPressed[KEYCODE_SPACE]) {
 					if(input->keysDown[KEYCODE_SPACE]) {
@@ -1650,6 +1651,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 				bool playerGroundCollision = false;
 				bool playerCeilingCollision = false;
 				bool playerSideCollision = false;
+
+				Vec2 positionOffset = vec2(0,0);
 
 				if(e->vel != vec3(0,0,0)) {
 					if(e->vel.xy != vec2(0,0)) ad->firstWalk = true;
@@ -1720,19 +1723,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 						}
 					}
 
-					// Footstep sound.
-					{
-						Vec2 positionOffset = nPos.xy - e->pos.xy;
-						float moveLength = lenVec2(positionOffset);
-						if(player->playerOnGround) ad->footstepSoundValue += moveLength;
-
-						float stepDistance = 2.3f;
-						if(ad->footstepSoundValue > stepDistance) {
-							addTrack("ui\\select.wav", 1, true);
-							ad->footstepSoundValue = 0;
-						}
-					}
-
 					float stillnessThreshold = 0.0001f;
 					if(valueBetween(e->vel.z, -stillnessThreshold, stillnessThreshold)) {
 						e->vel.z = 0;
@@ -1752,6 +1742,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 						e->vel = vec3(0,0,0);
 					}
 
+					positionOffset = nPos.xy - e->pos.xy;
 					e->pos = nPos;
 				}
 
@@ -1763,6 +1754,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 						e->vel.z = 0;
 					}
 
+					uchar groundCollisionBlockType = 0;
+
 					if(e->playerOnGround) {
 						Vec3 pos = e->pos;
 						Vec3 size = e->dim;
@@ -1770,14 +1763,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 						bool groundCollision = false;
 
-						for(int i = 0; i < 4; i++) {
+						for(int i = 0; i < 5; i++) {
 							Vec3 gp;
-							if(i == 0) 		gp = box.min + size*vec3(0,0,0);
-							else if(i == 1) gp = box.min + size*vec3(1,0,0);
-							else if(i == 2) gp = box.min + size*vec3(0,1,0);
-							else if(i == 3) gp = box.min + size*vec3(1,1,0);
-
-							// drawCube(&ad->pipelineIds, block, vec3(1,1,1)*1.01f, vec4(1,0,1,1), 0, vec3(0,0,0));
+							if(i == 0) 		gp = box.min + size*vec3(0.5f,0.5f,0); // For sound.
+							else if(i == 1) gp = box.min + size*vec3(0,0,0);
+							else if(i == 2) gp = box.min + size*vec3(1,0,0);
+							else if(i == 3) gp = box.min + size*vec3(0,1,0);
+							else if(i == 4) gp = box.min + size*vec3(1,1,0);
 
 							float raycastThreshold = 0.01f;
 							gp -= up*raycastThreshold;
@@ -1788,6 +1780,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 							if(*blockType > 0) {
 								groundCollision = true;
+								groundCollisionBlockType = *blockType;
 								break;
 							}
 						}
@@ -1805,6 +1798,32 @@ extern "C" APPMAINFUNCTION(appMain) {
 							if(!playerOnGroundStart && player->playerOnGround) ad->footstepSoundValue = 100;
 
 							if(!e->playerOnGround) ad->footstepSoundValue = 0;
+						}
+					}
+
+					// Footstep sound.
+					if(e->vel != vec3(0,0,0) && groundCollisionBlockType) {
+						float volume = 0.5f;
+
+						float moveLength = lenVec2(positionOffset);
+						if(player->playerOnGround) ad->footstepSoundValue += moveLength;
+
+						float stepDistance = 2.3f;
+						if(ad->footstepSoundValue > stepDistance) {
+
+							int footstepType = blockTypeFootsteps[groundCollisionBlockType];
+							FootstepArray fa = footstepFiles[footstepType];
+							char** files = fa.files;
+							int filesCount = fa.count;
+
+							int soundId = randomInt(0,filesCount-1);
+							if(soundId == ad->lastFootstepSoundId) 
+								soundId = (soundId+1)%(filesCount-1);
+							
+							addTrack(files[soundId], volume, true, 2.0f);
+							ad->footstepSoundValue = 0;
+							
+							ad->lastFootstepSoundId = soundId;
 						}
 					}
 
