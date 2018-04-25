@@ -845,9 +845,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// ad->menu.activeId = 0;
 
 		#if SHIPPING_MODE
-		ad->captureMouse = false;
-		#else 
 		ad->captureMouse = true;
+		#else 
+		ad->captureMouse = false;
 		#endif
 
 		// showCursor(false);
@@ -3771,7 +3771,11 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 		gui->div(vec2(0.2f,0));
 		if(gui->switcher("Freeze", &ds->noCollating)) {
-			if(ds->noCollating) ds->setPause = true;
+			if(ds->noCollating) {
+				ds->timelineCamSize = -1;
+				ds->timelineCamPos = -1;
+				ds->setPause = true;
+			}
 			else ds->setPlay = true;
 		}
 		gui->slider(&ds->cycleIndex, 0, cycleCount-1);
