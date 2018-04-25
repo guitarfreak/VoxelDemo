@@ -420,121 +420,6 @@ const char* fragmentShaderQuad = GLSL (
 
 //
 
-enum TestUniforms {
-	TEST_UNIFORM_SIZE = 0,
-};
-
-// struct {
-//   ResourceGLuint  
-//     box_vbo,
-//     box_ibo,
-//     sphere_vbo,
-//     sphere_ibo,
-
-//     scene_ubo,
-//     objects_ubo;
-// };
-
-// struct {
-//   GLuint64  
-//     box_vbo,
-//     box_ibo,
-//     sphere_vbo,
-//     sphere_ibo,
-
-//     scene_ubo,
-//     objects_ubo;
-// };
-
-struct SceneData {
-  // mat4  viewProjMatrix;
-  // mat4  viewProjMatrixI;
-  // mat4  viewMatrix;
-  // mat4  viewMatrixI;
-  // mat4  viewMatrixIT;
-  
-  // vec4  wLightPos;
-  
-  // uvec2 viewport;
-  // float shrinkFactor;
-  // float time;
-	Vec4 color;
-};
-
-const char* vertexShaderTest = GLSL (
-	out gl_PerVertex { vec4 gl_Position; };
-
-	// layout(commandBindableNV) uniform;
-
-	struct SceneData {
-	  // mat4  viewProjMatrix;
-	  // mat4  viewProjMatrixI;
-	  // mat4  viewMatrix;
-	  // mat4  viewMatrixI;
-	  // mat4  viewMatrixIT;
-	  
-	  // vec4  wLightPos;
-	  
-	  // uvec2 viewport;
-	  // float shrinkFactor;
-	  // float time;
-		vec4 color;
-	};
-
-	// const vec4 vertices[] = vec4[](
-	// 		vec4(-0.5f, -0.5f, 0.0f, 1.0f),
-	// 		vec4(-0.5f,  0.5f, 0.0f, 1.0f),
-	// 		vec4( 0.5f, -0.5f, 0.0f, 1.0f),
-	// 		vec4( 0.5f,  0.5f, 0.0f, 1.0f));
-
-	const vec4 vertices[] = vec4[](
-			vec4(-0.1f, -0.1f, 0.0f, 1.0f),
-			vec4(-0.1f,  0.1f, 0.0f, 1.0f),
-			vec4( 0.1f, -0.1f, 0.0f, 1.0f),
-			vec4( 0.1f,  0.1f, 0.0f, 1.0f));
-
-	// layout(std140, binding = 1) uniform vec2 pos;
-	// layout(binding = 1) uniform vec2 pos;
-
-	// layout(binding = 1) uniform float sArray;
-	// layout(binding = 1) uniform sampler2D sArray;
-
-	layout(std140, binding = 0) uniform sceneBuffer {
-	  SceneData scene;
-		// vec2 pos;
-		// vec4 color;
-	};
-
-
-	// layout(std140, binding = 0) uniform vec4 color;
-
-	// layout(std140,binding=UBO_OBJECT) uniform objectBuffer {
-	  // ObjectData  object;
-	// };
-
-	out vec4 Color;
-
-	void main() {
-		gl_Position = vertices[gl_VertexID];
-		// Color = vec4(1,0,0,1);
-		// Color = color;
-		Color = scene.color;
-	}
-);
-
-const char* fragmentShaderTest = GLSL (
-	in vec4 Color;
-	out vec4 color;
-
-	void main() {
-		// color = vec4(1,1,1,1);
-		color = Color;
-		// color = scene.color;
-	}
-);
-
-//
-
 enum ParticleUniforms {
 	PARTICLE_UNIFORM_MODEL = 0,
 	PARTICLE_UNIFORM_VIEW,
@@ -781,7 +666,6 @@ enum ShaderProgram {
 	SHADER_CUBE = 0,
 	SHADER_QUAD,
 	SHADER_VOXEL,
-	SHADER_TEST,
 	SHADER_PARTICLE,
 	SHADER_CUBEMAP,
 
@@ -792,7 +676,6 @@ MakeShaderInfo makeShaderInfo[SHADER_SIZE] = {
 	{(char*)vertexShaderCube, (char*)fragmentShaderCube, CUBE_UNIFORM_SIZE, cubeShaderUniformType},
 	{(char*)vertexShaderQuad, (char*)fragmentShaderQuad, QUAD_UNIFORM_SIZE, quadShaderUniformType},
 	{(char*)stbvox_get_vertex_shader(), (char*)stbvox_get_fragment_shader(), VOXEL_UNIFORM_SIZE, voxelShaderUniformType},
-	{(char*)vertexShaderTest, (char*)fragmentShaderTest, TEST_UNIFORM_SIZE, 0},
 	{(char*)vertexShaderParticle, (char*)fragmentShaderParticle, PARTICLE_UNIFORM_SIZE, particleShaderUniformType},
 	{(char*)vertexShaderCubeMap, (char*)fragmentShaderCubeMap, CUBEMAP_UNIFORM_SIZE, cubemapShaderUniformType},
 };

@@ -318,6 +318,7 @@ bool menuOptionSliderInt(MainMenu* menu, Vec2 pos, int* value, int rangeMin, int
 }
 
 
+
 struct AppData {
 	
 	// General.
@@ -424,7 +425,6 @@ struct AppData {
 
 
 
-// void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, bool* isRunning, bool init);
 void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, bool* isRunning, bool init, ThreadQueue* threadQueue);
 // void debugUpdatePlayback(DebugState* ds, AppMemory* appMemory);
 
@@ -521,14 +521,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 
 		ds->gui = getPStructDebug(Gui);
-		// gui->init(rectCenDim(vec2(0,1), vec2(300,800)));
-		// gui->init(rectCenDim(vec2(1300,1), vec2(300,500)));
 		ds->gui->init(rectCenDim(vec2(1300,1), vec2(300, ws->currentRes.h)), 0);
 
 		// ds->gui->cornerPos = 
 
 		ds->gui2 = getPStructDebug(Gui);
-		// ds->gui->init(rectCenDim(vec2(1300,1), vec2(400, ws->currentRes.h)), -1);
 		ds->gui2->init(rectCenDim(vec2(1300,1), vec2(300, ws->currentRes.h)), 3);
 
 		ds->input = getPStructDebug(Input);
@@ -695,7 +692,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			// as->latency = 1.5f;
 			as->latency = 2.0f;
-			// as->latency = 4.0f;
 
 			const CLSID CLSID_MMDeviceEnumerator = __uuidof(MMDeviceEnumerator);
 			const IID IID_IMMDeviceEnumerator = __uuidof(IMMDeviceEnumerator);
@@ -1042,7 +1038,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 
 		// if(mouseInClientArea(windowHandle)) {
-		// 	// updateCursor(ws);
 		// 	showCursor(false);
 		// } else {
 		// 	showCursor(true);
@@ -1281,7 +1276,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		int titleFontHeight = ds->fontHeight * ws->windowScale * 6.0f;
 		int optionFontHeight = titleFontHeight * 0.5f;
-		// Font* titleFont = getFont(FONT_SOURCESANS_PRO, titleFontHeight);
 		Font* titleFont = getFont("Merriweather-Regular.ttf", titleFontHeight);
 		Font* font = getFont(FONT_SOURCESANS_PRO, optionFontHeight);
 
@@ -2794,6 +2788,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 	// Particle test.
+
 	#if 0
 	if(false)
 	{
@@ -3045,6 +3040,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	}
 
+	// Visualize chunk storing/restoring.
 	#if 0
 	if(false)
 	{
@@ -3126,7 +3122,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 				Audio* audio = track->audio;
 
 				if(!track->used) continue;
-
 
 
 				int index = track->index;
@@ -3220,8 +3215,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 			tempTime = 0;
 		}
 
-		// drawTextLineCulled("sdfWT34t3w4tSEr", getFont(FONT_CALIBRI, 30), vec2(200,-200), 20, vec4(1,0,1,1));
-
 		blitFrameBuffers(FRAMEBUFFER_DebugMsaa, FRAMEBUFFER_DebugNoMsaa, ws->currentRes, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 
 
@@ -3282,9 +3275,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 			GLenum glError = glGetError(); printf("GLError: %i\n", glError);
 		}
 
-		// glBindFramebuffer(GL_FRAMEBUFFER, 0);
-		// drawRect(rectCenDim(0,0,100,100), vec4(1,0,0,1));
-
 		swapBuffers(sd);
 		glFinish();
 
@@ -3294,11 +3284,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 			wglSwapIntervalEXT(1);
 			sd->vsyncTempTurnOff = false;
 		}
-
-		// if(init) {
-		// 	showWindow(windowHandle);
-		// 	GLenum glError = glGetError(); printf("GLError: %i\n", glError);
-		// }
 	}
 
 	debugMain(ds, appMemory, ad, reload, isRunning, init, threadQueue);
