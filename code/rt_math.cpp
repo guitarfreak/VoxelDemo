@@ -1223,6 +1223,12 @@ inline Vec2i operator*(Vec2i a, int b) {
 	return a;
 }
 
+inline Vec2i operator*(Vec2i a, float b) {
+	a.x *= b;
+	a.y *= b;
+	return a;
+}
+
 inline Vec2i operator/(Vec2i a, Vec2i b) {
 	a.x /= b.x;
 	a.y /= b.y;
@@ -2403,11 +2409,11 @@ Vec3 operator*(Quat q, Vec3 v) {
 Vec3 rotateVec3(Vec3 v, float a, Vec3 axis) {
 	Vec3 r = quat(a, axis)*v;
 	return normVec3(r);
+	// return r;
 }
 
 void rotateVec3(Vec3* v, float a, Vec3 axis) {
-	*v = quat(a, axis)*(*v);
-	*v = normVec3(*v);
+	*v = rotateVec3(*v, a, axis);
 }
 
 Mat4 modelMatrix(Vec3 trans, Vec3 scale, float degrees = 0, Vec3 rot = vec3(0,0,0)) {

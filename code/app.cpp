@@ -3,16 +3,9 @@
 //				WHAT TO DO
 //-----------------------------------------
 - Joysticks, Keyboard, Mouse, Xinput-DirectInput
-- Sound
 - Data Package - Streamingw
-- Expand Font functionality
-- Gui
 - create simpler windows.h
 - remove c runtime library, implement sin, cos...
-- savestates, hotrealoading
-- pre and post functions to Main
-- memory dynamic expansion
-- 32x32 voxel chunks
 - ballistic motion on jumping
 - round collision
 - screen space reflections
@@ -26,12 +19,9 @@
 - stb_voxel push alpha test in voxel vertex shader
 - rocket launcher
 - antialiased pixel graphics with neighbour sampling 
-- macros for array stuff so i dont have to inline updateMeshList[updateMeshListSize++] every time 
 - level of detail for world gen back row								
-- 32x32 gen chunks
   
 - put in spaces for fillString
-- save mouse position at startup and place the mouse there when the app closes
 - simplex noise instead of perlin noise
 - make thread push copy the thead specific data on push in a seperate buffer for all possible threadjobs
 - frametime timer and fps counter
@@ -40,7 +30,6 @@
 - simd on vectors as a test first?
 
 - experiment with directx 10
-- font drawing bold
 
 gui stuff: 
 additionally:
@@ -62,47 +51,34 @@ Changing course for now:
  - In executeCommandList: Remember state, and only switch if a change occured. (Like shaders, colors, linewidth, etc.)
 
  - 3d animation system. (Search Opengl vertex skinning.)
- - Sound perturbation. (Whatever that is.) 
- - Clean up gui.
+ - Sound perturbation.
  - Using makros and defines to make templated vectors and hashtables and such.
  - When switching between text editor and debugger, synchronize open files.
  - Entity introspection in gui.
- - Open devenv from within sublime.
  - Shadow mapping, start with cloud texture projection.
 
-- Main Menu.
 - atomicAdd sections are not thread proof. 
   We could have multiple equal jobs in thread queue.
-- Simluate earth curvature in shader.
-- Make sides work on dirt voxels. (They all have grass on top.)
+- Simulate earth curvature in shader.
 - Make horizon work. The cubemap solution is not good.
-- Sound buffer glitch when game laggy.
-- Opengl.
 - DirectX.
 - Fix selection algorithm.
+- Cubemap not seemless.
+- Sound starts to glitch when under 30 hz because audio buffer is 2*framrate.
 
 //-------------------------------------
 //               BUGS
 //-------------------------------------
 - look has to be negative to work in view projection matrix
 - distance jumping collision bug, possibly precision loss in distances
-- gpu fucks up at some point making swapBuffers alternates between time steps 
-  which makes the game stutter, restart is required
 - game input gets stuck when buttons are pressed right at the start
-- sort key assert firing randomly
-- draw line crashes
 - release build takes forever
-- Crashing once in a while at startup. (NOTE: Has not happened in quite a while.)
 
 */
 
 /*
 	switching shader -> 550 ticks
 	using namedBufferSubData vs uniforms for vertices -> 2400 ticks vs 400 ticks
-*/
-
-/*
-
 */
 
 
@@ -159,12 +135,12 @@ struct MemoryBlock;
 struct DebugState;
 struct Timer;
 ThreadQueue* theThreadQueue;
-GraphicsState* globalGraphicsState;
+GraphicsState* theGraphicsState;
 AudioState* theAudioState;
 DrawCommandList* globalCommandList;
-MemoryBlock* globalMemory;
-DebugState* globalDebugState;
-Timer* globalTimer;
+MemoryBlock* theMemory;
+DebugState* theDebugState;
+Timer* theTimer;
 
 // Internal.
 
@@ -195,12 +171,14 @@ Timer* globalTimer;
 
 
 struct GameSettings {
+	bool fullscreen;
+	bool vsync;
+	float resolutionScale;
+	float volume;
 	float mouseSensitivity;
+	int fieldOfView;
+	int viewDistance;
 };
-
-void defaultGameSettings(GameSettings* settings) {
-	settings->mouseSensitivity = 0.1f;
-}
 
 enum Game_Mode {
 	GAME_MODE_MENU,
@@ -231,7 +209,23 @@ struct MainMenu {
 	float optionShadowSize;
 
 	bool pressedEnter;
+	bool pressedEscape;
+	bool pressedBackspace;
+	bool pressedUp;
+	bool pressedDown;
+	bool pressedLeft;
+	bool pressedRight;
 };
+
+void menuSetInput(MainMenu* menu, Input* input) {
+	menu->pressedEnter = input->keysPressed[KEYCODE_RETURN];
+	menu->pressedEscape = input->keysPressed[KEYCODE_ESCAPE];
+	menu->pressedBackspace = input->keysPressed[KEYCODE_BACKSPACE];
+	menu->pressedUp = input->keysPressed[KEYCODE_UP];
+	menu->pressedDown = input->keysPressed[KEYCODE_DOWN];
+	menu->pressedLeft = input->keysPressed[KEYCODE_LEFT];
+	menu->pressedRight = input->keysPressed[KEYCODE_RIGHT];
+}
 
 bool menuOption(MainMenu* menu, char* text, Vec2 pos, Vec2i alignment) {
 
@@ -246,6 +240,81 @@ bool menuOption(MainMenu* menu, char* text, Vec2 pos, Vec2i alignment) {
 	menu->currentId++;
 
 	return result;
+}
+
+bool menuOptionBool(MainMenu* menu, Vec2 pos, bool* value) {
+	bool isSelected = menu->activeId == menu->currentId-1;
+
+	bool active = false;
+	if(isSelected) {
+		if(menu->pressedEnter) {
+			*value = !(*value);
+			active = true;
+		}
+		if(menu->pressedLeft) {
+			if(*value == true) {
+				*value = false;
+				active = true;
+			}
+		}
+		if(menu->pressedRight) {
+			if(*value == false) {
+				*value = true;
+				active = true;
+			}
+		}
+	}
+
+	char* str;
+	if((*value) == true) str = "True";
+	else str = "False";
+
+	dcText(str, menu->font, pos, menu->cOption, vec2i(1,0), 0, menu->optionShadowSize, menu->cOptionShadow);
+
+	return active;
+}
+
+bool menuOptionSliderFloat(MainMenu* menu, Vec2 pos, float* value, float rangeMin, float rangeMax, float step, float precision) {
+	bool isSelected = menu->activeId == menu->currentId-1;
+
+	bool active = false;
+
+	float valueBefore = *value;
+	if(isSelected) {
+		if(menu->pressedLeft)  (*value) -= step;
+		if(menu->pressedRight) (*value) += step;
+		clamp(value, rangeMin, rangeMax);
+	}
+
+	if(valueBefore != (*value)) active = true;
+
+	char* str = getTString(20);
+	floatToStr(str, *value, precision);
+
+	dcText(str, menu->font, pos, menu->cOption, vec2i(1,0), 0, menu->optionShadowSize, menu->cOptionShadow);
+
+	return active;
+}
+
+bool menuOptionSliderInt(MainMenu* menu, Vec2 pos, int* value, int rangeMin, int rangeMax, int step) {
+	bool isSelected = menu->activeId == menu->currentId-1;
+
+	bool active = false;
+
+	int valueBefore = *value;
+	if(isSelected) {
+		if(menu->pressedLeft)  (*value) -= step;
+		if(menu->pressedRight) (*value) += step;
+		*value = clampInt(*value, rangeMin, rangeMax);
+	}
+
+	if(valueBefore != (*value)) active = true;
+
+	char* str = fillString("%i", *value);
+
+	dcText(str, menu->font, pos, menu->cOption, vec2i(1,0), 0, menu->optionShadowSize, menu->cOptionShadow);
+
+	return active;
 }
 
 
@@ -268,6 +337,7 @@ struct AppData {
 	DrawCommandList commandList3d;
 
 	bool updateFrameBuffers;
+	float mouseSensitivity;
 
 	// 
 
@@ -281,11 +351,10 @@ struct AppData {
 
 	Vec2i cur3dBufferRes;
 	int msaaSamples;
-	Vec2i fboRes;
-	bool useNativeRes;
+	float resolutionScale;
 
 	float aspectRatio;
-	float fieldOfView;
+	int fieldOfView;
 	float nearPlane;
 	float farPlane;
 
@@ -296,6 +365,7 @@ struct AppData {
 
 	bool loading;
 	bool newGame;
+	bool saveGame;
 	float startFade;
 
 	GameSettings settings;
@@ -406,7 +476,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	gMemory.pDebugMemory = &appMemory->memoryArrays[1];
 	gMemory.tMemoryDebug = &appMemory->memoryArrays[2];
 	gMemory.debugMemory = &appMemory->extendibleMemoryArrays[1];
-	globalMemory = &gMemory;
+	theMemory = &gMemory;
 
 	DebugState* ds = (DebugState*)getBaseMemoryArray(gMemory.pDebugMemory);
 	AppData* ad = (AppData*)getBaseExtendibleMemoryArray(gMemory.pMemory);
@@ -418,10 +488,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 	WindowSettings* ws = &ad->wSettings;
 
 	theThreadQueue = threadQueue;
-	globalGraphicsState = &ad->graphicsState;
+	theGraphicsState = &ad->graphicsState;
 	theAudioState = &ad->audioState;
-	globalDebugState = ds;
-	globalTimer = ds->timer;
+	theDebugState = ds;
+	theTimer = ds->timer;
 
 	// Init.
 
@@ -439,7 +509,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ds->recordedInput = (Input*)getPMemoryDebug(sizeof(Input) * ds->inputCapacity);
 
 		ds->timer = getPStructDebug(Timer);
-		globalTimer = ds->timer;
+		theTimer = ds->timer;
 		int timerSlots = 50000;
 		ds->timer->bufferSize = timerSlots;
 		ds->timer->timerBuffer = (TimerSlot*)getPMemoryDebug(sizeof(TimerSlot) * timerSlots);
@@ -581,11 +651,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		ad->fieldOfView = 60;
 		ad->msaaSamples = 4;
-		ad->fboRes = vec2i(0, 120);
-		ad->useNativeRes = true;
+		ad->resolutionScale = 1;
 		ad->nearPlane = 0.1f;
 		ad->farPlane = 3000;
-		ad->dt = 1/(float)60;
+		ad->dt = 1/(float)ws->frameRate;
 
 		//
 		// FrameBuffers.
@@ -732,9 +801,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 		//
 		//
 
-		globalGraphicsState->fontFolders[globalGraphicsState->fontFolderCount++] = getPStringCpy(App_Font_Folder);
+		theGraphicsState->fontFolders[theGraphicsState->fontFolderCount++] = getPStringCpy(App_Font_Folder);
 		char* windowsFontFolder = fillString("%s%s", getenv(Windows_Font_Path_Variable), Windows_Font_Folder);
-		globalGraphicsState->fontFolders[globalGraphicsState->fontFolderCount++] = getPStringCpy(windowsFontFolder);
+		theGraphicsState->fontFolders[theGraphicsState->fontFolderCount++] = getPStringCpy(windowsFontFolder);
 
 		// Setup app temp settings.
 		AppSessionSettings appSessionSettings = {};
@@ -773,12 +842,19 @@ extern "C" APPMAINFUNCTION(appMain) {
 		timerInit(&ds->frameTimer);
 		timerInit(&ds->tempTimer);
 
+		as->masterVolume = 0.4f;
+
 		ad->gameMode = GAME_MODE_LOAD;
 		ad->newGame = false;
 		// ad->menu.activeId = 0;
 
+		#if SHIPPING_MODE
 		ad->captureMouse = false;
-		showCursor(false);
+		#else 
+		ad->captureMouse = true;
+		#endif
+
+		// showCursor(false);
 
 		folderExistsCreate(SAVES_FOLDER);	
 
@@ -786,9 +862,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->volumeGeneral = 0.5f;
 		ad->volumeMenu = 0.7f;
 
-		//
+		ad->mouseSensitivity = 0.2f;
 
-		defaultGameSettings(&ad->settings);
+		//
 
 		// Entity.
 
@@ -842,6 +918,44 @@ extern "C" APPMAINFUNCTION(appMain) {
 			}
 			free(noiseSamples);
 		}
+
+
+		// Load game settings.
+		
+		{
+			// Init default.
+			if(!fileExists(Game_Settings_File)) {
+				GameSettings settings = {};
+
+				settings.fullscreen = true;
+				settings.vsync = true;
+				settings.resolutionScale = 1;
+				settings.volume = 1;
+				settings.mouseSensitivity = 0.2f;
+				settings.fieldOfView = 60;
+				settings.viewDistance = 5;
+
+				writeDataToFile((char*)&settings, sizeof(GameSettings), Game_Settings_File);
+			}
+
+			// Load Gamesettings.
+			{
+				GameSettings settings = {};
+
+				readDataFile((char*)&settings, Game_Settings_File);
+
+				if(settings.fullscreen) setWindowMode(windowHandle, ws, WINDOW_MODE_FULLBORDERLESS);
+				else setWindowMode(windowHandle, ws, WINDOW_MODE_WINDOWED);
+
+				ws->vsync = settings.vsync;
+				ad->resolutionScale = settings.resolutionScale;
+				ad->audioState.masterVolume = settings.volume;
+				ad->mouseSensitivity = settings.mouseSensitivity;
+				ad->fieldOfView = settings.fieldOfView;
+				ad->voxelSettings.viewDistance = settings.viewDistance;
+			}
+
+		}
 	}
 
 	// @AppStart.
@@ -863,9 +977,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 
 		// Bad news.
-		for(int i = 0; i < arrayCount(globalGraphicsState->fonts); i++) {
-			for(int j = 0; j < arrayCount(globalGraphicsState->fonts[0]); j++) {
-				Font* font = &globalGraphicsState->fonts[i][j];
+		for(int i = 0; i < arrayCount(theGraphicsState->fonts); i++) {
+			for(int j = 0; j < arrayCount(theGraphicsState->fonts[0]); j++) {
+				Font* font = &theGraphicsState->fonts[i][j];
 				if(font->heightIndex != 0) {
 					freeFont(font);
 				} else break;
@@ -891,9 +1005,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 				ds->fpsTime = 0;
 				ds->fpsCounter = 0;
 			}
-
-			// timerStart(&ad->frameTimer);
-			// printf("%f\n", ad->dt);
 		}
 	}
 
@@ -914,6 +1025,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 	{
 		TIMER_BLOCK_NAMED("Input");
 
+		if(ws->vsync) wglSwapIntervalEXT(1);
+		else wglSwapIntervalEXT(0);
+
 		inputPrepare(input);
 		SwitchToFiber(sd->messageFiber);
 
@@ -927,12 +1041,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 			memSet(ad->input.keysDown, 0, sizeof(ad->input.keysDown));
 		}
 
-		if(mouseInClientArea(windowHandle)) {
-			updateCursor(ws);
-			showCursor(false);
-		} else {
-			showCursor(true);
-		}
+		// if(mouseInClientArea(windowHandle)) {
+		// 	// updateCursor(ws);
+		// 	showCursor(false);
+		// } else {
+		// 	showCursor(true);
+		// }
 
 		ad->dt = ds->dt;
 		ad->time = ds->time;
@@ -973,17 +1087,6 @@ extern "C" APPMAINFUNCTION(appMain) {
     	else setWindowMode(windowHandle, ws, WINDOW_MODE_FULLBORDERLESS);
     }
 
-	// if(input->keysPressed[KEYCODE_F2]) {
-	// 	static bool switchMonitor = false;
-
-	// 	setWindowMode(windowHandle, ws, WINDOW_MODE_WINDOWED);
-
-	// 	if(!switchMonitor) setWindowProperties(windowHandle, 1, 1, 1920, 0);
-	// 	else setWindowProperties(windowHandle, 1920, 1080, -1920, 0);
-	// 	switchMonitor = !switchMonitor;
-
-	// 	setWindowMode(windowHandle, ws, WINDOW_MODE_FULLBORDERLESS);
-	// }
 
 	if(input->resize || init) {
 		if(!windowIsMinimized(windowHandle)) {
@@ -999,10 +1102,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->updateFrameBuffers = false;
 		ad->aspectRatio = ws->aspectRatio;
 		
-		ad->fboRes.x = ad->fboRes.y*ad->aspectRatio;
-
-		if(ad->useNativeRes) ad->cur3dBufferRes = ws->currentRes;
-		else ad->cur3dBufferRes = ad->fboRes;
+		ad->cur3dBufferRes = ws->currentRes;
+		if(ad->resolutionScale < 1.0f) {
+			ad->cur3dBufferRes = ad->cur3dBufferRes * ad->resolutionScale;
+		}
 
 		Vec2i s = ad->cur3dBufferRes;
 		Vec2 reflectionRes = vec2(s);
@@ -1015,8 +1118,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_DebugMsaa, ws->currentRes.w, ws->currentRes.h);
 		setDimForFrameBufferAttachmentsAndUpdate(FRAMEBUFFER_DebugNoMsaa, ws->currentRes.w, ws->currentRes.h);
 	}
-	
-
 
 	TIMER_BLOCK_BEGIN_NAMED(openglInit, "Opengl Init");
 
@@ -1052,7 +1153,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// Clear all the framebuffers and window backbuffer.
 	{
-
 		// for(int i = 0; i < arrayCount(gs->frameBuffers); i++) {
 		// 	FrameBuffer* fb = getFrameBuffer(i);
 		// 	bindFrameBuffer(i);
@@ -1137,9 +1237,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 
 		if(!ad->captureMouse) {
-			// if(input->keysPressed[KEYCODE_F3] || 
-			//    (input->mouseButtonPressed[1]) && !ad->fpsModeFixed) {
-				// if(input->keysPressed[KEYCODE_F3]) ad->fpsModeFixed = true;
 
 			if(input->keysPressed[KEYCODE_F3]) {
 				input->mouseButtonPressed[1] = false;
@@ -1148,9 +1245,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 				GetCursorPos(&ws->lastMousePosition);
 			}
 		} else {
-			// if(input->keysPressed[KEYCODE_F3] || 
-			   // (input->mouseButtonReleased[1] && !ad->fpsModeFixed)) {
-				// if(input->keysPressed[KEYCODE_F3]) ad->fpsModeFixed = false;
 
 			if(input->keysPressed[KEYCODE_F3]) {
 				ad->captureMouse = false;
@@ -1176,13 +1270,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// @AppLoop.
 
 	// @GameMenu.
-
-	if(input->keysPressed[KEYCODE_U]) {
-		// addTrack("footsteps\\water1.wav", 1.0f);
-		// addTrack("footsteps\\dirst1.wav", 1.0f);
-		// addTrack("ui\\select.wav", 1);
-		addTrack("aphex.wav", 1);
-	}
 
 	if(ad->gameMode == GAME_MODE_MENU) {
 		globalCommandList = &ad->commandList2d;
@@ -1213,10 +1300,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 		float buttonAnimSpeed = 4;
 
 		float optionOffset = optionFontHeight*1.2f;
-		float settingsOffset = rWidth * 0.15f;
+		float settingsOffset = 0.15f;
 
 
 		MainMenu* menu = &ad->menu;
+		menuSetInput(menu, input);
 
 		float volumeMid = ad->volumeMenu;
 
@@ -1254,7 +1342,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 			menu->cOptionShadow = cOptionShadow;
 			menu->cOptionShadowActive = cOptionShadowActive;
 			menu->optionShadowSize = optionShadowSize;
-			menu->pressedEnter = input->keysPressed[KEYCODE_RETURN];
 		}
 
 		dcRect(sr, cBackground);
@@ -1262,7 +1349,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		if(menu->screen == MENU_SCREEN_MAIN) {
 
 			Vec2 p = top - vec2(0, rHeight*0.2f);
-			dcText("Voxel Game", titleFont, p, cTitle, vec2i(0,0), 0, titleShadowSize, cTitleShadow);
+			dcText("Voxel Demo", titleFont, p, cTitle, vec2i(0,0), 0, titleShadowSize, cTitleShadow);
 
 			bool gameRunning = menu->gameRunning;
 
@@ -1301,26 +1388,83 @@ extern "C" APPMAINFUNCTION(appMain) {
 		} else if(menu->screen == MENU_SCREEN_SETTINGS) {
 
 			Vec2 p = top - vec2(0, rHeight*0.2f);
+			Vec2 pos;
+			float leftX = rWidth * settingsOffset;
+			float rightX = rWidth * (1-settingsOffset);
+
 			dcText("Settings", titleFont, p, cTitle, vec2i(0,0), 0, titleShadowSize, cTitleShadow);
 
-			int optionCount = 4;
+			int optionCount = 7;
 			p.y = rectCen(sr).y + ((optionCount-1)*optionOffset)/2;
+
 
 			// List settings.
 
-			p.x = settingsOffset;
-			if(menuOption(menu, "Field of view", p, vec2i(-1,0))) {
+			GameSettings* settings = &ad->settings;
+			VoxelWorldSettings* voxelSettings = &ad->voxelSettings;
+
+
+
+			p.x = leftX;
+			menuOption(menu, "Fullscreen", p, vec2i(-1,0));
+			
+			bool tempBool = ws->fullscreen;
+			if(menuOptionBool(menu, vec2(rightX, p.y), &tempBool)) {
+				if(ws->fullscreen) setWindowMode(windowHandle, ws, WINDOW_MODE_WINDOWED);
+				else setWindowMode(windowHandle, ws, WINDOW_MODE_FULLBORDERLESS);
 			}
+
+			//
+
+			p.y -= optionOffset; p.x = leftX;
+			menuOption(menu, "VSync", p, vec2i(-1,0));
+
+			menuOptionBool(menu, vec2(rightX, p.y), &ws->vsync);
+
+			//
+
+			p.y -= optionOffset; p.x = leftX;
+			menuOption(menu, "Resolution Scale", p, vec2i(-1,0));
+
+			if(menuOptionSliderFloat(menu, vec2(rightX, p.y), &ad->resolutionScale, 0.2f, 1, 0.1f, 1)) {
+				ad->updateFrameBuffers = true;
+			}
+
+			//
+
+			p.y -= optionOffset; p.x = leftX;
+			menuOption(menu, "Volume", p, vec2i(-1,0));
+
+			menuOptionSliderFloat(menu, vec2(rightX, p.y), &ad->audioState.masterVolume, 0.0f, 1, 0.1f, 1);
+
+			//
+
+			p.y -= optionOffset; p.x = leftX;
+			menuOption(menu, "Mouse Sensitivity", p, vec2i(-1,0));
+
+			menuOptionSliderFloat(menu, vec2(rightX, p.y), &ad->mouseSensitivity, 0.01f, 2, 0.01f, 2);
+
+			//
+
+			p.y -= optionOffset; p.x = leftX;
+			menuOption(menu, "Field of View", p, vec2i(-1,0));
+
+			menuOptionSliderInt(menu, vec2(rightX, p.y), &ad->fieldOfView, 20, 90, 1);
+
+			//
 
 			p.y -= optionOffset;
-			if(menuOption(menu, "Resolution", p, vec2i(-1,0))) {
-			}
+
+			// Game specific.
+
+			p.y -= optionOffset; p.x = leftX;
+			menuOption(menu, "View Distance", p, vec2i(-1,0));
+
+			menuOptionSliderInt(menu, vec2(rightX, p.y), &voxelSettings->viewDistance, 2, 32, 1);
+
+			//
 
 			p.y -= optionOffset;
-			if(menuOption(menu, "Mouse Sensitivity", p, vec2i(-1,0))) {
-			}
-
-			// 
 
 			p.x = rWidth * 0.5f;
 			p.y -= optionOffset;
@@ -1360,22 +1504,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			// Pre work.
 			{
 				ad->blockMenuSelected = 0;
-
-				// Clear voxel hash and meshes.
-				{
-					// DArray<int>* voxelHash = ad->voxelData.voxelHash;
-					VoxelArray* voxelHash = ad->voxelData.voxelHash;
-					for(int i = 0; i < ad->voxelData.voxelHashSize; i++) {
-						voxelHash[i].count = 0;
-					}
-
-					DArray<VoxelMesh>* voxels = &ad->voxelData.voxels;
-					for(int i = 0; i < voxels->count; i++) {
-						freeVoxelMesh(voxels->data + i);
-					}
-
-					voxels->clear();
-				}
+				resetVoxelHashAndMeshes(&ad->voxelData);
 			}
 
 			// Load game.
@@ -1512,6 +1641,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	}
 
+
 	if(ad->gameMode == GAME_MODE_MAIN) {
 
 	if(input->keysPressed[KEYCODE_ESCAPE]) {
@@ -1613,7 +1743,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				float speed = 30;
 
 				if((!ad->fpsMode && input->mouseButtonDown[1]) || ad->fpsMode) {
-					float turnRate = ad->dt*ad->settings.mouseSensitivity;
+					float turnRate = ad->mouseSensitivity * 0.01f;
 					e->rot.y -= turnRate * input->mouseDelta.y;
 					e->rot.x -= turnRate * input->mouseDelta.x;
 
@@ -1716,7 +1846,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 								}
 							}
 
-							float error = 0.0001f;
+							float error = 0.001f;
 								// float error = 0;
 							nPos += dir*(-minDistance + error);
 
@@ -1851,7 +1981,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				if(input->keysDown[KEYCODE_T]) speed = 1000;
 
 				if((!ad->fpsMode && input->mouseButtonDown[1]) || ad->fpsMode) {
-					float turnRate = ad->dt*ad->settings.mouseSensitivity;
+					float turnRate = ad->mouseSensitivity * 0.01f;
 					e->rot.y -= turnRate * input->mouseDelta.y;
 					e->rot.x -= turnRate * input->mouseDelta.x;
 
@@ -2224,51 +2354,19 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// Draw cubemap.
 	{
-		bindShader(SHADER_CUBEMAP);
-		glBindTextures(0, 1, &getCubemap(ad->skyBoxId)->id);
-		glBindSamplers(0, 1, gs->samplers);
-
-		Vec3 skyBoxRot;
-		if(ad->playerMode) skyBoxRot = ad->player->rot;
-		else skyBoxRot = ad->cameraEntity->rot;
-		skyBoxRot.x += M_PI;
-
-		Camera skyBoxCam = getCamData(vec3(0,0,0), skyBoxRot, vec3(0,0,0), vec3(0,1,0), vec3(0,0,1));
-		pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_VIEW, viewMatrix(skyBoxCam.pos, -skyBoxCam.look, skyBoxCam.up, skyBoxCam.right));
-		pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_PROJ, projMatrix(degreeToRadian(ad->fieldOfView), ad->aspectRatio, 0.001f, 2));
-		pushUniform(SHADER_CUBEMAP, 2, CUBEMAP_UNIFORM_CLIPPLANE, false);
-		pushUniform(SHADER_CUBEMAP, 2, CUBEMAP_UNIFORM_FOGCOLOR, ad->voxelSettings.fogColor);
-
-		glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
-		glDepthMask(false);
-		glFrontFace(GL_CCW);
-			glDrawArrays(GL_TRIANGLES, 0, 6*6);
-		glFrontFace(GL_CW);
-		glDepthMask(true);
-		glDisable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+		drawCubeMap(ad->skyBoxId, ad->player, ad->cameraEntity, ad->playerMode, ad->fieldOfView, ad->aspectRatio, &ad->voxelSettings, false);
 	}
 
 	if(ad->reloadWorld) {
 		ad->reloadWorld = false;
 
-		if(threadQueueFinished(threadQueue)) {
-			int radius = ad->voxelSettings.viewDistance;
+		threadQueueComplete(threadQueue);
 
-			Vec3 pp = ad->activeCam.pos;
-			Vec2i worldPos = coordToMesh(pp);
+		ad->blockMenuSelected = 0;
 
-			for(int y = worldPos.y-radius; y < worldPos.y+radius; y++) {
-				for(int x = worldPos.x-radius; x < worldPos.x+radius; x++) {
-					Vec2i coord = vec2i(x, y);
-					VoxelMesh* m = getVoxelMesh(&ad->voxelData, coord);
-					m->upToDate = false;
-					m->uploaded = false;
-					m->generated = false;
+		resetVoxelHashAndMeshes(&ad->voxelData);
 
-					makeMesh(m, &ad->voxelData, &ad->voxelSettings);
-				}
-			}
-		} 
+		for(int i = 0; i < ad->entityList.size; i++) ad->entityList.e[i].init = false;
 	}
 
 	TIMER_BLOCK_BEGIN_NAMED(world, "Upd World");
@@ -2287,8 +2385,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->voxelDrawCount = 0;
 
 		Vec2i pPos = coordToMesh(ad->activeCam.pos);
-		// int radius = VIEW_DISTANCE;
-		int radius = vs->storeDistance + vs->storeSize;
+		int storeDistance = (vs->viewDistance + vs->storeDistanceOffset);
+		int radius = storeDistance + vs->storeSize;
 
 		// generate the meshes around the player in a spiral by drawing lines and rotating
 		// the directing every time we reach a corner
@@ -2319,7 +2417,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 				// Throw away coordinates outside store circle.
 				float distance = lenVec2(vec2(coord - pPos));
-				if((distance >= vs->storeDistance) && distance <= (vs->storeDistance+vs->storeSize)) {
+				if((distance >= storeDistance) && distance <= (storeDistance + vs->storeSize)) {
 
 					VoxelMesh* mesh = getVoxelMesh(&ad->voxelData, coord, false);
 					if(mesh && !mesh->stored && mesh->generated && !mesh->activeMaking) {
@@ -2359,15 +2457,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 				Vec3 cu = ad->activeCam.up;
 				Vec3 cr = ad->activeCam.right;
 
-				float ar = ad->aspectRatio;
-				float fov = degreeToRadian(ad->fieldOfView);
-				// float ne = ad->nearPlane;
-				// float fa = ad->farPlane;
+				float aspect = (ws->currentRes.x / (float)ws->currentRes.y);
+				float fovV = degreeToRadian(ad->fieldOfView);
+				float fovH = degreeToRadian(ad->fieldOfView) * aspect;
 
-				Vec3 left = rotateVec3(cl, fov*ar, cu);
-				Vec3 right = rotateVec3(cl, -fov*ar, cu);
-				Vec3 top = rotateVec3(cl, fov, cr);
-				Vec3 bottom = rotateVec3(cl, -fov, cr);
+				Vec3 left =   rotateVec3(cl,  fovH * 0.5f, cu);
+				Vec3 right =  rotateVec3(cl, -fovH * 0.5f, cu);
+				Vec3 top =    rotateVec3(cl,  fovV * 0.5f, cr);
+				Vec3 bottom = rotateVec3(cl, -fovV * 0.5f, cr);
 
 				Vec3 normalLeftPlane = cross(cu, left);
 				Vec3 normalRightPlane = cross(right, cu);
@@ -2444,34 +2541,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 	}
 
-	// // Store chunks that are in store region.
-	// {
-	// 	Vec2i playerPos = coordToMesh(ad->activeCam.pos);
-
-	// 	int dist = STORE_DISTANCE;
-	// 	Vec2i startPos = vec2i(dist, dist);
-	// 	Vec2i dir = vec2i(0,-1);
-	// 	Vec2i pos = startPos;
-	// 	do {
-	// 		VoxelMesh* mesh = getVoxelMesh(&ad->voxelData, playerPos + pos, false);
-	// 		if(mesh && !mesh->stored) {
-	// 			if(!mesh->compressionStep) {
-	// 				if(!mesh->activeStoring && !threadQueueFull(theThreadQueue)) {
-	// 					atomicAdd(&mesh->activeStoring);
-	// 					threadQueueAdd(theThreadQueue, storeMeshThreaded, mesh);
-	// 				}
-	// 			} else {
-	// 				freeVoxelMesh(mesh);
-	// 				mesh->compressionStep = false;
-	// 				mesh->stored = true;
-	// 			}
-	// 		}
-
-	// 		pos += dir;
-	// 		if(abs(pos.x) == dist && abs(pos.y) == dist) dir = vec2i(dir.y, -dir.x);
-	// 	} while(pos != startPos);
-	// }
-
 	// Store chunks that are in store region.
 	// if(false)
 	// {
@@ -2514,12 +2583,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	TIMER_BLOCK_END(world);
 
-	// {
-	// 	dcDisable(STATE_DEPTH_TEST);
-	// 	dcCube(vec3(0,0,0), vec3(1000000,1000000,0.1), vec4(1,0,0,1));
-	// 	dcEnable(STATE_DEPTH_TEST);
-	// }
-
 	TIMER_BLOCK_BEGIN_NAMED(worldDraw, "Draw World");
 
 	// Draw voxel world and reflection.
@@ -2528,8 +2591,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		int waterLevelHeight = vs->waterLevelHeight;
 
 		setupVoxelUniforms(ad->activeCam.pos, view, proj, vs->fogColor.rgb, vs->viewDistance);
-		// setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, voxelFogColor.rgb);
-		// setupVoxelUniforms(vec4(ad->activeCam.pos, 1), 0, 1, 2, view, proj, voxelFogColor.rgb, vec3(0,0,waterLevelHeight*2 + 0.01f), vec3(1,1,-1));
 
 		// TIMER_BLOCK_NAMED("D World");
 		// draw world without water
@@ -2585,35 +2646,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 			glEnable(GL_CLIP_DISTANCE0);
 			// glEnable(GL_CLIP_DISTANCE1);
 			glEnable(GL_DEPTH_TEST);
+
+			drawCubeMap(ad->skyBoxId, ad->player, ad->cameraEntity, ad->playerMode, ad->fieldOfView, ad->aspectRatio, &ad->voxelSettings, true);
+
 			glFrontFace(GL_CCW);
-
-				// draw cubemap reflection
-				bindShader(SHADER_CUBEMAP);
-				glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
-				glBindTextures(0, 1, &getCubemap(ad->skyBoxId)->id);
-				glBindSamplers(0, 1, gs->samplers);
-
-				Vec3 skyBoxRot;
-				if(ad->playerMode) skyBoxRot = ad->player->rot;
-				else skyBoxRot = ad->cameraEntity->rot;
-				skyBoxRot.x += M_PI;
-
-				Camera skyBoxCam = getCamData(vec3(0,0,0), skyBoxRot, vec3(0,0,0), vec3(0,1,0), vec3(0,0,1));
-
-				Mat4 viewMat; viewMatrix(&viewMat, skyBoxCam.pos, -skyBoxCam.look, skyBoxCam.up, skyBoxCam.right);
-				Mat4 projMat; projMatrix(&projMat, degreeToRadian(ad->fieldOfView), ad->aspectRatio, 0.001f, 2);
-				pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_VIEW, viewMat.e);
-				pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_PROJ, projMat.e);
-
-				pushUniform(SHADER_CUBEMAP, 2, CUBEMAP_UNIFORM_CLIPPLANE, true);
-				pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_CPLANE1, 0,0,-1,waterLevelHeight);
-
-				glDepthMask(false);
-				// glFrontFace(GL_CCW);
-				glDrawArrays(GL_TRIANGLES, 0, 6*6);
-				// glFrontFace(GL_CW);
-				glDepthMask(true);
-				glDisable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 
 			setupVoxelUniforms(ad->activeCam.pos, view, proj, vs->fogColor.rgb, vs->viewDistance, vec3(0,0,waterLevelHeight*2 + 0.01f), vec3(1,1,-1));
 			pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_CLIPPLANE, true);
@@ -2636,38 +2672,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		// draw reflection texture	
 		{ 
-			// 	// glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-			// 	// glBlendFunc(GL_SRC_COLOR, GL_ONE);
-			// 	// glBlendFunc(GL_SRC_COLOR, GL_ONE_MINUS_SRC_ALPHA);
-			// 	// glBlendFunc(GL_DST_COLOR, GL_ZERO);
-			// 	// glBlendFunc(GL_SRC_COLOR, GL_ONE);
-
-			// 	// glBlendFunc(GL_DST_COLOR, GL_ZERO);
-			// 	// glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
-			// 	// glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
-
-			// 	// glBlendFunc(GL_ONE, GL_DST_COLOR);
-			// 	// glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
-			// 	// glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
-
-			// 	// GL_DST_COLOR, GL_ZERO
-
-			// 	// void glBlendFuncSeparate(	GLenum srcRGB,
-			// 	//  	GLenum dstRGB,
-			// 	//  	GLenum srcAlpha,
-			// 	//  	GLenum dstAlpha);
-
-			// // glBlendFuncSeparate(GL_ONE_MINUS_DST_COLOR, GL_ZERO, GL_ONE, GL_ONE);
-			// // glBlendFuncSeparate(GL_ONE_MINUS_DST_COLOR, GL_ZERO, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-			// glBlendFuncSeparate(GL_ONE_MINUS_DST_COLOR, GL_ZEROd, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-
-			// 	glBlendEquation(GL_FUNC_ADD);
-			// 	// glBlendEquation(GL_FUNC_SUBTRACT);
-			// 	// glBlendEquation(GL_FUNC_REVERSE_SUBTRACT);
-			// 	// glBlendEquation(GL_MIN);
-			// 	// glBlendEquation(GL_MAX);
-
 			bindFrameBuffer(FRAMEBUFFER_3dMsaa);
 			glDisable(GL_DEPTH_TEST);
 
@@ -2676,9 +2680,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 			         getFrameBuffer(FRAMEBUFFER_Reflection)->colorSlot[0]->id);
 
 			glEnable(GL_DEPTH_TEST);
-
-			// 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-			// 	glBlendEquation(GL_FUNC_ADD);
 		}
 
 		// draw water
@@ -2731,9 +2732,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 	if(ad->playerMode) {
 		globalCommandList = &ad->commandList2d;
 
-		for(int i = 0; i < 10; i++) {
-			ad->blockMenu[i] = i+1;
-		}
+		int blocks[] = {BT_Sand, BT_Ground, BT_Stone, BT_Snow, 
+						BT_Glass, BT_GlowStone, BT_Pumpkin};
+		int count = arrayCount(blocks);
+		for(int i = 0; i < count; i++) ad->blockMenu[i] = blocks[i];
 
 		Vec2 res = vec2(ws->currentRes);
 		float bottom = 0.950f;
@@ -2741,8 +2743,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		float dist = 0.5f;
 		Vec2 iconSize = vec2(size * res.h);
 		float iconDist = iconSize.w * dist;
-			// int count = arrayCount(ad->blockMenu);
-		int count = 10;
 
 		float selectColor = 1.5f;
 		float trans = 0.8f;
@@ -2757,11 +2757,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 			}
 
 			Vec2 pos = vec2(start + i*(iconSize.w + iconDist), -res.y*bottom);
-			// dcRect({rectCenDim(pos, iconSize*1.2f*iconOff), rect(0,0,1,1), vec4(vec3(0.1f),trans), 1});
 			dcRect(rectCenDim(pos, iconSize*1.2f*iconOff), rect(0,0,1,1), vec4(0,0,0,0.85f), 1);
 
 			uint textureId = gs->textures3d[0].id;
-			dcRect(rectCenDim(pos, iconSize*iconOff), rect(0,0,1,1), color, (int)textureId, texture1Faces[i+1][0]+1);
+			uint voxelTextureIndex = texture1Faces[blocks[i]][0]+1;
+			dcRect(rectCenDim(pos, iconSize*iconOff), rect(0,0,1,1), color, (int)textureId, voxelTextureIndex);
 		}
 
 		globalCommandList = &ad->commandList3d;
@@ -2775,25 +2775,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		float v = ad->startFade;
 
 		ad->startFade += ad->dt / 3.0f;
-
-		// float p = 0.25f;
-
-		// float r[] = {0, 0.3f, 0.9, 1};
-		// int stage = 0;
-		// for(int i = 0; i < arrayCount(r); i++) {
-		// 	if(v >= r[i] && v < r[i+1]) { stage = i; break; }
-		// }
-
-		// float a = 0;
-		// if(stage == 0) {
-		// 	a = 1;
-		// } else if(stage == 1) {
-		// 	a = mapRange(v, r[stage], r[stage+1], 1, 0.1f);
-		// 	a = powf(a, p);
-		// } else if(stage == 2) {
-		// 	float s = powf(0.1f, p);
-		// 	a = mapRange(v, r[stage], r[stage+1], s, 0);
-		// }
 
 		float r[] = {0, 0.3f, 1};
 		int stage = 0;
@@ -2813,6 +2794,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 	// Particle test.
+	#if 0
 	if(false)
 	{
 		bindShader(SHADER_CUBE);
@@ -3059,9 +3041,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		#endif 
 	}
+	#endif
 
 	}
 
+	#if 0
 	if(false)
 	{
 		VoxelData* vd = &ad->voxelData;
@@ -3105,14 +3089,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		dcState(STATE_POLYGONMODE, POLYGON_MODE_FILL);
 	}
+	#endif
 
 	endOfMainLabel:
 
 	// Update Audio.
 	{
 		AudioState* as = &ad->audioState;
-
-		as->masterVolume = 0.4f;
 
 		int framesPerFrame = ad->dt * as->waveFormat->nSamplesPerSec * as->latency;
 
@@ -3125,6 +3108,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// printf("%i %i %i %i\n", numFramesAvailable, numFramesPadding, as->bufferFrameCount, framesToPush);
 
 		// numFramesPadding = framesPerFrame;
+		// framesPerFrame = framesToPush;
 
 		// if(framesPerFrame && framesToPush > 0) 
 		if(framesPerFrame) 
@@ -3322,8 +3306,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// debugUpdatePlayback(ds, appMemory);
 
 	// Save game.
-	// if(*isRunning == false)
-	if(false)
+	if(*isRunning == false)
 	{
 		threadQueueComplete(theThreadQueue);
 
@@ -3397,6 +3380,23 @@ extern "C" APPMAINFUNCTION(appMain) {
 		printf("%f %f\n", dt, dt2);
 	}
 
+	// Save game settings.
+	if(*isRunning == false) {
+		GameSettings settings = {};
+		settings.fullscreen = ws->fullscreen;
+		settings.vsync = ws->vsync;
+		settings.resolutionScale = ad->resolutionScale;
+		settings.volume = ad->audioState.masterVolume;
+		settings.mouseSensitivity = ad->mouseSensitivity;
+		settings.fieldOfView = ad->fieldOfView;
+		settings.viewDistance = ad->voxelSettings.viewDistance;
+
+		char* file = Game_Settings_File;
+		if(fileExists(file)) {
+			writeDataToFile((char*)&settings, sizeof(GameSettings), file);
+		}
+	}
+
 	// @AppSessionWrite
 	if(*isRunning == false) {
 		Rect windowRect = getWindowWindowRect(sd->windowHandle);
@@ -3411,12 +3411,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// @AppEnd.
 }
 
-
-#if 0
 void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, bool* isRunning, bool init, ThreadQueue* threadQueue) {
 	// @DebugStart.
 
-	globalMemory->debugMode = true;
+	theMemory->debugMode = true;
 
 	timerStart(&ds->tempTimer);
 
@@ -3426,7 +3424,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 	clearTMemoryDebug();
 
 	ExtendibleMemoryArray* debugMemory = &appMemory->extendibleMemoryArrays[1];
-	ExtendibleMemoryArray* pMemory = globalMemory->pMemory;
+	ExtendibleMemoryArray* pMemory = theMemory->pMemory;
 
 	int clSize = megaBytes(2);
 	drawCommandListInit(&ds->commandListDebug, (char*)getTMemoryDebug(clSize), clSize);
@@ -3552,1188 +3550,13 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 		static bool sectionSettings = initSections;
 		if(gui->beginSection("Settings", &sectionSettings)) {
-			gui->div(vec2(0,0)); if(gui->button("Compile")) shellExecute("C:\\Projects\\Hmm\\code\\buildWin32.bat");
-								 if(gui->button("Up Buffers")) ad->updateFrameBuffers = true;
+			if(gui->button("Update Buffers")) ad->updateFrameBuffers = true;
 			gui->div(vec2(0,0)); gui->label("FoV", 0); gui->slider(&ad->fieldOfView, 1, 180);
 			gui->div(vec2(0,0)); gui->label("MSAA", 0); gui->slider(&ad->msaaSamples, 1, 8);
-			gui->switcher("Native Res", &ad->useNativeRes);
-			gui->div(0,0,0); gui->label("FboRes", 0); gui->slider(&ad->fboRes.x, 150, ad->cur3dBufferRes.x); gui->slider(&ad->fboRes.y, 150, ad->cur3dBufferRes.y);
 			gui->div(0,0,0); gui->label("NFPlane", 0); gui->slider(&ad->nearPlane, 0.01, 2); gui->slider(&ad->farPlane, 1000, 5000);
 		} gui->endSection();
 
-		static bool sectionEntities = true;
-		if(gui->beginSection("Entities", &sectionEntities)) { 
-
-
-			// EntityList* list = &ad->entityList;
-			// for(int i = 0; i < list->size; i++) {
-			// 	Entity* e = list->e + i;
-
-			// 	if(e->init) {
-			// 		gui->label(fillString("Id: %i", e->id), 0);
-			// 		gui->startPos.x += 30;
-			// 		gui->panelWidth -= 30;
-
-			// 		float tw = 150;
-
-			// 		gui->div(vec2(tw,0)); gui->label("init", 0);           gui->textBoxInt(&e->init);
-			// 		gui->div(vec2(tw,0)); gui->label("type", 0);           gui->textBoxInt(&e->type);
-			// 		gui->div(vec2(tw,0)); gui->label("id", 0);             gui->textBoxInt(&e->id);
-			// 		gui->div(vec2(tw,0)); gui->label("name", 0);           gui->textBoxChar(e->name);
-
-			// 		#define TEDIT_VEC3(name) gui->textBoxFloat(&name.x); gui->textBoxFloat(&name.y); gui->textBoxFloat(&name.z);
-
-			// 		gui->div(tw,0,0,0); gui->label("pos", 0);            TEDIT_VEC3(e->pos);
-			// 		gui->div(tw,0,0,0); gui->label("dir", 0);            TEDIT_VEC3(e->dir);
-			// 		gui->div(tw,0,0,0); gui->label("rot", 0);            TEDIT_VEC3(e->rot);
-			// 		gui->div(vec2(tw,0)); gui->label("rotAngle", 0);     gui->textBoxFloat(&e->rotAngle);
-			// 		gui->div(tw,0,0,0); gui->label("dim", 0);            TEDIT_VEC3(e->dim);
-			// 		gui->div(tw,0,0,0); gui->label("camOff", 0);         TEDIT_VEC3(e->camOff);
-			// 		gui->div(tw,0,0,0); gui->label("vel", 0);            TEDIT_VEC3(e->vel);
-			// 		gui->div(tw,0,0,0); gui->label("acc", 0);            TEDIT_VEC3(e->acc);
-
-			// 		gui->div(vec2(tw,0)); gui->label("movementType", 0);   gui->textBoxInt(&e->movementType);
-			// 		gui->div(vec2(tw,0)); gui->label("spatial", 0);        gui->textBoxInt(&e->spatial);
-
-			// 		gui->div(vec2(tw,0)); gui->label("deleted", 0);        gui->switcher("deleted", &e->deleted);
-			// 		gui->div(vec2(tw,0)); gui->label("isMoving", 0);       gui->switcher("isMoving", &e->isMoving);
-			// 		gui->div(vec2(tw,0)); gui->label("isColliding", 0);    gui->switcher("isColliding", &e->isColliding);
-			// 		gui->div(vec2(tw,0)); gui->label("exploded", 0);       gui->switcher("exploded", &e->exploded);
-			// 		gui->div(vec2(tw,0)); gui->label("playerOnGround", 0); gui->switcher("playerOnGround", &e->playerOnGround);
-
-			// 		gui->startPos.x -= 30;
-			// 		gui->panelWidth += 30;
-			// 	}
-			// }
-
-			// entityStructMemberInfos[];
-
-
-
-			EntityList* list = &ad->entityList;
-			for(int i = 0; i < list->size; i++) {
-				Entity* e = list->e + i;
-
-				if(e->init) {
-					guiPrintIntrospection(gui, STRUCTTYPE_ENTITY, (char*)e);
-				}
-			}
-
-
-		} gui->endSection();
-
-		addDebugInfo(fillString("%i", ad->entityList.size));
-
-		static bool sectionWorld = initSections;
-		if(gui->beginSection("World", &sectionWorld)) { 
-			if(gui->button("Reload World") || input->keysPressed[KEYCODE_TAB]) ad->reloadWorld = true;
-			
-			gui->div(vec2(0,0)); gui->label("RefAlpha", 0); gui->slider(&reflectionAlpha, 0, 1);
-			gui->div(vec2(0,0)); gui->label("Light", 0); gui->slider(&globalLumen, 0, 255);
-			gui->div(0,0,0); gui->label("MinMax", 0); gui->slider(&WORLD_MIN, 0, 255); gui->slider(&WORLD_MAX, 0, 255);
-			gui->div(vec2(0,0)); gui->label("WaterLevel", 0); 
-				if(gui->slider(&waterLevelValue, 0, 0.2f)) waterLevelHeight = lerp(waterLevelValue, WORLD_MIN, WORLD_MAX);
-
-			gui->div(vec2(0,0)); gui->label("WFreq", 0); gui->slider(&worldFreq, 0.0001f, 0.02f);
-			gui->div(vec2(0,0)); gui->label("WDepth", 0); gui->slider(&worldDepth, 1, 10);
-			gui->div(vec2(0,0)); gui->label("MFreq", 0); gui->slider(&modFreq, 0.001f, 0.1f);
-			gui->div(vec2(0,0)); gui->label("MDepth", 0); gui->slider(&modDepth, 1, 10);
-			gui->div(vec2(0,0)); gui->label("MOffset", 0); gui->slider(&modOffset, 0, 1);
-			gui->div(vec2(0,0)); gui->label("PowCurve", 0); gui->slider(&worldPowCurve, 1, 6);
-			gui->div(0,0,0,0); gui->slider(heightLevels+0,0,1); gui->slider(heightLevels+1,0,1);
-								  gui->slider(heightLevels+2,0,1); gui->slider(heightLevels+3,0,1);
-		} gui->endSection();
-
-		static bool sectionTest = false;
-		if(gui->beginSection("Test", &sectionTest)) {
-			static int scrollHeight = 200;
-			static int scrollElements = 13;
-			static float scrollVal = 0;
-			gui->div(vec2(0,0)); gui->slider(&scrollHeight, 0, 2000); gui->slider(&scrollElements, 0, 100);
-
-			gui->beginScroll(scrollHeight, &scrollVal); {
-				for(int i = 0; i < scrollElements; i++) {
-					gui->button(fillString("Element: %i.", i));
-				}
-			} gui->endScroll();
-
-			static int textCapacity = 50;
-			static char* text = getPArray(char, textCapacity);
-			static bool DOIT = true;
-			if(DOIT) {
-				DOIT = false;
-				strClear(text);
-				strCpy(text, "This is a really long sentence!");
-			}
-			gui->div(vec2(0,0)); gui->label("Text Box:", 0); gui->textBoxChar(text, 0, textCapacity);
-
-			static int textNumber = 1234;
-			gui->div(vec2(0,0)); gui->label("Int Box:", 0); gui->textBoxInt(&textNumber);
-
-			static float textFloat = 123.456f;
-			gui->div(vec2(0,0)); gui->label("Float Box:", 0); gui->textBoxFloat(&textFloat);
-
-		} gui->endSection();
-
-		gui->end();
-	}
-
-	ds->timer->timerInfoCount = __COUNTER__;
-
-	int fontHeight = 18;
-	Timer* timer = ds->timer;
-	int cycleCount = arrayCount(ds->timings);
-
-	bool threadsFinished = threadQueueFinished(threadQueue);
-
-	int bufferIndex = timer->bufferIndex;
-
-	// Save const strings from initialised timerinfos.
-	{
-		int timerCount = timer->timerInfoCount;
-		for(int i = 0; i < timerCount; i++) {
-			TimerInfo* info = timer->timerInfos + i;
-
-			// Set colors.
-			float ss = i%(timerCount/2) / ((float)timerCount/2);
-			float h = i < timerCount/2 ? 0.1f : -0.1f;
-			Vec3 color = vec3(0,0,0);
-			hslToRgb(color.e, 360*ss, 0.5f, 0.5f+h);
-
-			vSet3(info->color, color.r, color.g, color.b);
-
-
-			if(!info->initialised || info->stringsSaved) continue;
-			char* s;
-			
-			s = info->file;
-			info->file = getPStringDebug(strLen(s) + 1);
-			strCpy(info->file, s);
-
-			s = info->function;
-			info->function = getPStringDebug(strLen(s) + 1);
-			strCpy(info->function, s);
-
-			s = info->name;
-			info->name = getPStringDebug(strLen(s) + 1);
-			strCpy(info->name, s);
-
-			info->stringsSaved = true;
-		}
-	}
-
-	if(ds->setPause) {
-		ds->lastCycleIndex = ds->cycleIndex;
-		ds->cycleIndex = mod(ds->cycleIndex-1, arrayCount(ds->timings));
-
-		ds->timelineCamSize = -1;
-		ds->timelineCamPos = -1;
-
-		ds->setPause = false;
-	}
-	if(ds->setPlay) {
-		ds->cycleIndex = ds->lastCycleIndex;
-		ds->setPlay = false;
-	}
-
-	Timings* timings = ds->timings[ds->cycleIndex];
-	Statistic* statistics = ds->statistics[ds->cycleIndex];
-
-	int cycleIndex = ds->cycleIndex;
-	int newCycleIndex = (ds->cycleIndex + 1)%cycleCount;
-
-	// Timer update.
-	{
-
-		if(!ds->noCollating) {
-			zeroMemory(timings, timer->timerInfoCount*sizeof(Timings));
-			zeroMemory(statistics, timer->timerInfoCount*sizeof(Statistic));
-
-			ds->cycleIndex = newCycleIndex;
-
-			// Collate timing buffer.
-
-			// for(int threadIndex = 0; threadIndex < threadQueue->threadCount; threadIndex++) 
-			{
-				// GraphSlot* graphSlots = ds->graphSlots[threadIndex];
-				// int index = ds->graphSlotCount[threadIndex];
-
-				for(int i = ds->lastBufferIndex; i < bufferIndex; ++i) {
-					TimerSlot* slot = timer->timerBuffer + i;
-					
-					int threadIndex = threadIdToIndex(threadQueue, slot->threadId);
-
-					if(slot->type == TIMER_TYPE_BEGIN) {
-						int index = ds->graphSlotCount[threadIndex];
-
-						GraphSlot graphSlot;
-						graphSlot.threadIndex = threadIndex;
-						graphSlot.timerIndex = slot->timerIndex;
-						graphSlot.stackIndex = index;
-						graphSlot.cycles = slot->cycles;
-						ds->graphSlots[threadIndex][index] = graphSlot;
-
-						ds->graphSlotCount[threadIndex]++;
-					} else {
-						ds->graphSlotCount[threadIndex]--;
-						int index = ds->graphSlotCount[threadIndex];
-						if(index < 0) index = 0; // @Hack, to keep things running.
-
-						ds->graphSlots[threadIndex][index].size = slot->cycles - ds->graphSlots[threadIndex][index].cycles;
-						ds->savedBuffer[ds->savedBufferIndex] = ds->graphSlots[threadIndex][index];
-						ds->savedBufferIndex = (ds->savedBufferIndex+1)%ds->savedBufferMax;
-						ds->savedBufferCount = clampMax(ds->savedBufferCount + 1, ds->savedBufferMax);
-
-
-						Timings* timing = timings + ds->graphSlots[threadIndex][index].timerIndex;
-						timing->cycles += ds->graphSlots[threadIndex][index].size;
-						timing->hits++;
-					}
-				}
-
-				// ds->graphSlotCount[threadIndex] = index;
-			}
-
-			// ds->savedBufferCounts[cycleIndex] = savedBufferCount;
-
-			for(int i = 0; i < timer->timerInfoCount; i++) {
-				Timings* t = timings + i;
-				t->cyclesOverHits = t->hits > 0 ? (u64)(t->cycles/t->hits) : 0; 
-			}
-
-			for(int timerIndex = 0; timerIndex < timer->timerInfoCount; timerIndex++) {
-				Statistic* stat = statistics + timerIndex;
-				beginStatistic(stat);
-
-				for(int i = 0; i < arrayCount(ds->timings); i++) {
-					Timings* t = &ds->timings[i][timerIndex];
-					if(t->hits == 0) continue;
-
-					updateStatistic(stat, t->cyclesOverHits);
-				}
-
-				endStatistic(stat);
-				if(stat->count == 0) stat->avg = 0;
-			}
-		}
-	}
-
-	ds->lastBufferIndex = bufferIndex;
-
-	if(threadsFinished) {
-		timer->bufferIndex = 0;
-		ds->lastBufferIndex = 0;
-	}
-
-	assert(timer->bufferIndex < timer->bufferSize);
-
-	if(init) {
-		ds->lineGraphCamSize = 700000;
-		ds->lineGraphCamPos = 0;
-		ds->mode = 0;
-		ds->lineGraphHeight = 30;
-		ds->lineGraphHighlight = 0;
-	}
-
-	//
-	// Draw timing info.
-	//
-
-	if(ds->showStats) 
-	{
-		static int highlightedIndex = -1;
-		Vec4 highlightColor = vec4(1,1,1,0.05f);
-
-		// float cyclesPerFrame = (float)((3.5f*((float)1/60))*1024*1024*1024);
-		float cyclesPerFrame = (float)((3.5f*((float)1/60))*1000*1000*1000);
-		int fontSize = ds->fontHeight;
-		Vec2 textPos = vec2(550, -fontHeight);
-		int infoCount = timer->timerInfoCount;
-
-		Gui* gui = ds->gui2;
-		gui->start(ds->gInput, getFont(FONT_CALIBRI, fontHeight), ws->currentRes);
-
-		gui->label("App Statistics", 1, gui->colors.sectionColor, vec4(0,0,0,1));
-
-		float sectionWidth = 120;
-		float headerDivs[] = {sectionWidth,sectionWidth,sectionWidth,0,80,80};
-		gui->div(headerDivs, arrayCount(headerDivs));
-		if(gui->button("Data", (int)(ds->mode == 0) + 1)) ds->mode = 0;
-		if(gui->button("Line graph", (int)(ds->mode == 1) + 1)) ds->mode = 1;
-		if(gui->button("Timeline", (int)(ds->mode == 2) + 1)) ds->mode = 2;
-		gui->empty();
-		gui->label(fillString("%fms", ds->debugTime*1000), 1);
-		gui->label(fillString("%fms", ds->debugRenderTime*1000), 1);
-
-		gui->div(vec2(0.2f,0));
-		if(gui->switcher("Freeze", &ds->noCollating)) {
-			if(ds->noCollating) ds->setPause = true;
-			else ds->setPlay = true;
-		}
-		gui->slider(&ds->cycleIndex, 0, cycleCount-1);
-
-		if(ds->mode == 0)
-		{
-			int barWidth = 1;
-			int barCount = arrayCount(ds->timings);
-			float sectionWidths[] = {0,0.2f,0,0,0,0,0,0, barWidth*barCount};
-			// float sectionWidths[] = {0.1f,0,0.1f,0,0.05f,0,0,0.1f, barWidth*barCount};
-
-			char* headers[] = {"File", "Function", "Description", "Cycles", "Hits", "C/H", "Avg. Cycl.", "Total Time", "Graphs"};
-			gui->div(sectionWidths, arrayCount(sectionWidths));
-
-			float textSectionEnd;
-			for(int i = 0; i < arrayCount(sectionWidths); i++) {
-				// @Hack: Get the end of the text region by looking at last region.
-				if(i == arrayCount(sectionWidths)-1) textSectionEnd = gui->getCurrentRegion().max.x;
-
-				Vec4 buttonColor = vec4(gui->colors.regionColor.rgb, 0.5f);
-				if(gui->button(headers[i], 0, 1, buttonColor, vec4(0,0,0,1))) {
-					if(abs(ds->graphSortingIndex) == i) ds->graphSortingIndex *= -1;
-					else ds->graphSortingIndex = i;
-				}
-			}
-
-			SortPair* sortList = getTArrayDebug(SortPair, infoCount+1);
-			{
-				for(int i = 0; i < infoCount+1; i++) sortList[i].index = i;
-
-		   			 if(abs(ds->graphSortingIndex) == 3) for(int i = 0; i < infoCount+1; i++) sortList[i].key = timings[i].cycles;
-		   		else if(abs(ds->graphSortingIndex) == 4) for(int i = 0; i < infoCount+1; i++) sortList[i].key = timings[i].hits;
-		   		else if(abs(ds->graphSortingIndex) == 5) for(int i = 0; i < infoCount+1; i++) sortList[i].key = timings[i].cyclesOverHits;
-		   		else if(abs(ds->graphSortingIndex) == 6) for(int i = 0; i < infoCount+1; i++) sortList[i].key = statistics[i].avg;
-		   		else if(abs(ds->graphSortingIndex) == 7) for(int i = 0; i < infoCount+1; i++) sortList[i].key = timings[i].cycles/cyclesPerFrame;
-
-		   		bool sortDirection = true;
-		   		if(ds->graphSortingIndex < 0) sortDirection = false;
-
-		   		if(valueBetween(abs(ds->graphSortingIndex), 3, 7)) 
-					bubbleSort(sortList, infoCount, sortDirection);
-			}
-
-			for(int index = 0; index < infoCount; index++) {
-				int i = sortList[index].index;
-
-				TimerInfo* tInfo = timer->timerInfos + i;
-				Timings* timing = timings + i;
-
-				if(!tInfo->initialised) continue;
-
-				gui->div(sectionWidths, arrayCount(sectionWidths)); 
-
-				// if(highlightedIndex == i) {
-				// 	Rect r = gui->getCurrentRegion();
-				// 	Rect line = rect(r.min, vec2(textSectionEnd,r.min.y + fontHeight));
-				// 	dcRect(line, highlightColor);
-				// }
-
-				gui->label(fillString("%s", tInfo->file + 21),0);
-				if(gui->button(fillString("%s", tInfo->function),0, 0, vec4(gui->colors.regionColor.rgb, 0.2f))) {
-					char* command = fillString("%s %s:%i", editor_executable_path, tInfo->file, tInfo->line);
-					shellExecuteNoWindow(command);
-				}
-				gui->label(fillString("%s", tInfo->name),0);
-				gui->label(fillString("%i64.c", timing->cycles),2);
-				gui->label(fillString("%i64.", timing->hits),2);
-				gui->label(fillString("%i64.c", timing->cyclesOverHits),2);
-				gui->label(fillString("%i64.c", (i64)statistics[i].avg),2); // Not a i64 but whatever.
-				gui->label(fillString("%.3f%%", ((float)timing->cycles/cyclesPerFrame)*100),2);
-
-				// Bar graphs.
-				dcState(STATE_LINEWIDTH, barWidth);
-
-				gui->empty();
-				Rect r = gui->getCurrentRegion();
-				float rheight = gui->getDefaultHeight();
-				float fontBaseOffset = 4;
-
-				float xOffset = 0;
-				for(int statIndex = 0; statIndex < barCount; statIndex++) {
-					Statistic* stat = statistics + i;
-					u64 coh = ds->timings[statIndex][i].cyclesOverHits;
-
-					float height = mapRangeClamp(coh, stat->min, stat->max, 1, rheight);
-					Vec2 rmin = r.min + vec2(xOffset, fontBaseOffset);
-					float colorOffset = mapRange(coh, stat->min, stat->max, 0, 1);
-					// dcRect(rectMinDim(rmin, vec2(barWidth, height)), vec4(colorOffset,1-colorOffset,0,1));
-					dcLine2d(rmin, rmin+vec2(0,height), vec4(colorOffset,1-colorOffset,0,1));
-
-					xOffset += barWidth;
-				}
-			}
-		}
-
-		// Timeline graph.
-		if(ds->mode == 2 && ds->noCollating)
-		{
-			float lineHeightOffset = 1.2;
-
-			gui->empty();
-			Rect cyclesRect = gui->getCurrentRegion();
-			gui->heightPush(1.5f);
-			gui->empty();
-			Rect headerRect = gui->getCurrentRegion();
-			gui->heightPop();
-
-			float lineHeight = fontHeight * lineHeightOffset;
-
-			gui->heightPush(3*lineHeight +  2*lineHeight*(threadQueue->threadCount-1));
-			gui->empty();
-			Rect bgRect = gui->getCurrentRegion();
-			gui->heightPop();
-
-			float graphWidth = rectDim(bgRect).w;
-
-			int swapTimerIndex = 0;
-			for(int i = 0; i < timer->timerInfoCount; i++) {
-				if(!timer->timerInfos[i].initialised) continue;
-
-				if(strCompare(timer->timerInfos[i].name, "Swap")) {
-					swapTimerIndex = i;
-					break;
-				}
-			}
-
-			int recentIndex = mod(ds->savedBufferIndex-1, ds->savedBufferMax);
-			int oldIndex = mod(ds->savedBufferIndex - ds->savedBufferCount, ds->savedBufferMax);
-			GraphSlot recentSlot = ds->savedBuffer[recentIndex];
-			GraphSlot oldSlot = ds->savedBuffer[oldIndex];
-			double cyclesLeft = oldSlot.cycles;
-			double cyclesRight = recentSlot.cycles + recentSlot.size;
-			double cyclesSize = cyclesRight - cyclesLeft;
-
-			// Setup cam pos and zoom.
-			if(ds->timelineCamPos == -1 && ds->timelineCamSize == -1) {
-				ds->timelineCamSize = (recentSlot.cycles + recentSlot.size) - oldSlot.cycles;
-				ds->timelineCamPos = oldSlot.cycles + ds->timelineCamSize/2;
-			}
-
-			if(gui->input.mouseWheel) {
-				float wheel = gui->input.mouseWheel;
-
-				float offset = wheel < 0 ? 1.1f : 1/1.1f;
-				if(!input->keysDown[KEYCODE_SHIFT] && input->keysDown[KEYCODE_CTRL]) 
-					offset = wheel < 0 ? 1.2f : 1/1.2f;
-				if(input->keysDown[KEYCODE_SHIFT] && input->keysDown[KEYCODE_CTRL]) 
-					offset = wheel < 0 ? 1.4f : 1/1.4f;
-
-				double oldZoom = ds->timelineCamSize;
-				ds->timelineCamSize *= offset;
-				clampDouble(&ds->timelineCamSize, 1000, cyclesSize);
-				double diff = ds->timelineCamSize - oldZoom;
-
-				float zoomOffset = mapRange(input->mousePos.x, bgRect.min.x, bgRect.max.x, -0.5f, 0.5f);
-				ds->timelineCamPos -= diff*zoomOffset;
-			}
-
-
-			Vec2 dragDelta = vec2(0,0);
-			gui->drag(bgRect, &dragDelta, vec4(0,0,0,0));
-
-			ds->timelineCamPos -= dragDelta.x * (ds->timelineCamSize/graphWidth);
-			clampDouble(&ds->timelineCamPos, cyclesLeft + ds->timelineCamSize/2, cyclesRight - ds->timelineCamSize/2);
-
-
-			double camPos = ds->timelineCamPos;
-			double zoom = ds->timelineCamSize;
-			double orthoLeft = camPos - zoom/2;
-			double orthoRight = camPos + zoom/2;
-
-
-			// Header.
-			{
-				dcRect(cyclesRect, gui->colors.sectionColor);
-				Vec2 cyclesDim = rectDim(cyclesRect);
-
-				dcRect(headerRect, vec4(1,1,1,0.1f));
-				Vec2 headerDim = rectDim(headerRect);
-
-				{
-					float viewAreaLeft = mapRangeDouble(orthoLeft, cyclesLeft, cyclesRight, cyclesRect.min.x, cyclesRect.max.x);
-					float viewAreaRight = mapRangeDouble(orthoRight, cyclesLeft, cyclesRight, cyclesRect.min.x, cyclesRect.max.x);
-
-					float viewSize = viewAreaRight - viewAreaLeft;
-					float viewMid = viewAreaRight + viewSize/2;
-					float viewMinSize = 2;
-					if(viewSize < viewMinSize) {
-						viewAreaLeft = viewMid - viewMinSize*0.5;
-						viewAreaRight = viewMid + viewMinSize*0.5;
-					}
-
-					dcRect(rect(viewAreaLeft, cyclesRect.min.y, viewAreaRight, cyclesRect.max.y), vec4(1,1,1,0.03f));
-				}
-
-				float g = 0.7f;
-				float heightMod = 0.0f;
-				double div = 4;
-				double divMod = (1/div) + 0.05f;
-
-				double timelineSection = div;
-				while(timelineSection < zoom*divMod*(ws->currentRes.h/(graphWidth))) {
-					timelineSection *= div;
-					heightMod += 0.1f;
-				}
-
-				clampMax(&heightMod, 1);
-
-				dcState(STATE_LINEWIDTH, 3);
-				double startPos = roundModDouble(orthoLeft, timelineSection) - timelineSection;
-				double pos = startPos;
-				while(pos < orthoRight + timelineSection) {
-					double p = mapRangeDouble(pos, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
-
-					// Big line.
-					{
-						float h = headerDim.h*heightMod;
-						dcLine2d(vec2(p,headerRect.min.y), vec2(p,headerRect.min.y + h), vec4(g,g,g,1));
-					}
-
-					// Text
-					{
-						Vec2 textPos = vec2(p,cyclesRect.min.y + cyclesDim.h/2);
-						float percent = mapRange(pos, cyclesLeft, cyclesRight, 0, 100);
-						int percentInterval = mapRangeDouble(timelineSection, 0, cyclesSize, 0, 100);
-
-						char* s;
-						if(percentInterval > 10) s = fillString("%i%%", (int)percent);
-						else if(percentInterval > 1) s = fillString("%.1f%%", percent);
-						else if(percentInterval > 0.1) s = fillString("%.2f%%", percent);
-						else s = fillString("%.3f%%", percent);
-
-						float tw = getTextDim(s, gui->font).w;
-						if(valueBetween(bgRect.min.x, textPos.x - tw/2, textPos.x + tw/2)) textPos.x = bgRect.min.x + tw/2;
-						if(valueBetween(bgRect.max.x, textPos.x - tw/2, textPos.x + tw/2)) textPos.x = bgRect.max.x - tw/2;
-
-						dcText(s, gui->font, textPos, gui->colors.textColor, vec2i(0,0), 0, 1, gui->colors.shadowColor);
-					}
-
-					pos += timelineSection;
-				}
-				dcState(STATE_LINEWIDTH, 1);
-
-				pos = startPos;
-				timelineSection /= div;
-				heightMod *= 0.6f;
-				int index = 0;
-				while(pos < orthoRight + timelineSection) {
-
-					// Small line.
-					if((index%(int)div) != 0) {
-						double p = mapRangeDouble(pos, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
-						float h = headerDim.h*heightMod;
-						dcLine2d(vec2(p,headerRect.min.y), vec2(p,headerRect.min.y + h), vec4(g,g,g,1));
-					}
-
-					// Cycle text.
-					{
-						float pMid = mapRangeDouble(pos - timelineSection/2, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
-						Vec2 textPos = vec2(pMid,headerRect.min.y + headerDim.h/3);
-
-						double cycles = timelineSection;
-						char* s;
-						if(cycles < 1000) s = fillString("%ic", (int)cycles);
-						else if(cycles < 1000000) s = fillString("%.1fkc", cycles/1000);
-						else if(cycles < 1000000000) s = fillString("%.1fmc", cycles/1000000);
-						else if(cycles < 1000000000000) s = fillString("%.1fbc", cycles/1000000000);
-						else s = fillString("INF");
-
-						dcText(s, gui->font, textPos, gui->colors.textColor, vec2i(0,0), 0, gui->settings.textShadow, gui->colors.shadowColor);
-					}
-
-					pos += timelineSection;
-					index++;
-
-				}
-			}
-
-			dcState(STATE_LINEWIDTH, 1);
-
-			bool mouseHighlight = false;
-			Rect hRect;
-			Vec4 hc;
-			char* hText;
-			GraphSlot* hSlot;
-
-			Vec2 startPos = rectTL(bgRect);
-			startPos -= vec2(0, lineHeight);
-
-			int firstBufferIndex = oldIndex;
-			int bufferCount = ds->savedBufferCount;
-			for(int threadIndex = 0; threadIndex < threadQueue->threadCount; threadIndex++) {
-
-				// Horizontal lines to distinguish thread bars.
-				if(threadIndex > 0) {
-					Vec2 p = startPos + vec2(0,lineHeight);
-					float g = 0.8f;
-					dcLine2d(p, vec2(bgRect.max.x, p.y), vec4(g,g,g,1));
-				}
-
-				for(int i = 0; i < bufferCount; ++i) {
-					GraphSlot* slot = ds->savedBuffer + ((firstBufferIndex+i)%ds->savedBufferMax);
-					if(slot->threadIndex != threadIndex) continue;
-
-					Timings* t = timings + slot->timerIndex;
-					TimerInfo* tInfo = timer->timerInfos + slot->timerIndex;
-
-					if(slot->cycles + slot->size < orthoLeft || slot->cycles > orthoRight) continue;
-
-
-					double barLeft = mapRangeDouble(slot->cycles, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
-					double barRight = mapRangeDouble(slot->cycles + slot->size, orthoLeft, orthoRight, bgRect.min.x, bgRect.max.x);
-
-					// Draw vertical line at swap boundaries.
-					if(slot->timerIndex == swapTimerIndex) {
-						float g = 0.8f;
-						dcLine2d(vec2(barRight, bgRect.min.y), vec2(barRight, bgRect.max.y), vec4(g,g,g,1));
-					}
-
-					// Bar min size is 1.
-					if(barRight - barLeft < 1) {
-						double mid = barLeft + (barRight - barLeft)/2;
-						barLeft = mid - 0.5f;
-						barRight = mid + 0.5f;
-					}
-
-					float y = startPos.y+slot->stackIndex*-lineHeight;
-					Rect r = rect(vec2(barLeft,y), vec2(barRight, y + lineHeight));
-
-					float cOff = slot->timerIndex/(float)timer->timerInfoCount;
-					Vec4 c = vec4(tInfo->color[0], tInfo->color[1], tInfo->color[2], 1);
-
-					if(gui->getMouseOver(gui->input.mousePos, r)) {
-						mouseHighlight = true;
-						hRect = r;
-						hc = c;
-
-						hText = fillString("%s %s (%i.c)", tInfo->function, tInfo->name, slot->size);
-						hSlot = slot;
-					} else {
-						float g = 0.1f;
-						gui->drawRect(r, vec4(g,g,g,1));
-
-						bool textRectVisible = (barRight - barLeft) > 1;
-						if(textRectVisible) {
-							if(barLeft < bgRect.min.x) r.min.x = bgRect.min.x;
-							Rect textRect = rect(r.min+vec2(1,1), r.max-vec2(1,1));
-
-							gui->drawTextBox(textRect, fillString("%s %s (%i.c)", tInfo->function, tInfo->name, slot->size), c, 0, rectDim(textRect).w);
-						}
-					}
-
-				}
-
-				if(threadIndex == 0) startPos.y -= lineHeight*3;
-				else startPos.y -= lineHeight*2;
-
-			}
-
-			if(mouseHighlight) {
-				if(hRect.min.x < bgRect.min.x) hRect.min.x = bgRect.min.x;
-
-				float tw = getTextDim(hText, gui->font).w + 2;
-				if(tw > rectDim(hRect).w) hRect.max.x = hRect.min.x + tw;
-
-				float g = 0.8f;
-				gui->drawRect(hRect, vec4(g,g,g,1));
-
-				Rect textRect = rect(hRect.min+vec2(1,1), hRect.max-vec2(1,1));
-				gui->drawTextBox(textRect, hText, hc);
-			}
-
-			gui->div(0.1f, 0); 
-			gui->div(0.1f, 0); 
-
-			if(gui->button("Reset")) {
-				ds->timelineCamSize = (recentSlot.cycles + recentSlot.size) - oldSlot.cycles;
-				ds->timelineCamPos = oldSlot.cycles + ds->timelineCamSize/2;
-			}
-
-			gui->label(fillString("Cam: %i64., Zoom: %i64.", (i64)ds->timelineCamPos, (i64)ds->timelineCamSize));
-		}
-		
-
-
-
-		// Line graph.
-		if(ds->mode == 1)
-		{
-			dcState(STATE_LINEWIDTH, 1);
-
-			// Get longest function name string.
-			float timerInfoMaxStringSize = 0;
-			int cycleCount = arrayCount(ds->timings);
-			int timerCount = ds->timer->timerInfoCount;
-			for(int timerIndex = 0; timerIndex < timerCount; timerIndex++) {
-				TimerInfo* info = &timer->timerInfos[timerIndex];
-				if(!info->initialised) continue;
-
-				Statistic* stat = &ds->statistics[cycleIndex][timerIndex];
-				if(stat->avg == 0) continue;
-
-				char* text = strLen(info->name) > 0 ? info->name : info->function;
-				timerInfoMaxStringSize = max(getTextDim(text, gui->font).w, timerInfoMaxStringSize);
-			}
-
-			// gui->div(0.2f, 0);
-			gui->slider(&ds->lineGraphHeight, 1, 60);
-			// gui->empty();
-
-			gui->heightPush(gui->getDefaultHeight() * ds->lineGraphHeight);
-			gui->div(vec3(timerInfoMaxStringSize + 2, 0, 120));
-			gui->empty(); Rect rectNames = gui->getCurrentRegion();
-			gui->empty(); Rect rectLines = gui->getCurrentRegion();
-			gui->empty(); Rect rectNumbers = gui->getCurrentRegion();
-			gui->heightPop();
-
-			float rTop = rectLines.max.y;
-			float rBottom = rectLines.min.y;
-
-			Vec2 dragDelta = vec2(0,0);
-			gui->drag(rectLines, &dragDelta, vec4(0,0,0,0.2f));
-
-			float wheel = gui->input.mouseWheel;
-			if(wheel) {
-				float offset = wheel < 0 ? 1.1f : 1/1.1f;
-				if(!input->keysDown[KEYCODE_SHIFT] && input->keysDown[KEYCODE_CTRL]) 
-					offset = wheel < 0 ? 1.2f : 1/1.2f;
-				if(input->keysDown[KEYCODE_SHIFT] && input->keysDown[KEYCODE_CTRL]) 
-					offset = wheel < 0 ? 1.4f : 1/1.4f;
-
-				float heightDiff = ds->lineGraphCamSize;
-				ds->lineGraphCamSize *= offset;
-				ds->lineGraphCamSize = clampMin(ds->lineGraphCamSize, 0.00001f);
-				heightDiff -= ds->lineGraphCamSize;
-
-				float mouseOffset = mapRange(input->mousePosNegative.y, rBottom, rTop, -0.5f, 0.5f);
-				ds->lineGraphCamPos += heightDiff * mouseOffset;
-			}
-
-			ds->lineGraphCamPos -= dragDelta.y * ((ds->lineGraphCamSize)/(rTop - rBottom));
-			clampMin(&ds->lineGraphCamPos, ds->lineGraphCamSize/2.05f);
-
-			float orthoTop = ds->lineGraphCamPos + ds->lineGraphCamSize/2;
-			float orthoBottom = ds->lineGraphCamPos - ds->lineGraphCamSize/2;
-
-			// Draw numbers.
-			{
-				gui->scissorPush(rectNumbers);
-
-				float y = 0;
-				float length = 10;
-
-				float div = 10;
-				float timelineSection = div;
-				float splitMod = (1/div)*0.2f;
-				while(timelineSection < ds->lineGraphCamSize*splitMod*(ws->currentRes.h/(rTop-rBottom))) timelineSection *= div;
-
-				float start = roundMod(orthoBottom, timelineSection) - timelineSection;
-
-				float p = start;
-				while(p < orthoTop) {
-					p += timelineSection;
-					y = mapRange(p, orthoBottom, orthoTop, rBottom, rTop);
-
-					dcLine2d(vec2(rectNumbers.min.x, y), vec2(rectNumbers.min.x + length, y), vec4(1,1,1,1)); 
-					dcText(fillString("%i64.c",(i64)p), gui->font, vec2(rectNumbers.min.x + length + 4, y), vec4(1,1,1,1), vec2i(-1,0));
-				}
-
-				gui->scissorPop();
-			}
-
-			for(int timerIndex = 0; timerIndex < timerCount; timerIndex++) {
-				TimerInfo* info = &timer->timerInfos[timerIndex];
-				if(!info->initialised) continue;
-
-				Statistic* stat = &ds->statistics[cycleIndex][timerIndex];
-				if(stat->avg == 0) continue;
-
-				float statMin = mapRange(stat->min, orthoBottom, orthoTop, rBottom, rTop);
-				float statMax = mapRange(stat->max, orthoBottom, orthoTop, rBottom, rTop);
-				if(statMax < rBottom || statMin > rTop) continue;
-
-				Vec4 color = vec4(info->color[0], info->color[1], info->color[2], 1);
-
-				float yAvg = mapRange(stat->avg, orthoBottom, orthoTop, rBottom, rTop);
-				char* text = strLen(info->name) > 0 ? info->name : info->function;
-				float textWidth = getTextDim(text, gui->font, vec2(rectNames.max.x - 2, yAvg)).w;
-
-				gui->scissorPush(rectNames);
-				Rect tr = getTextLineRect(text, gui->font, vec2(rectNames.max.x - 2, yAvg), vec2i(1,-1));
-				if(gui->buttonUndocked(text, tr, 2, gui->colors.panelColor)) ds->lineGraphHighlight = timerIndex;
-				gui->scissorPop();
-
-				Rect rectNamesAndLines = rect(rectNames.min, rectLines.max);
-				gui->scissorPush(rectNamesAndLines);
-				dcLine2d(vec2(rectLines.min.x - textWidth - 2, yAvg), vec2(rectLines.max.x, yAvg), color);
-				gui->scissorPop();
-
-				gui->scissorPush(rectLines);
-
-				if(timerIndex == ds->lineGraphHighlight) dcState(STATE_LINEWIDTH, 3);
-				else dcState(STATE_LINEWIDTH, 1);
-
-				bool firstEmpty = ds->timings[0][timerIndex].cyclesOverHits == 0;
-				Vec2 p = vec2(rectLines.min.x, 0);
-				if(firstEmpty) p.y = yAvg;
-				else p.y = mapRange(ds->timings[0][timerIndex].cyclesOverHits, orthoBottom, orthoTop, rBottom, rTop);
-				for(int i = 1; i < cycleCount; i++) {
-					Timings* t = &ds->timings[i][timerIndex];
-
-					bool lastElementEmpty = false;
-					if(t->cyclesOverHits == 0) {
-						if(i != cycleCount-1) continue;
-						else lastElementEmpty = true;
-					}
-
-					float y = mapRange(t->cyclesOverHits, orthoBottom, orthoTop, rBottom, rTop);
-					float xOff = rectDim(rectLines).w/(cycleCount-1);
-					Vec2 np = vec2(rectLines.min.x + xOff*i, y);
-
-					if(lastElementEmpty) np.y = yAvg;
-
-					dcLine2d(p, np, color);
-					p = np;
-				}
-
-				dcState(STATE_LINEWIDTH, 1);
-
-				gui->scissorPop();
-			}
-
-			gui->empty();
-			Rect r = gui->getCurrentRegion();
-			Vec2 rc = rectCen(r);
-			float rw = rectDim(r).w;
-
-			// Draw color rectangles.
-			float width = (rw/timerCount)*0.75f;
-			float height = fontHeight*0.8f;
-			float sw = (rw-(timerCount*width))/(timerCount+1);
-
-			for(int i = 0; i < timerCount; i++) {
-				TimerInfo* info = &timer->timerInfos[i];
-
-				Vec4 color = vec4(info->color[0], info->color[1], info->color[2], 1);
-				Vec2 pos = vec2(r.min.x + sw+width/2 + i*(width+sw), rc.y);
-				dcRect(rectCenDim(pos, vec2(width, height)), color);
-			}
-
-		}
-
-		gui->end();
-
-	}
-
-	//
-	// Dropdown Console.
-	//
-
-	{
-		Console* con = &ds->console;
-
-		if(init) {
-			con->init(ws->currentRes.y);
-		}
-
-		bool smallExtension = input->keysPressed[KEYCODE_F5] && !input->keysDown[KEYCODE_CTRL];
-		bool bigExtension = input->keysPressed[KEYCODE_F5] && input->keysDown[KEYCODE_CTRL];
-
-		con->update(ds->input, vec2(ws->currentRes), ad->dt, smallExtension, bigExtension);
-
-		// Execute commands.
-
-		if(con->commandAvailable) {
-			con->commandAvailable = false;
-
-			char* comName = con->comName;
-			char** args = con->comArgs;
-			char* resultString = "";
-			bool pushResult = true;
-
-			if(strCompare(comName, "add")) {
-				int a = strToInt(args[0]);
-				int b = strToInt(args[1]);
-
-				resultString = fillString("%i + %i = %i.", a, b, a+b);
-
-			} else if(strCompare(comName, "addFloat")) {
-				float a = strToFloat(args[0]);
-				float b = strToFloat(args[1]);
-
-				resultString = fillString("%f + %f = %f.", a, b, a+b);
-
-			} else if(strCompare(comName, "print")) {
-				resultString = fillString("\"%s\"", args[0]);
-
-			} else if(strCompare(comName, "cls")) {
-				con->clearMainBuffer();
-				pushResult = false;
-
-			} else if(strCompare(comName, "doNothing")) {
-
-			} else if(strCompare(comName, "setGuiAlpha")) {
-				ds->guiAlpha = strToFloat(args[0]);
-
-			} else if(strCompare(comName, "exit")) {
-				*isRunning = false;
-
-			}
-			if(pushResult) con->pushToMainBuffer(resultString);
-		}
-
-		con->updateBody();
-
-	}
-
-	// Notifications.
-	{
-		// Update notes.
-		int deletionCount = 0;
-		for(int i = 0; i < ds->notificationCount; i++) {
-			ds->notificationTimes[i] -= ds->dt;
-			if(ds->notificationTimes[i] <= 0) {
-				deletionCount++;
-			}
-		}
-
-		// Delete expired notes.
-		if(deletionCount > 0) {
-			for(int i = 0; i < ds->notificationCount-deletionCount; i++) {
-				ds->notificationStack[i] = ds->notificationStack[i+deletionCount];
-				ds->notificationTimes[i] = ds->notificationTimes[i+deletionCount];
-			}
-			ds->notificationCount -= deletionCount;
-		}
-
-		// Draw notes.
-		int fontSize = ds->fontHeight;
-		Font* font = getFont(FONT_CALIBRI, fontSize);
-		Vec4 color = vec4(1,0.5f,0,1);
-
-		float y = -fontSize/2;
-		for(int i = 0; i < ds->notificationCount; i++) {
-			char* note = ds->notificationStack[i];
-			dcText(note, font, vec2(ws->currentRes.w/2, y), color, vec2i(0,0), 0, 2);
-			y -= fontSize;
-		}
-	}
-
-	if(ds->showHud) {
-		int fontSize = ds->fontHeight*1.1f;
-		int pi = 0;
-		// Vec4 c = vec4(1.0f,0.2f,0.0f,1);
-		Vec4 c = vec4(1.0f,0.4f,0.0f,1);
-		Vec4 c2 = vec4(0,0,0,1);
-		Font* font = getFont(FONT_CONSOLAS, fontSize);
-		int sh = 1;
-		Vec2 offset = vec2(6,6);
-		Vec2i ali = vec2i(1,1);
-
-		Vec2 tp = vec2(ad->wSettings.currentRes.x, 0) - offset;
-
-		static f64 timer = 0;
-		static int fpsCounter = 0;
-		static int fps = 0;
-		timer += ds->dt;
-		fpsCounter++;
-		if(timer >= 1.0f) {
-			fps = fpsCounter;
-			fpsCounter = 0;
-			timer = 0;
-		}
-
-		dcText(fillString("Fps  : %i", fps), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-		dcText(fillString("Pos  : (%f,%f,%f)", PVEC3(ad->activeCam.pos)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-		dcText(fillString("Pos  : (%f,%f,%f)", PVEC3(ad->selectedBlock)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-		dcText(fillString("Look : (%f,%f,%f)", PVEC3(ad->activeCam.look)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-		dcText(fillString("Up   : (%f,%f,%f)", PVEC3(ad->activeCam.up)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-		dcText(fillString("Right: (%f,%f,%f)", PVEC3(ad->activeCam.right)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-		dcText(fillString("Rot  : (%f,%f)",    PVEC2(ad->player->rot)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-		dcText(fillString("Vec  : (%f,%f,%f)", PVEC3(ad->player->vel)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-		dcText(fillString("Acc  : (%f,%f,%f)", PVEC3(ad->player->acc)), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-		dcText(fillString("Draws: (%i)", 	   ad->voxelDrawCount), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-		dcText(fillString("Quads: (%i)", 	   ad->voxelTriangleCount), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-		dcText(fillString("BufferIndex: %i",    ds->timer->bufferIndex), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-		dcText(fillString("LastBufferIndex: %i",ds->lastBufferIndex), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-
-
-		for(int i = 0; i < ds->infoStackCount; i++) {
-			dcText(fillString("%s", ds->infoStack[i]), font, tp, c, ali, 0, sh, c2); tp.y -= fontSize;
-		}
-		ds->infoStackCount = 0;
-	}
-
-
-	if(*isRunning == false) {
-		guiSave(ds->gui, 2, 0);
-		if(globalDebugState->gui2) guiSave(globalDebugState->gui2, 2, 3);
-	}
-
-	// Update debugTime every second.
-	static f64 tempTime = 0;
-	tempTime += ds->dt;
-	if(tempTime >= 1) {
-		ds->debugTime = timerStop(&ds->tempTimer);
-		tempTime = 0;
-	}
-}
-
-#pragma optimize( "", on ) 
-
-#endif
-
-
-
-
-void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, bool* isRunning, bool init, ThreadQueue* threadQueue) {
-	// @DebugStart.
-
-	globalMemory->debugMode = true;
-
-	timerStart(&ds->tempTimer);
-
-	Input* input = ds->input;
-	WindowSettings* ws = &ad->wSettings;
-
-	clearTMemoryDebug();
-
-	ExtendibleMemoryArray* debugMemory = &appMemory->extendibleMemoryArrays[1];
-	ExtendibleMemoryArray* pMemory = globalMemory->pMemory;
-
-	int clSize = megaBytes(2);
-	drawCommandListInit(&ds->commandListDebug, (char*)getTMemoryDebug(clSize), clSize);
-	globalCommandList = &ds->commandListDebug;
-
-
-	ds->gInput = { input->mousePos, input->mouseWheel, input->mouseButtonPressed[0], input->mouseButtonDown[0], 
-					input->keysPressed[KEYCODE_ESCAPE], input->keysPressed[KEYCODE_RETURN], input->keysPressed[KEYCODE_SPACE], input->keysPressed[KEYCODE_BACKSPACE], input->keysPressed[KEYCODE_DEL], input->keysPressed[KEYCODE_HOME], input->keysPressed[KEYCODE_END], 
-					input->keysPressed[KEYCODE_LEFT], input->keysPressed[KEYCODE_RIGHT], input->keysPressed[KEYCODE_UP], input->keysPressed[KEYCODE_DOWN], 
-					input->keysDown[KEYCODE_SHIFT], input->keysDown[KEYCODE_CTRL], input->inputCharacters, input->inputCharacterCount};
-
-	if(input->keysPressed[KEYCODE_F6]) ds->showMenu = !ds->showMenu;
-	if(input->keysPressed[KEYCODE_F7]) ds->showStats = !ds->showStats;
-	if(input->keysPressed[KEYCODE_F8]) ds->showHud = !ds->showHud;
-
-	// Recording update.
-	{
-		if(ds->playbackSwapMemory) {
-			threadQueueComplete(threadQueue);
-			ds->playbackSwapMemory = false;
-
-			pMemory->index = ds->snapShotCount-1;
-			pMemory->arrays[pMemory->index].index = ds->snapShotMemoryIndex;
-
-			for(int i = 0; i < ds->snapShotCount; i++) {
-				memCpy(pMemory->arrays[i].data, ds->snapShotMemory[i], pMemory->slotSize);
-			}
-		}
-	}
-
-	if(ds->showMenu) {
-		int fontSize = ds->fontHeight;
-
-		bool initSections = false;
-
-		Gui* gui = ds->gui;
-		gui->start(ds->gInput, getFont(FONT_CALIBRI, fontSize), ws->currentRes);
-
-		static bool sectionGuiRecording = false;
-		if(gui->beginSection("Recording", &sectionGuiRecording)) {
-
-			bool noActiveThreads = threadQueueFinished(threadQueue);
-
-			gui->div(vec2(0,0));
-			gui->label("Active Threads:");
-			gui->label(fillString("%i", !noActiveThreads));
-
-			gui->div(vec2(0,0));
-			gui->label("Max Frames:");
-			gui->label(fillString("%i", ds->inputCapacity));
-
-			gui->div(vec2(0,0));
-			if(gui->switcher("Record", &ds->recordingInput)) {
-				if(ds->playbackInput || !noActiveThreads) ds->recordingInput = false;
-
-				if(ds->recordingInput) {
-					if(threadQueueFinished(threadQueue)) {
-
-						ds->snapShotCount = pMemory->index+1;
-						ds->snapShotMemoryIndex = pMemory->arrays[pMemory->index].index;
-						for(int i = 0; i < ds->snapShotCount; i++) {
-							if(ds->snapShotMemory[i] == 0) 
-								ds->snapShotMemory[i] = (char*)malloc(pMemory->slotSize);
-
-							memCpy(ds->snapShotMemory[i], pMemory->arrays[i].data, pMemory->slotSize);
-						}
-
-
-						ds->recordingInput = true;
-						ds->inputIndex = 0;
-					}
-				}
-			}
-			gui->label(fillString("%i", ds->inputIndex));
-
-
-			if(ds->inputIndex > 0 && !ds->recordingInput) {
-				char* s = ds->playbackInput ? "Stop Playback" : "Start Playback";
-
-				if(gui->switcher(s, &ds->playbackInput)) {
-					if(ds->playbackInput) {
-						threadQueueComplete(threadQueue);
-						ds->playbackIndex = 0;
-
-						pMemory->index = ds->snapShotCount-1;
-						pMemory->arrays[pMemory->index].index = ds->snapShotMemoryIndex;
-
-						for(int i = 0; i < ds->snapShotCount; i++) {
-							memCpy(pMemory->arrays[i].data, ds->snapShotMemory[i], pMemory->slotSize);
-						}
-					} else {
-						ds->playbackPause = false;
-						ds->playbackBreak = false;
-					}
-				}
-
-				if(ds->playbackInput) {
-					gui->div(vec2(0,0));
-
-					gui->switcher("Pause/Resume", &ds->playbackPause);
-
-					int cap = ds->playbackIndex;
-					gui->slider(&ds->playbackIndex, 0, ds->inputIndex - 1);
-					ds->playbackIndex = cap;
-
-					gui->div(vec3(0.25f,0.25f,0));
-					if(gui->button("Step")) {
-						ds->playbackBreak = true;
-						ds->playbackPause = false;
-						ds->playbackBreakIndex = (ds->playbackIndex + 1)%ds->inputIndex;
-					}
-					gui->switcher("Break", &ds->playbackBreak);
-					gui->slider(&ds->playbackBreakIndex, 0, ds->inputIndex - 1);
-				}
-			}
-
-		} gui->endSection();
-
-		static bool sectionGuiSettings = initSections;
-		if(gui->beginSection("GuiSettings", &sectionGuiSettings)) {
-			guiSettings(gui);
-		} gui->endSection();
-
-		static bool sectionSettings = initSections;
-		if(gui->beginSection("Settings", &sectionSettings)) {
-			gui->div(vec2(0,0)); if(gui->button("Compile")) shellExecute("C:\\Projects\\Hmm\\code\\buildWin32.bat");
-								 if(gui->button("Up Buffers")) ad->updateFrameBuffers = true;
-			gui->div(vec2(0,0)); gui->label("FoV", 0); gui->slider(&ad->fieldOfView, 1, 180);
-			gui->div(vec2(0,0)); gui->label("MSAA", 0); gui->slider(&ad->msaaSamples, 1, 8);
-			gui->switcher("Native Res", &ad->useNativeRes);
-			gui->div(0,0,0); gui->label("FboRes", 0); gui->slider(&ad->fboRes.x, 150, ad->cur3dBufferRes.x); gui->slider(&ad->fboRes.y, 150, ad->cur3dBufferRes.y);
-			gui->div(0,0,0); gui->label("NFPlane", 0); gui->slider(&ad->nearPlane, 0.01, 2); gui->slider(&ad->farPlane, 1000, 5000);
-		} gui->endSection();
-
-		static bool sectionEntities = true;
+		static bool sectionEntities = false;
 		if(gui->beginSection("Entities", &sectionEntities)) { 
 
 			EntityList* list = &ad->entityList;
@@ -5534,7 +4357,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 		bool smallExtension = input->keysPressed[KEYCODE_F5] && !input->keysDown[KEYCODE_CTRL];
 		bool bigExtension = input->keysPressed[KEYCODE_F5] && input->keysDown[KEYCODE_CTRL];
 
-		con->update(ds->input, vec2(ws->currentRes), ad->dt, smallExtension, bigExtension);
+		con->update(ds->input, vec2(ws->currentRes), ds->fontHeight, ad->dt, smallExtension, bigExtension);
 
 		// Execute commands.
 
@@ -5663,7 +4486,7 @@ void debugMain(DebugState* ds, AppMemory* appMemory, AppData* ad, bool reload, b
 
 	if(*isRunning == false) {
 		guiSave(ds->gui, 2, 0);
-		if(globalDebugState->gui2) guiSave(globalDebugState->gui2, 2, 3);
+		if(theDebugState->gui2) guiSave(theDebugState->gui2, 2, 3);
 	}
 
 	// Update debugTime every second.

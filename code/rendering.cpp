@@ -2,7 +2,7 @@
 struct DrawCommandList;
 extern DrawCommandList* globalCommandList;
 struct GraphicsState;
-extern GraphicsState* globalGraphicsState;
+extern GraphicsState* theGraphicsState;
 
 
 // 
@@ -470,7 +470,13 @@ void loadCubeMapFromFile(Texture* texture, char* filePath, int mipLevels, int in
 
 		glTextureSubImage3D(texture->id, 0, 0, 0, i, skySize, skySize, 1, channelType, channelFormat, skyTex);
 	}
-	// glGenerateTextureMipmap(ad->cubemapTextureId);
+	glTextureParameteri(texture->id, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTextureParameteri(texture->id, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTextureParameteri(texture->id, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTextureParameteri(texture->id, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTextureParameteri(texture->id, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);  
+
+	glGenerateTextureMipmap(texture->id);
 
 	stbi_image_free(stbData);
 }
@@ -701,22 +707,22 @@ struct GraphicsState {
 };
 
 Shader* getShader(int shaderId) {
-	Shader* s = globalGraphicsState->shaders + shaderId;
+	Shader* s = theGraphicsState->shaders + shaderId;
 	return s;
 }
 
 Mesh* getMesh(int meshId) {
-	Mesh* m = globalGraphicsState->meshs + meshId;
+	Mesh* m = theGraphicsState->meshs + meshId;
 	return m;
 }
 
 Texture* getTexture(int textureId) {
-	Texture* t = globalGraphicsState->textures + textureId;
+	Texture* t = theGraphicsState->textures + textureId;
 	return t;
 }
 
 Texture* getTextureX(int textureId) {
-	GraphicsState* gs = globalGraphicsState;
+	GraphicsState* gs = theGraphicsState;
 	for(int i = 0; i < arrayCount(gs->textures); i++) {
 		if(gs->textures[i].id == textureId) {
 			return gs->textures + i;
@@ -727,18 +733,18 @@ Texture* getTextureX(int textureId) {
 }
 
 Texture* addTexture(Texture tex) {
-	GraphicsState* gs = globalGraphicsState;
+	GraphicsState* gs = theGraphicsState;
 	gs->textures[gs->textureCount++] = tex;
 	return gs->textures + (gs->textureCount - 1);
 }
 
 Texture* getCubemap(int textureId) {
-	Texture* t = globalGraphicsState->cubeMaps + textureId;
+	Texture* t = theGraphicsState->cubeMaps + textureId;
 	return t;
 }
 
 FrameBuffer* getFrameBuffer(int id) {
-	FrameBuffer* fb = globalGraphicsState->frameBuffers + id;
+	FrameBuffer* fb = theGraphicsState->frameBuffers + id;
 	return fb;
 }
 
@@ -748,9 +754,9 @@ FrameBuffer* getFrameBuffer(int id) {
 
 Font* fontInit(Font* fontSlot, char* file, float height, bool enableHinting = false) {
 	char* fontFolder = 0;
-	for(int i = 0; i < globalGraphicsState->fontFolderCount; i++) {
-		if(fileExists(fillString("%s%s", globalGraphicsState->fontFolders[i], file))) {
-			fontFolder = globalGraphicsState->fontFolders[i];
+	for(int i = 0; i < theGraphicsState->fontFolderCount; i++) {
+		if(fileExists(fillString("%s%s", theGraphicsState->fontFolders[i], file))) {
+			fontFolder = theGraphicsState->fontFolders[i];
 			break;
 		}
 	}
@@ -902,19 +908,19 @@ void freeFont(Font* font) {
 
 Font* getFont(char* fontFile, float heightIndex, char* boldFontFile = 0, char* italicFontFile = 0) {
 
-	int fontCount = arrayCount(globalGraphicsState->fonts);
-	int fontSlotCount = arrayCount(globalGraphicsState->fonts[0]);
+	int fontCount = arrayCount(theGraphicsState->fonts);
+	int fontSlotCount = arrayCount(theGraphicsState->fonts[0]);
 	Font* fontSlot = 0;
 	for(int i = 0; i < fontCount; i++) {
-		if(globalGraphicsState->fonts[i][0].heightIndex == 0) {
-			fontSlot = &globalGraphicsState->fonts[i][0];
+		if(theGraphicsState->fonts[i][0].heightIndex == 0) {
+			fontSlot = &theGraphicsState->fonts[i][0];
 			break;
 		} else {
-			if(strCompare(fontFile, globalGraphicsState->fonts[i][0].file)) {
+			if(strCompare(fontFile, theGraphicsState->fonts[i][0].file)) {
 				for(int j = 0; j < fontSlotCount; j++) {
-					float h = globalGraphicsState->fonts[i][j].heightIndex;
+					float h = theGraphicsState->fonts[i][j].heightIndex;
 					if(h == 0 || h == heightIndex) {
-						fontSlot = &globalGraphicsState->fonts[i][j];
+						fontSlot = &theGraphicsState->fonts[i][j];
 						goto forEnd;
 					}
 				}
@@ -947,7 +953,7 @@ Font* getFont(char* fontFile, float heightIndex, char* boldFontFile = 0, char* i
 
 
 void bindShader(int shaderId) {
-	int shader = globalGraphicsState->shaders[shaderId].program;
+	int shader = theGraphicsState->shaders[shaderId].program;
 	glBindProgramPipeline(shader);
 }
 
@@ -964,7 +970,7 @@ uint createShader(const char* vertexShaderString, const char* fragmentShaderStri
 }
 
 void loadShaders() {
-	GraphicsState* gs = globalGraphicsState;
+	GraphicsState* gs = theGraphicsState;
 
 	for(int i = 0; i < SHADER_SIZE; i++) {
 		MakeShaderInfo* info = makeShaderInfo + i; 
@@ -984,7 +990,7 @@ void loadShaders() {
 }
 
 void pushUniform(uint shaderId, int shaderStage, uint uniformId, void* data, int count = 1) {
-	Shader* s = globalGraphicsState->shaders + shaderId;
+	Shader* s = theGraphicsState->shaders + shaderId;
 	ShaderUniform* uni = s->uniforms + uniformId;
 
 	int i = shaderStage;
@@ -1032,7 +1038,7 @@ void pushUniform(uint shaderId, int shaderStage, uint uniformId, Mat4 m) {
 };
 
 void getUniform(uint shaderId, int shaderStage, uint uniformId, float* data) {
-	Shader* s = globalGraphicsState->shaders + shaderId;
+	Shader* s = theGraphicsState->shaders + shaderId;
 	ShaderUniform* uni = s->uniforms + uniformId;
 
 	uint stage = shaderStage == 0 ? s->vertex : s->fragment;
@@ -1057,7 +1063,7 @@ void drawRect(Rect r, Vec4 color, Rect uv = rect(0,0,1,1), int texture = -1, flo
 
 	uint tex[2] = {texture, texture};
 	glBindTextures(0,2,tex);
-	glBindSamplers(0, 1, globalGraphicsState->samplers);
+	glBindSamplers(0, 1, theGraphicsState->samplers);
 
 	glDrawArraysInstancedBaseInstance(GL_TRIANGLE_STRIP, 0, 4, 1, 0);
 }
@@ -1525,7 +1531,7 @@ Rect getTextLineRect(char* text, Font* font, Vec2 startPos, Vec2i align = vec2i(
 }
 
 void drawText(char* text, Vec2 startPos, Vec2i align, int wrapWidth, TextSettings settings) {
-	float z = globalGraphicsState->zOrder;
+	float z = theGraphicsState->zOrder;
 	Font* font = settings.font;
 
 	int cullWidth = wrapWidth;
@@ -1607,7 +1613,7 @@ void drawText(char* text, Vec2 startPos, Vec2i align, TextSettings settings) {
 
 // // @CodeDuplication.
 // void drawTextLineCulled(char* text, Vec2 startPos, Vec2i align, int width, TextSettings settings) {
-// 	float z = globalGraphicsState->zOrder;
+// 	float z = theGraphicsState->zOrder;
 // 	Font* font = settings.font;
 
 // 	startPos = testgetTextStartPos(text, font, startPos, align, wrapWidth);
@@ -2096,8 +2102,9 @@ Rect scissorRectScreenSpace(Rect r, float screenHeight) {
 }
 
 void scissorTestScreen(Rect r) {
-	Rect sr = scissorRectScreenSpace(r, globalGraphicsState->screenRes.h);
+	Rect sr = scissorRectScreenSpace(r, theGraphicsState->screenRes.h);
 	if(rectW(sr) < 0 || rectH(sr) < 0) sr = rect(0,0,0,0);
 
 	scissorTest(sr);
 }
+

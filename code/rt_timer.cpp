@@ -59,7 +59,7 @@ struct  Timer {
 	int bufferIndex;
 };
 
-extern Timer* globalTimer;
+extern Timer* theTimer;
 
 inline uint getThreadID() {
 	// char *threadLocalStorage = (char *)__readgsqword(0x30);
@@ -71,11 +71,11 @@ inline uint getThreadID() {
 }
 
 void addTimerSlot(int timerIndex, int type) {
-	if(globalTimer->bufferIndex > globalTimer->bufferSize-10) return;
+	if(theTimer->bufferIndex > theTimer->bufferSize-10) return;
 	
-	int id = InterlockedIncrement((LONG*)(&globalTimer->bufferIndex));
+	int id = InterlockedIncrement((LONG*)(&theTimer->bufferIndex));
 	id--;
-	TimerSlot* slot = globalTimer->timerBuffer + id;
+	TimerSlot* slot = theTimer->timerBuffer + id;
 	slot->cycles = __rdtsc();
 	slot->type = type;
 	slot->threadId = getThreadID();
@@ -84,7 +84,7 @@ void addTimerSlot(int timerIndex, int type) {
 
 void addTimerSlotAndInfo(int timerIndex, int type, char* file, char* function, int line, char* name = "") {
 
-	TimerInfo* timerInfo = globalTimer->timerInfos + timerIndex;
+	TimerInfo* timerInfo = theTimer->timerInfos + timerIndex;
 
 	// if(getThreadID() == 0 && !timerInfo->initialised) {
 	if(!timerInfo->initialised) {

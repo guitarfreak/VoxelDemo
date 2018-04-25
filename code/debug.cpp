@@ -397,7 +397,7 @@ struct DebugState {
 };
 
 void addDebugNote(char* string, float duration = DEBUG_NOTE_DURATION) {
-	DebugState* ds = globalDebugState;
+	DebugState* ds = theDebugState;
 
 	assert(strLen(string) < DEBUG_NOTE_LENGTH);
 	if(ds->notificationCount >= arrayCount(ds->notificationStack)) return;
@@ -410,7 +410,7 @@ void addDebugNote(char* string, float duration = DEBUG_NOTE_DURATION) {
 }
 
 void addDebugInfo(char* string) {
-	DebugState* ds = globalDebugState;
+	DebugState* ds = theDebugState;
 
 	if(ds->infoStackCount >= arrayCount(ds->infoStack)) return;
 	ds->infoStack[ds->infoStackCount++] = string;
@@ -491,10 +491,10 @@ void reloadChangedFiles(HANDLE* folderHandles, Asset* assets, int assetCount) {
 			if(CompareFileTime(&asset->lastWriteTime, &newWriteTime) != 0) {
 
 				if(folderIndex == 0) {
-					loadTextureFromFile(globalGraphicsState->textures + asset->index, texturePaths[asset->index], -1, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE, true);
+					loadTextureFromFile(theGraphicsState->textures + asset->index, texturePaths[asset->index], -1, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE, true);
 
 				} else if(folderIndex == 1) {
-						loadCubeMapFromFile(globalGraphicsState->cubeMaps + asset->index, (char*)cubeMapPaths[asset->index], 5, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE, true);
+						loadCubeMapFromFile(theGraphicsState->cubeMaps + asset->index, (char*)cubeMapPaths[asset->index], 5, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE, true);
 
 				} else if(folderIndex == 2) {
 					loadVoxelTextures(MINECRAFT_TEXTURE_FOLDER, INTERNAL_TEXTURE_FORMAT, true, asset->index);

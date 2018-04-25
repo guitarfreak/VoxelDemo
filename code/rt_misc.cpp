@@ -187,12 +187,9 @@ inline char * intToStr(char* buffer, i64 var) {
 	return buffer;
 };
 
-char* floatToStr(char * buffer, float f, int precision = 0)
-{
-	int stringSize = sprintf(buffer, "%1.7f", f); // TODO: Make more robust.
-	if (precision > 0) {
-		buffer[stringSize - (7-precision)] = '\0';
-	} else {
+char* floatToStr(char * buffer, float f, int precision = 0) {
+	int stringSize = sprintf(buffer, "%1.*f", precision, f); // TODO: Make more robust.
+	if(precision == 0) {
 		int stringIndex = stringSize-1;
 		while(buffer[stringIndex] == '0') {
 			stringIndex--;
@@ -749,10 +746,10 @@ void initMemoryArray(MemoryArray * memory, int slotSize, void* baseAddress = 0) 
 
 
 
-MemoryArray* globalMemoryArray;
+MemoryArray* theMemoryArray;
 
 void* getMemoryArray(int size, MemoryArray * memory = 0) {
-    if(!memory) memory = globalMemoryArray;
+    if(!memory) memory = theMemoryArray;
     myAssert(memory->index + size <= memory->size);
 
     void * location = memory->data + memory->index;
@@ -762,14 +759,14 @@ void* getMemoryArray(int size, MemoryArray * memory = 0) {
 }
 
 void freeMemoryArray(int size, MemoryArray * memory = 0) {
-    if(!memory) memory = globalMemoryArray;
+    if(!memory) memory = theMemoryArray;
     myAssert(memory->size >= memory->index);
 
     memory->index -= size;
 }
 
 void clearMemoryArray(MemoryArray* memory = 0) {
-    if(!memory) memory = globalMemoryArray;
+    if(!memory) memory = theMemoryArray;
 	memory->index = 0;
 }
 

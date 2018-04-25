@@ -1,4 +1,3 @@
-extern ThreadQueue* theThreadQueue;
 
 #define VOXEL_X 64
 #define VOXEL_Y 64
@@ -18,7 +17,7 @@ extern ThreadQueue* theThreadQueue;
 
 struct VoxelWorldSettings {
 	int viewDistance = 5;
-	int storeDistance = viewDistance + 3;
+	int storeDistanceOffset = 3;
 	int storeSize = 2;
 
 	//
@@ -134,6 +133,7 @@ enum BlockTypes {
 	BT_None = 0,
 	BT_Water,
 	BT_Sand,
+	BT_Ground,
 	BT_Grass,
 	BT_Stone,
 	BT_Snow,
@@ -254,6 +254,7 @@ int blockTypeFootsteps[BT_Size] = {
 	FOOTSTEP_WATER,
 	FOOTSTEP_SAND,
 	FOOTSTEP_GRASS,
+	FOOTSTEP_GRASS,
 	FOOTSTEP_DIRT,
 	FOOTSTEP_SNOW,
 	FOOTSTEP_DIRT,
@@ -266,9 +267,9 @@ int blockTypeFootsteps[BT_Size] = {
 
 
 // uchar blockColor[BT_Size] = {0,0,0,0,0,0,0,47,0,0,0};
-uchar blockColor[BT_Size] = {0,17,0,0,0,0,0,16,0,0,0};
-uchar texture2[BT_Size] = {0,1,1,BX2_Grass,1,1,1,BX_Leaves,1,1,1};
-uchar textureLerp[BT_Size] = {0,0,0,0,0,0,0,0,0,0,0};
+uchar blockColor[BT_Size] = {0,17,0,0,0,0,0,0,16,0,0,0};
+uchar texture2[BT_Size] = {0,1,1,BX2_Grass,1,1,1,1,BX_Leaves,1,1,1};
+uchar textureLerp[BT_Size] = {0,0,0,0,0,0,0,0,0,0,0,0};
 
 
 #define allTexSame(t) t,t,t,t,t,t
@@ -276,6 +277,7 @@ uchar texture1Faces[BT_Size][6] = {
 	{0,0,0,0,0,0},
 	{allTexSame(BX_Water)},
 	{allTexSame(BX_Sand)},
+	{allTexSame(BX_GrassBottom)},
 	{BX_GrassSide, BX_GrassSide, BX_GrassSide, BX_GrassSide, BX_GrassTop, BX_GrassBottom},
 	{allTexSame(BX_Stone)},
 	{allTexSame(BX_Snow)},
@@ -294,13 +296,14 @@ uchar geometry[BT_Size] = {
 	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_solid,0,0),
 	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_solid,0,0),
 	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_solid,0,0),
+	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_solid,0,0),
 	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_force,0,0),
 	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_force,0,0),
 	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_solid,0,0),
 	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_solid,0,0),
 };
 
-uchar meshSelection[BT_Size] = {0,1,0,0,0,0,0,1,1,0,0};
+uchar meshSelection[BT_Size] = {0,1,0,0,0,0,0,0,1,1,0,0};
 
 // uint blockMainTexture[BT_Size] = {
 // };
@@ -490,7 +493,7 @@ void generateVoxelMeshThreaded(void* data) {
 				float modHeight = height+mod;
 				int blockType;
 	    			 if(modHeight <  vs->heightLevels[0]) blockType = BT_Sand; // sand
-	    		else if(modHeight <  vs->heightLevels[1]) blockType = BT_Grass; // grass
+	    		else if(modHeight <  vs->heightLevels[1]) blockType = BT_Ground; // grass
 	    		else if(modHeight <  vs->heightLevels[2]) blockType = BT_Stone; // stone
 	    		else if(modHeight <= vs->heightLevels[3]) blockType = BT_Snow; // snow
 
@@ -499,22 +502,30 @@ void generateVoxelMeshThreaded(void* data) {
 	    		height = pow(height,vs->worldPowCurve);
 	    		int blockHeight = lerp(height, vs->worldMin, vs->worldMax);
 
+	    		// Blocktype.
 	    		for(int z = 0; z < blockHeight; z++) {
 	    			voxels[voxelCacheArray(x,y,z)] = blockType;
 	    			lighting[voxelCacheArray(x,y,z)] = 0;
 	    		}
 
+	    		if(blockType == BT_Ground) {
+	    			voxels[voxelCacheArray(x,y,blockHeight-1)] = BT_Grass;
+	    		}
+
+	    		// Air.
 	    		for(int z = blockHeight; z < VOXEL_Z; z++) {
 	    			voxels[voxelCacheArray(x,y,z)] = 0;
 	    			lighting[voxelCacheArray(x,y,z)] = vs->globalLumen;
 	    		}
 
-	    		if(blockType == BT_Grass && vs->treeNoise[y*VOXEL_Y + x] == 1 && 
+	    		// Trees.
+	    		if(blockType == BT_Ground && vs->treeNoise[y*VOXEL_Y + x] == 1 && 
 	    			valueBetween(y, min.y+3, max.y-3) && valueBetween(x, min.x+3, max.x-3) && 
 	    			valueBetween(perlinMod, 0.2f, 0.4f)) {
 	    			treePositions[treePositionsSize++] = vec3i(x,y,blockHeight);
 		    	}
 
+		    	// Water.
 		    	int waterLevelHeight = vs->waterLevelHeight;
 		    	if(blockHeight < waterLevelHeight) {
 		    		for(int z = blockHeight; z < waterLevelHeight; z++) {
@@ -942,8 +953,8 @@ void setupVoxelUniforms(Vec3 cameraPos, Mat4 view, Mat4 proj, Vec3 fogColor, int
 	Vec3 lColor = vec3(0.7f,0.7f,0.5f);
 	Vec3 lColorBrightness = lColor*50;
 	Vec3 light[2] = { vec3(0,0,(amp/2)+start + sin(dtl)*amp), lColorBrightness };
-	// int loc = glGetUniformLocation(globalGraphicsState->pipelineIds.voxelFragment, "light_source");
-	// glProgramUniform3fv(globalGraphicsState->pipelineIds.voxelFragment, loc, 2, (GLfloat*)light);
+	// int loc = glGetUniformLocation(theGraphicsState->pipelineIds.voxelFragment, "light_source");
+	// glProgramUniform3fv(theGraphicsState->pipelineIds.voxelFragment, loc, 2, (GLfloat*)light);
 	pushUniform(SHADER_VOXEL, 1, VOXEL_UNIFORM_LIGHT_SOURCE, light, 2);
 	dcCube({light[0], vec3(3,3,3), vec4(lColor, 1), 0, vec3(0,0,0)});
 	#endif
@@ -1027,15 +1038,15 @@ void setupVoxelUniforms(Vec3 cameraPos, Mat4 view, Mat4 proj, Vec3 fogColor, int
 void drawVoxelMesh(VoxelMesh* m, int drawMode = 0) {
 	TIMER_BLOCK();
 
-	globalGraphicsState->textureUnits[0] = globalGraphicsState->textures3d[0].id;
-	globalGraphicsState->textureUnits[1] = globalGraphicsState->textures3d[1].id;
-	globalGraphicsState->samplerUnits[0] = globalGraphicsState->samplers[SAMPLER_VOXEL_1];
-	globalGraphicsState->samplerUnits[1] = globalGraphicsState->samplers[SAMPLER_VOXEL_2];
-	globalGraphicsState->samplerUnits[2] = globalGraphicsState->samplers[SAMPLER_VOXEL_3];
+	theGraphicsState->textureUnits[0] = theGraphicsState->textures3d[0].id;
+	theGraphicsState->textureUnits[1] = theGraphicsState->textures3d[1].id;
+	theGraphicsState->samplerUnits[0] = theGraphicsState->samplers[SAMPLER_VOXEL_1];
+	theGraphicsState->samplerUnits[1] = theGraphicsState->samplers[SAMPLER_VOXEL_2];
+	theGraphicsState->samplerUnits[2] = theGraphicsState->samplers[SAMPLER_VOXEL_3];
 
 
 
-	glBindSamplers(0,16,globalGraphicsState->samplerUnits);
+	glBindSamplers(0,16,theGraphicsState->samplerUnits);
 
 	bindShader(SHADER_VOXEL);
 	pushUniform(SHADER_VOXEL, 2, VOXEL_UNIFORM_TRANSFORM, m->transform[0], 3);
@@ -1046,8 +1057,8 @@ void drawVoxelMesh(VoxelMesh* m, int drawMode = 0) {
 		glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 0, (void*)0);
 		glEnableVertexAttribArray(vaLoc);
 
-		globalGraphicsState->textureUnits[2] = m->textureId;
-		glBindTextures(0,16,globalGraphicsState->textureUnits);
+		theGraphicsState->textureUnits[2] = m->textureId;
+		glBindTextures(0,16,theGraphicsState->textureUnits);
 
 		glDrawArrays(GL_QUADS, 0, m->quadCount*4);
 	}
@@ -1058,8 +1069,8 @@ void drawVoxelMesh(VoxelMesh* m, int drawMode = 0) {
 		glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 0, (void*)0);
 		glEnableVertexAttribArray(vaLoc);
 
-		globalGraphicsState->textureUnits[2] = m->textureTransId;
-		glBindTextures(0,16,globalGraphicsState->textureUnits);
+		theGraphicsState->textureUnits[2] = m->textureTransId;
+		glBindTextures(0,16,theGraphicsState->textureUnits);
 
 		glDrawArrays(GL_QUADS, 0, m->quadCountTrans*4);
 	}
@@ -1073,7 +1084,7 @@ void loadVoxelTextures(char* folderPath, float waterAlpha, int internalFormat, b
 	strClear(p);
 	strAppend(p, (char*)folderPath);
 
-	Texture* texture = globalGraphicsState->textures3d + 0;
+	Texture* texture = theGraphicsState->textures3d + 0;
 
 	if(!reload) {
 		glCreateTextures(GL_TEXTURE_2D_ARRAY, 2, &texture->id);
@@ -1110,7 +1121,7 @@ void loadVoxelTextures(char* folderPath, float waterAlpha, int internalFormat, b
 
 	if(!reload || (reload && levelToReload == BX_Leaves))
 	{
-		int textureId = globalGraphicsState->textures3d[0].id;
+		int textureId = theGraphicsState->textures3d[0].id;
 
 		float alphaCoverage[mipMapCount] = {};
 		int size = 32;
@@ -1151,7 +1162,7 @@ void loadVoxelTextures(char* folderPath, float waterAlpha, int internalFormat, b
 	}
 
 
-	texture = globalGraphicsState->textures3d + 1;
+	texture = theGraphicsState->textures3d + 1;
 
 	if(!reload) {
 		glCreateTextures(GL_TEXTURE_2D_ARRAY, 2, &texture->id);
@@ -1267,4 +1278,52 @@ void decompressVoxelData(VoxelMesh* mesh) {
 
 	}
 
+}
+
+void resetVoxelHashAndMeshes(VoxelData* vd) {
+
+	VoxelArray* voxelHash = vd->voxelHash;
+	for(int i = 0; i < vd->voxelHashSize; i++) {
+		voxelHash[i].count = 0;
+	}
+
+	DArray<VoxelMesh>* voxels = &vd->voxels;
+	for(int i = 0; i < voxels->count; i++) {
+		freeVoxelMesh(voxels->data + i);
+	}
+
+	voxels->clear();
+}
+
+
+void drawCubeMap(int skyBoxId, Entity* player, Entity* camera, bool playerMode, int fieldOfView, float aspectRatio, VoxelWorldSettings* voxelSettings, bool reflection) {
+
+	bindShader(SHADER_CUBEMAP);
+	glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+	glBindTextures(0, 1, &getCubemap(skyBoxId)->id);
+	glBindSamplers(0, 1, theGraphicsState->samplers);
+
+	Vec3 skyBoxRot;
+	if(playerMode) skyBoxRot = player->rot;
+	else skyBoxRot = camera->rot;
+	skyBoxRot.x += M_PI;
+
+	Camera skyBoxCam = getCamData(vec3(0,0,0), skyBoxRot, vec3(0,0,0), vec3(0,1,0), vec3(0,0,1));
+	pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_VIEW, viewMatrix(skyBoxCam.pos, -skyBoxCam.look, skyBoxCam.up, skyBoxCam.right));
+	pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_PROJ, projMatrix(degreeToRadian(fieldOfView), aspectRatio, 0.001f, 2));
+
+	pushUniform(SHADER_CUBEMAP, 2, CUBEMAP_UNIFORM_CLIPPLANE, reflection);
+	if(reflection) {
+		pushUniform(SHADER_CUBEMAP, 0, CUBEMAP_UNIFORM_CPLANE1, 0,0,-1,	voxelSettings->waterLevelHeight);
+	}
+
+	pushUniform(SHADER_CUBEMAP, 2, CUBEMAP_UNIFORM_FOGCOLOR, voxelSettings->fogColor);
+
+	glDisable(GL_DEPTH_TEST);
+	glFrontFace(GL_CCW);
+		glDrawArrays(GL_TRIANGLES, 0, 6*6);
+	glFrontFace(GL_CW);
+	glEnable(GL_DEPTH_TEST);
+
+	glDisable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 }

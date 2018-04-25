@@ -1368,14 +1368,14 @@ struct Console {
 		commandAvailable = false;
 	}
 
-	void initSettings() {
+	void initSettings(int fontHeight) {
 		cs.consoleSpeed = 10;
 
 		cs.bodyFontHeightPadding = 1.0f;
 		cs.bodyFontHeightResultPadding = 1.2f;
 
-		cs.bodyFont = getFont(FONT_SOURCESANS_PRO, 22);
-		cs.inputFont = getFont(FONT_CONSOLAS, 16);
+		cs.bodyFont = getFont(FONT_SOURCESANS_PRO, fontHeight * 1.4f);
+		cs.inputFont = getFont(FONT_CONSOLAS, fontHeight*1.2f);
 
 		cs.inputHeightPadding = 1.5;
 		cs.fontDrawHeightOffset = 0.2f;
@@ -1407,9 +1407,9 @@ struct Console {
 		cs.commandPreText = "> ";
 	}
 
-	void update(Input* input, Vec2 currentRes, float dt, bool smallExtensionButtonPressed, bool bigExtensionButtonPressed) {
+	void update(Input* input, Vec2 currentRes, int fontHeight, float dt, bool smallExtensionButtonPressed, bool bigExtensionButtonPressed) {
 
-		initSettings();
+		initSettings(fontHeight);
 
 		this->input = input;
 		this->currentRes = currentRes;

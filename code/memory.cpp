@@ -11,7 +11,7 @@ struct MemoryBlock {
 	ExtendibleMemoryArray* debugMemory;
 };
 
-extern MemoryBlock* globalMemory;
+extern MemoryBlock* theMemory;
 
 #define getPStruct(type) 		(type*)(getPMemoryMain(sizeof(type)))
 #define getPArray(type, count) 	(type*)(getPMemoryMain(sizeof(type) * count))
@@ -26,14 +26,14 @@ extern MemoryBlock* globalMemory;
 // void* getTMemory(int size, MemoryBlock * memory = 0);
 
 void *getPMemoryMain(int size, MemoryBlock * memory = 0) {
-	if(memory == 0) memory = globalMemory;
+	if(memory == 0) memory = theMemory;
 
 	void* location = getExtendibleMemoryArray(size, memory->pMemory);
     return location;
 }
 
 void * getTMemoryMain(int size, MemoryBlock * memory = 0) {
-	if(memory == 0) memory = globalMemory;
+	if(memory == 0) memory = theMemory;
 
 	void* location = getMemoryArray(size, memory->tMemory);
     return location;
@@ -49,53 +49,53 @@ void * getTMemoryMain(int size, MemoryBlock * memory = 0) {
 // #define getDArrayDebug(type, count) 	(type*)(getDMemoryDebug(sizeof(type) * count))
 
 void clearTMemory(MemoryBlock * memory = 0) {
-	if(memory == 0) memory = globalMemory;
+	if(memory == 0) memory = theMemory;
 
 	clearMemoryArray(memory->tMemory);
 }
 
 void *getPMemoryDebug(int size, MemoryBlock * memory = 0) {
-	if(memory == 0) memory = globalMemory;
+	if(memory == 0) memory = theMemory;
 
 	void* location = getMemoryArray(size, memory->pDebugMemory);
     return location;
 }
 
 void * getTMemoryDebug(int size, MemoryBlock * memory = 0) {
-	if(memory == 0) memory = globalMemory;
+	if(memory == 0) memory = theMemory;
 
 	void* location = getMemoryArray(size, memory->tMemoryDebug);
     return location;
 }
 
 void clearTMemoryDebug(MemoryBlock * memory = 0) {
-	if(memory == 0) memory = globalMemory;
+	if(memory == 0) memory = theMemory;
 
 	clearMemoryArray(memory->tMemoryDebug);
 }
 
 // void pushMarkerTMemory(MemoryBlock * memory = 0)  {
-    // if(!memory) memory = globalMemory;
+    // if(!memory) memory = theMemory;
     // memory->markerStack[memory->markerStackIndex] = memory->temporaryIndex;
     // memory->markerStackIndex++;
 // }
 
 // void popMarkerTMemory(MemoryBlock * memory = 0)  {
-    // if(!memory) memory = globalMemory;
+    // if(!memory) memory = theMemory;
     // int size = memory->temporaryIndex - memory->markerStack[memory->markerStackIndex];
     // memory->markerStackIndex--;
     // freeTMemory(size, memory);
 // }
 
 void * getDMemoryMain(int size, MemoryBlock * memory = 0) {
-	if(memory == 0) memory = globalMemory;
+	if(memory == 0) memory = theMemory;
 
 	void* location = getExtendibleBucketMemory(memory->dMemory);
     return location;
 }
 
 void freeDMemory(void* address, MemoryBlock * memory = 0) {
-	if(memory == 0) memory = globalMemory;
+	if(memory == 0) memory = theMemory;
 
 	freeExtendibleBucketMemory(address, memory->dMemory);
 }
@@ -111,14 +111,14 @@ void freeDMemory(void* address, MemoryBlock * memory = 0) {
 #define getTStringX(size) 		(char*)(getTMemory(size)) 
 
 void *getPMemory(int size, MemoryBlock * memory = 0) {
-	if(memory == 0) memory = globalMemory;
+	if(memory == 0) memory = theMemory;
 
 	if(!memory->debugMode) return getPMemoryMain(size, memory);
 	else return getPMemoryDebug(size, memory);
 }
 
 void *getTMemory(int size, MemoryBlock * memory = 0) {
-	if(memory == 0) memory = globalMemory;
+	if(memory == 0) memory = theMemory;
 
 	if(!memory->debugMode) return getTMemoryMain(size, memory);
 	else return getTMemoryDebug(size, memory);

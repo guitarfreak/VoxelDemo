@@ -3,7 +3,7 @@
 const int INTERNAL_TEXTURE_FORMAT = USE_SRGB ? GL_SRGB8_ALPHA8 : GL_RGBA8;
 
 #define COLOR_SRGB(color) \
-	(globalGraphicsState->useSRGB ? colorSRGB(color) : color);
+	(theGraphicsState->useSRGB ? colorSRGB(color) : color);
 
 #define APP_NAME "VoxelGame"
 
@@ -13,6 +13,7 @@ const int INTERNAL_TEXTURE_FORMAT = USE_SRGB ? GL_SRGB8_ALPHA8 : GL_RGBA8;
 #define HOTRELOAD_SHADERS 1
 
 #define App_Session_File ".\\session.tmp"
+#define Game_Settings_File ".\\settings.tmp"
 
 #ifdef SHIPPING_MODE
 #define DATA_FOLDER(str) ".\\data\\" str
@@ -710,7 +711,7 @@ const char* fragmentShaderCubeMap = GLSL (
 	void main() {
 		vec3 clipPos = pos;
 		if(clipPlane) clipPos.y *= -1;
-		// color = texture(s, vec4(clipPos, 0));
+		color = texture(s, vec4(clipPos, 0));
 
 		float d0 = -0.01f;
 		if(clipPos.y <= 0) {

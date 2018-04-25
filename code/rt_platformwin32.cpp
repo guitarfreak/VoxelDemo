@@ -688,6 +688,7 @@ void initSystem(SystemData* systemData, WindowSettings* ws, WindowsData wData, V
     windowClass.lpfnWndProc = mainWindowCallBack;
     windowClass.hInstance = systemData->instance;
     windowClass.lpszClassName = "App";
+    windowClass.hCursor = LoadCursor(0, IDC_ARROW);
 
     if(!RegisterClass(&windowClass)) {
         DWORD errorCode = GetLastError();
@@ -1152,4 +1153,8 @@ int folderFileCount(char* folder) {
 	}
 
 	return count;
+}
+
+void setVsync() {
+
 }
