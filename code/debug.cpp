@@ -1,4 +1,7 @@
 
+#define DEBUG_NOTE_LENGTH 50
+#define DEBUG_NOTE_DURATION 3
+
 enum StructType {
 	STRUCTTYPE_INT = 0,
 	STRUCTTYPE_FLOAT,
@@ -35,6 +38,117 @@ struct StructMemberInfo {
 	int arrayCount;
 	ArrayInfo arrays[2];
 };
+
+struct StructInfo {
+	char* name;
+	int size;
+	int memberCount;
+	StructMemberInfo* list;
+};
+
+struct Asset {
+	int index;
+	int folderIndex;
+	char* filePath;
+	FILETIME lastWriteTime;
+};
+
+struct DebugState {
+	Asset* assets;
+	int assetCount;
+
+	i64 lastTimeStamp;
+	f64 dt;
+	f64 time;
+
+	f64 debugTime;
+	f64 debugRenderTime;
+
+	MSTimer swapTimer;
+	MSTimer frameTimer;
+	MSTimer tempTimer;
+
+	f64 fpsTime;
+	int fpsCounter;
+	float avgFps;
+
+	bool showMenu;
+	bool showStats;
+	bool showConsole;
+	bool showHud;
+
+	DrawCommandList commandListDebug;
+	Input* input;
+
+	Timer* timer;
+	Timings timings[120][32];
+	Statistic statistics[120][32];
+	int cycleIndex;
+	bool stopCollating;
+
+	bool setPause;
+	bool setPlay;
+	bool noCollating;
+	int lastCycleIndex;
+	GraphSlot* savedBuffer;
+	int savedBufferIndex;
+	int savedBufferMax;
+	int savedBufferCount;
+	int lastBufferIndex;
+
+	GraphSlot graphSlots[16][8]; // threads, stackIndex
+	int graphSlotCount[16];
+
+	//
+
+	int mode;
+	int graphSortingIndex;
+	
+	double timelineCamPos;
+	double timelineCamSize;
+
+	float lineGraphCamPos;
+	float lineGraphCamSize;
+	float lineGraphHeight;
+	int lineGraphHighlight;
+
+	//
+
+	int fontHeight;
+	float fontScale;
+
+	GuiInput gInput;
+	Gui* gui;
+	Gui* gui2;
+	float guiAlpha;
+
+	Input* recordedInput;
+	int inputCapacity;
+	bool recordingInput;
+	int inputIndex;
+
+	char* snapShotMemory[8];
+	int snapShotCount;
+	int snapShotMemoryIndex;
+
+	bool playbackInput;
+	int playbackIndex;
+	bool playbackSwapMemory;
+	bool playbackPause;
+	bool playbackBreak;
+	int playbackBreakIndex;
+
+	Console console;
+
+	char* notificationStack[10];
+	float notificationTimes[10];
+	int notificationCount;
+
+	char* infoStack[10];
+	int infoStackCount;
+};
+
+
 
 StructMemberInfo initMemberInfo(char* name, int type, int offset) {
 	StructMemberInfo info;
@@ -82,14 +196,7 @@ StructMemberInfo entityStructMemberInfos[] = {
 	initMemberInfo("isMoving", STRUCTTYPE_BOOL, offsetof(Entity, isMoving)),
 	initMemberInfo("isColliding", STRUCTTYPE_BOOL, offsetof(Entity, isColliding)),
 	initMemberInfo("exploded", STRUCTTYPE_BOOL, offsetof(Entity, exploded)),
-	initMemberInfo("playerOnGround", STRUCTTYPE_BOOL, offsetof(Entity, playerOnGround)),
-};
-
-struct StructInfo {
-	char* name;
-	int size;
-	int memberCount;
-	StructMemberInfo* list;
+	initMemberInfo("onGround", STRUCTTYPE_BOOL, offsetof(Entity, onGround)),
 };
 
 StructInfo structInfos[] = {
@@ -207,10 +314,6 @@ void printType(int structType, char* data, int depth) {
 
 }
 
-
-
-
-
 void guiPrintIntrospection(Gui* gui, int structType, char* data, int depth = 0);
 void guiPrintIntrospection(Gui* gui, char* structBase, StructMemberInfo member, char* data, int arrayIndex, int depth) {
 	int arrayPrintLimit = 5;
@@ -297,105 +400,6 @@ void guiPrintIntrospection(Gui* gui, int structType, char* data, int depth) {
 
 
 
-#define DEBUG_NOTE_LENGTH 50
-#define DEBUG_NOTE_DURATION 3
-
-struct Asset;
-struct DebugState {
-	Asset* assets;
-	int assetCount;
-
-	i64 lastTimeStamp;
-	f64 dt;
-	f64 time;
-
-	f64 debugTime;
-	f64 debugRenderTime;
-
-	MSTimer swapTimer;
-	MSTimer frameTimer;
-	MSTimer tempTimer;
-
-	f64 fpsTime;
-	int fpsCounter;
-	float avgFps;
-
-	bool showMenu;
-	bool showStats;
-	bool showConsole;
-	bool showHud;
-
-	DrawCommandList commandListDebug;
-	Input* input;
-
-	Timer* timer;
-	Timings timings[120][32];
-	Statistic statistics[120][32];
-	int cycleIndex;
-	bool stopCollating;
-
-	bool setPause;
-	bool setPlay;
-	bool noCollating;
-	int lastCycleIndex;
-	GraphSlot* savedBuffer;
-	int savedBufferIndex;
-	int savedBufferMax;
-	int savedBufferCount;
-	int lastBufferIndex;
-
-	GraphSlot graphSlots[16][8]; // threads, stackIndex
-	int graphSlotCount[16];
-
-	//
-
-	int mode;
-	int graphSortingIndex;
-	
-	double timelineCamPos;
-	double timelineCamSize;
-
-	float lineGraphCamPos;
-	float lineGraphCamSize;
-	float lineGraphHeight;
-	int lineGraphHighlight;
-
-	//
-
-	int fontHeight;
-	float fontScale;
-
-	GuiInput gInput;
-	Gui* gui;
-	Gui* gui2;
-	float guiAlpha;
-
-	Input* recordedInput;
-	int inputCapacity;
-	bool recordingInput;
-	int inputIndex;
-
-	char* snapShotMemory[8];
-	int snapShotCount;
-	int snapShotMemoryIndex;
-
-	bool playbackInput;
-	int playbackIndex;
-	bool playbackSwapMemory;
-	bool playbackPause;
-	bool playbackBreak;
-	int playbackBreakIndex;
-
-	Console console;
-
-	char* notificationStack[10];
-	float notificationTimes[10];
-	int notificationCount;
-
-	char* infoStack[10];
-	int infoStackCount;
-};
-
 void addDebugNote(char* string, float duration = DEBUG_NOTE_DURATION) {
 	DebugState* ds = theDebugState;
 
@@ -417,13 +421,6 @@ void addDebugInfo(char* string) {
 }
 
 
-
-struct Asset {
-	int index;
-	int folderIndex;
-	char* filePath;
-	FILETIME lastWriteTime;
-};
 
 void initWatchFolders(HANDLE* folderHandles, Asset* assets, int* assetCount) {
 	for(int i = 0; i < 3; i++) {

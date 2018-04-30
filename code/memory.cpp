@@ -126,8 +126,6 @@ void *getTMemory(int size, MemoryBlock * memory = 0) {
 
 
 
-
-
 inline char* getPStringCpy(char* str, int size = -1) {
 	char* newStr = getPString((size == -1 ? strLen(str) : size) + 1);
 	strCpy(newStr, str, size);

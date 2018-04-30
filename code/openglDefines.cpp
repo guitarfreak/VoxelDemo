@@ -48,6 +48,7 @@
 #define GL_DEBUG_SEVERITY_NOTIFICATION    0x826B
 #define GL_MULTISAMPLE                    0x809D
 #define GL_FUNC_ADD                       0x8006
+#define GL_FUNC_SUBTRACT                  0x800A
 #define GL_CLIP_DISTANCE0                 0x3000
 #define GL_CLIP_DISTANCE1                 0x3001
 #define GL_FUNC_ADD                       0x8006

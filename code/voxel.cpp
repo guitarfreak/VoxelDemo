@@ -305,8 +305,53 @@ uchar geometry[BT_Size] = {
 
 uchar meshSelection[BT_Size] = {0,1,0,0,0,0,0,0,1,1,0,0};
 
-// uint blockMainTexture[BT_Size] = {
-// };
+Vec4 blockTypeParticleColor[] = {
+	vec4(0,0,0,1),
+	vec4(0.561, 0.682, 0.812,0.75f), // BT_Water,
+	vec4(0.859, 0.722, 0.49,1), // BT_Sand,
+	vec4(0.643, 0.518, 0.337,1), // BT_Ground,
+	vec4(0.431, 0.475, 0.196,1), // BT_Grass,
+	vec4(0.451, 0.451, 0.451,1), // BT_Stone,
+	vec4(0.945, 0.961, 0.969,1), // BT_Snow,
+	vec4(0.698, 0.62, 0.478,1), // BT_TreeLog,
+	vec4(200/255.0f,20/255.0f,0,1), // BT_Leaves,
+	vec4(1,1,1,0.2f), // BT_Glass,
+	vec4(0.918f,0.882f,0.51f,1), // BT_GlowStone,
+	vec4(0.98f,0.6f,0.165f,1), // BT_Pumpkin,
+};
+
+float blockHardnessType[] = {
+	0, // Air. 
+	1, // Leaves.
+	2, // Sand.
+	3, // Ground.
+	4, // Wood.
+	5, // Stone.
+};
+
+float blockTypeHardness[] = {
+	blockHardnessType[0], // BT_None,
+	blockHardnessType[1], // BT_Water,
+	blockHardnessType[2], // BT_Sand,
+	blockHardnessType[3], // BT_Ground,
+	blockHardnessType[3], // BT_Grass,
+	blockHardnessType[5], // BT_Stone,
+	blockHardnessType[3], // BT_Snow,
+	blockHardnessType[4], // BT_TreeLog,
+	blockHardnessType[1], // BT_Leaves,
+	blockHardnessType[1], // BT_Glass,
+	blockHardnessType[4], // BT_GlowStone,
+	blockHardnessType[4], // BT_Pumpkin,
+};
+
+Vec3 voxelVertices[] = {
+	vec3( 1, 1, 1), vec3( 1, 1,-1), vec3( 1,-1,-1), vec3( 1,-1, 1), // +x
+	vec3(-1,-1, 1), vec3(-1,-1,-1), vec3(-1, 1,-1), vec3(-1, 1, 1), // -x
+	vec3(-1, 1, 1), vec3(-1, 1,-1), vec3( 1, 1,-1), vec3( 1, 1, 1), // +y
+	vec3( 1,-1, 1), vec3( 1,-1,-1), vec3(-1,-1,-1), vec3(-1,-1, 1), // -y
+	vec3(-1, 1, 1), vec3( 1, 1, 1), vec3( 1,-1, 1), vec3(-1,-1, 1), // +z
+	vec3( 1, 1,-1), vec3(-1, 1,-1), vec3(-1,-1,-1), vec3( 1,-1,-1), // -z
+};
 
 static unsigned char colorPaletteCompact[64][3] =
 {
@@ -1183,7 +1228,7 @@ void loadVoxelTextures(char* folderPath, float waterAlpha, int internalFormat, b
 
 }
 
-bool collisionVoxelWidthBox(VoxelData* voxelData, Vec3 boxPos, Vec3 boxSize, float* minDistance = 0, Vec3* collisionVoxel = 0) {
+bool collisionVoxelBox(VoxelData* voxelData, Vec3 boxPos, Vec3 boxSize, float* minDistance = 0, Vec3* collisionVoxel = 0) {
 
 	// First get the mesh coords that touch the player box.
 
@@ -1194,7 +1239,7 @@ bool collisionVoxelWidthBox(VoxelData* voxelData, Vec3 boxPos, Vec3 boxSize, flo
 	bool checkDistance = minDistance != 0 && collisionVoxel != 0;
 
 	bool collision = false;
-	if(checkDistance) *minDistance = 100000; // @Cleanup: Replace with FLT_MAX or something.
+	if(checkDistance) *minDistance = FLT_MAX;
 
 	// Check collision with the voxel that's closest.
 
@@ -1203,13 +1248,13 @@ bool collisionVoxelWidthBox(VoxelData* voxelData, Vec3 boxPos, Vec3 boxSize, flo
 			for(int z = voxelMin.z; z < voxelMax.z; z++) {
 				Vec3i coord = vec3i(x,y,z);
 				uchar* block = getBlockFromVoxel(voxelData, coord);
-				if(!block) continue;
 
-				if(*block > 0) {
+				if(block && *block > 0) {
 					if(checkDistance) {
 						Vec3 cBox = voxelToVoxelCoord(coord);
 						float distance = lenVec3(boxPos - cBox);
-						if(*minDistance == 100000 || distance > *minDistance) {
+						
+						if(distance < *minDistance) {
 							*minDistance = distance;
 							*collisionVoxel = cBox;
 						}
@@ -1223,6 +1268,94 @@ bool collisionVoxelWidthBox(VoxelData* voxelData, Vec3 boxPos, Vec3 boxSize, flo
 
 	return collision;
 }
+
+bool collisionVoxelBoxDistance(VoxelData* voxelData, Vec3 pos, Vec3 size, Vec3* newPos, Vec3* collisionNormal) {
+
+	*collisionNormal = vec3(0,0,0);
+
+	bool result = true;
+
+	int collisionCount = 0;
+	bool collision = true;
+	while(collision) {
+
+		float md;
+		Vec3 collisionBox;
+		collision = collisionVoxelBox(voxelData, pos, size, &md, &collisionBox);
+
+		if(collision) {
+			collisionCount++;
+
+			float maxDistance = -FLT_MAX;
+			Vec3 dir = vec3(0,0,0);
+
+			// check all the 6 planes and take the one with the shortest distance
+			Vec3 directions[] = {vec3(1,0,0), vec3(-1,0,0), vec3(0,1,0), 
+							 	 vec3(0,-1,0), vec3(0,0,1), vec3(0,0,-1),};
+			for(int i = 0; i < 6; i++) {
+				Vec3 n = directions[i];
+
+				// assuming voxel size is 1
+				// this could be simpler because the voxels are axis aligned
+				Vec3 p = collisionBox + (n * ((size/2) + 0.5));
+				float d = -dot(p, n);
+				float d2 = dot(pos, n);
+
+				// distances are lower then zero in this case where the point is 
+				// not on the same side as the normal
+				float distance = d + d2;
+
+				if(i == 0 || distance > maxDistance) {
+					maxDistance = distance;
+					dir = n;
+				}
+			}
+
+			// float error = 0;
+			float error = 0.0001f;
+			pos += dir*(-maxDistance + error);
+
+			(*collisionNormal) += dir;
+		}
+
+		if(collisionCount > 5) {
+			result = false;
+			break;
+		}
+	}
+
+	*newPos = pos;
+
+	return result;
+}
+
+bool raycastGroundVoxelBox(VoxelData* voxelData, Vec3 pos, Vec3 size, uchar* collisionBlockType) {
+	float raycastThreshold = 0.01f;
+
+	bool groundCollision = false;
+
+	Vec3 bottomCenter = pos - vec3(0,0,size.z/2);
+	Vec2 offsets[] = {vec2(0,0), 
+					  vec2(0.5f, 0.5f), vec2(-0.5f, 0.5f),
+					  vec2(0.5f,-0.5f), vec2(-0.5f,-0.5f),};
+
+	for(int i = 0; i < 5; i++) {
+		Vec3 gp = bottomCenter + vec3(offsets[i],0)*size;
+		gp.z -= raycastThreshold;
+
+		Vec3 block = coordToVoxelCoord(gp);
+		uchar* blockType = getBlockFromCoord(voxelData, gp);
+
+		if(blockType && *blockType > 0) {
+			groundCollision = true;
+			if(collisionBlockType) *collisionBlockType = *blockType;
+			break;
+		}
+	}
+
+	return groundCollision;
+}
+
 
 void compressVoxelData(VoxelMesh* mesh, uchar* buffer) {
 	uchar* buf = buffer;
@@ -1295,7 +1428,6 @@ void resetVoxelHashAndMeshes(VoxelData* vd) {
 	voxels->clear();
 }
 
-
 void drawCubeMap(int skyBoxId, Entity* player, Entity* camera, bool playerMode, int fieldOfView, float aspectRatio, VoxelWorldSettings* voxelSettings, bool reflection) {
 
 	bindShader(SHADER_CUBEMAP);
@@ -1326,4 +1458,49 @@ void drawCubeMap(int skyBoxId, Entity* player, Entity* camera, bool playerMode, 
 	glEnable(GL_DEPTH_TEST);
 
 	glDisable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+}
+
+void getVoxelQuadFromFaceDir(Vec3 p, Vec3 faceDir, Vec3 vs[4]) {
+
+	Vec3* voxelVerts;
+	     if(faceDir.x > 0) voxelVerts = voxelVertices + 0*4;
+	else if(faceDir.x < 0) voxelVerts = voxelVertices + 1*4;
+	else if(faceDir.y > 0) voxelVerts = voxelVertices + 2*4;
+	else if(faceDir.y < 0) voxelVerts = voxelVertices + 3*4;
+	else if(faceDir.z > 0) voxelVerts = voxelVertices + 4*4;
+	else if(faceDir.z < 0) voxelVerts = voxelVertices + 5*4;
+	else assert(false);
+
+	for(int i = 0; i < 4; i++) vs[i] = p + voxelVerts[i]*0.5f;
+
+	// int axis = getBiggestAxis(faceDir);
+
+	// for(int i = 0; i < 4; i++) {
+	// 	vs[i] = p + voxelVerts[i]*0.5f;
+
+	// 	float before = vs[i].e[axis];
+	// 	// vs[i].e[axis] = nextafterf(vs[i].e[axis], vs[i].e[axis] + faceDir.e[axis]);
+
+	// 	// float diff = nextafterf(vs[i].e[axis], vs[i].e[axis] + faceDir.e[axis]);
+	// 	// diff -= vs[i].e[axis];
+	// 	// diff *= 100;
+
+	// 	for(int j = 0; j < 50; j++) {
+	// 		vs[i].e[axis] = nextafterf(vs[i].e[axis], vs[i].e[axis] + faceDir.e[axis]);
+	// 	}
+
+	// 	// vs[i].e[axis] += diff;
+
+	// 	printf("DIFF:%f\n", before - vs[i].e[axis]);
+
+	// 	// vs[i].e[axis] -= vs[i].e[axis]*0.1f;
+	// 	// vs[i].e[axis] *= 1.001f;
+	// }
+}
+
+void getVoxelShowingVoxelFaceDirs(Vec3 dirFromVoxelToCam, Vec3 faceDirs[3]) {
+	for(int i = 0; i < 3; i++) {
+		faceDirs[i] = vec3(0,0,0);
+		faceDirs[i].e[i] = dirFromVoxelToCam.e[i] < 0 ? -1 : 1;
+	}
 }

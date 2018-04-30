@@ -78,6 +78,7 @@ enum TextureId {
 	TEXTURE_RECT,
 	TEXTURE_CIRCLE,
 	TEXTURE_TEST,
+	TEXTURE_DESTROY_STAGES,
 	TEXTURE_SIZE,
 };
 
@@ -86,6 +87,7 @@ char* texturePaths[] = {
 	DATA_FOLDER("Textures\\Misc\\rect.png"),
 	DATA_FOLDER("Textures\\Misc\\circle.png"),
 	DATA_FOLDER("Textures\\Misc\\test.png"),
+	DATA_FOLDER("Textures\\Minecraft\\destroyStages.png"),
 };
 
 //

@@ -1876,8 +1876,11 @@ inline bool operator!=(Vec3 a, Vec3 b) {
 }
 
 inline float dot(Vec3 a, Vec3 b) {
-	float result = a.x*b.x + a.y*b.y + a.z*b.z;
-	return result;
+	return a.x*b.x + a.y*b.y + a.z*b.z;
+}
+
+inline float dot(Vec3 a) {
+	return a.x*a.x + a.y*a.y + a.z*a.z;
 }
 
 inline Vec3 cross(Vec3 a, Vec3 b) {
@@ -1898,16 +1901,28 @@ inline Vec3 toVec3(Vec2 a) {
 	return result;
 }
 
+// inline float lenVec3X(Vec3 a) {
+// 	float sqrlen = dot(a,a);
+// 	if(sqrlen > 0) sqrlen = 1.0f/sqrt(sqrlen);
+// 	return sqrlen;
+// }
+
+// inline Vec3 normVec3(Vec3 a) {
+// 	float sqrlen = lenVec3X(a);
+// 	return a*sqrlen;
+// }
+
 inline float lenVec3(Vec3 a) {
-	float sqrlen = dot(a,a);
-	if(sqrlen > 0) sqrlen = 1.0f/sqrt(sqrlen);
-	return sqrlen;
+	return sqrt(dot(a));
 }
 
 inline Vec3 normVec3(Vec3 a) {
-	float sqrlen = lenVec3(a);
-	return a*sqrlen;
+	return a/lenVec3(a);
 }
+
+// inline Vec3 normVec3(Vec3 a) {
+// 	return a/lenVec3(a);
+// }
 
 Vec3 projectPointOnLine(Vec3 lPos, Vec3 lDir, Vec3 p) {
 	Vec3 result;
@@ -1963,8 +1978,10 @@ bool boxRaycast(Vec3 lp, Vec3 ld, Rect3 box, float* distance = 0, int* face = 0)
 int getBiggestAxis(Vec3 v, int smallerAxis[2] = 0) {
 	int biggestAxis = maxReturnIndex(abs(v.x), abs(v.y), abs(v.z));
 	if(smallerAxis != 0) {
-		smallerAxis[0] = mod(biggestAxis-1, 3);
-		smallerAxis[1] = mod(biggestAxis+1, 3);
+		int axis1 = mod(biggestAxis-1, 3);
+		int axis2 = mod(biggestAxis+1, 3);
+		smallerAxis[0] = v.e[biggestAxis] < 0 ? axis1 : axis2;
+		smallerAxis[1] = v.e[biggestAxis] < 0 ? axis2 : axis1;
 	}
 
 	return biggestAxis;
@@ -2013,6 +2030,26 @@ Vec3 lerp(float percent, Vec3 a, Vec3 b) {
 	a.z = lerp(percent, a.z, b.z);
 
 	return a;
+}
+
+Vec3 randomUnitSphereDirection() {
+
+	// Distribute in box and discard if not in sphere.
+	Vec3 p;
+	do {
+		p = vec3( randomFloatPCG(-1,1, 0.0001f), 
+	              randomFloatPCG(-1,1, 0.0001f), 
+	              randomFloatPCG(-1,1, 0.0001f));
+	} while(lenVec3(p) > 1);
+
+	p = normVec3(p);
+
+	return p;
+}
+
+inline Vec3 reflectVector(Vec3 dir, Vec3 normal) {
+	Vec3 result = dir - 2*(dot(dir, normal))*normal;
+	return result;
 }
 
 //
@@ -2080,6 +2117,11 @@ inline bool operator==(Vec3i a, Vec3i b) {
 	bool equal = (a.x == b.x) && (a.y == b.y) && (a.z == b.z);
 	return equal;
 }
+
+inline bool operator!=(Vec3i a, Vec3i b) {
+	return !(a == b);
+}
+
 
 //
 //
@@ -2169,7 +2211,7 @@ inline bool operator==(Vec4 a, Vec4 b) {
 	bool result = (a.x == b.x && a.y == b.y && a.z == b.z && a.w == b.w);
 	return result;
 }
-
+// 
 inline bool operator!=(Vec4 a, Vec4 b) {
 	bool result = !(a == b);
 	return result;
@@ -2303,6 +2345,9 @@ inline Mat4 viewMatrix(Vec3 cPos, Vec3 cLook, Vec3 cUp, Vec3 cRight) {
 }
 
 inline void projMatrix(Mat4* m, float fov, float ar, float n, float f) {
+	// ar -> w / h
+	// fov -> vertical
+
 	*m = { 	1/(ar*tan(fov*0.5f)), 0, 				 0, 			 0,
 			0, 					  1/(tan(fov*0.5f)), 0, 			 0,
 			0, 					  0, 				 -((f+n)/(f-n)), -((2*f*n)/(f-n)),

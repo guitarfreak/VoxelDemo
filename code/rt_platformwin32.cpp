@@ -889,7 +889,7 @@ DWORD getWindowStyle(HWND hwnd) {
 
 void updateResolution(HWND windowHandle, WindowSettings* ws) {
 	getWindowProperties(windowHandle, &ws->currentRes.x, &ws->currentRes.y,0,0,0,0);
-	ws->aspectRatio = ws->currentRes.x / (float)ws->currentRes.y;
+	ws->aspectRatio = ws->currentRes.w / (float)ws->currentRes.h;
 
 	{
 		MONITORINFO monitorInfo;

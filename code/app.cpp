@@ -2,60 +2,34 @@
 //-----------------------------------------
 //				WHAT TO DO
 //-----------------------------------------
-- Joysticks, Keyboard, Mouse, Xinput-DirectInput
-- Data Package - Streamingw
+- Joysticks, Xinput-DirectInput
+- Data Package - Streaming
 - create simpler windows.h
-- remove c runtime library, implement sin, cos...
+- remove c runtime library
 - ballistic motion on jumping
 - round collision
 - screen space reflections
 
-- advance timestep when window not in focus (stop game when not in focus)
-- reduce number of thread queue pushes
-- insert and init mesh not thread proof, make sure every mesh is initialized before generating
 - implement sun and clouds that block beams of light
-- glowstone emmiting light
-- make voxel drop in tutorial code for stb_voxel
+- glowstone emmitting light
 - stb_voxel push alpha test in voxel vertex shader
 - rocket launcher
 - antialiased pixel graphics with neighbour sampling 
-- level of detail for world gen back row								
+- level of detail for world gen back row, project to cubemap.
   
 - put in spaces for fillString
 - simplex noise instead of perlin noise
-- make thread push copy the thead specific data on push in a seperate buffer for all possible threadjobs
-- frametime timer and fps counter
 
 - simd voxel generation
-- simd on vectors as a test first?
+- simd on vectors
 
-- experiment with directx 10
+- In executeCommandList: Remember state, and only switch if a change occured. (Like shaders, colors, linewidth, etc.)
 
-gui stuff: 
-additionally:
-- 2d drawing
-- 3d drawing
-- vector representation
-- sound 
-- entities
-- make columns stack
-- drag element to seperate column elements
-- struct as defer for section begin and such
-- make settings pushable as a whole
-  -> doesn't that remove the need for explicit stacking in scrollbars and such?
-- top menu bar
-- Clean up the gui to make it more usable.
-- Make entities watchable and changeable in Gui.
-
-Changing course for now:
- - In executeCommandList: Remember state, and only switch if a change occured. (Like shaders, colors, linewidth, etc.)
-
- - 3d animation system. (Search Opengl vertex skinning.)
- - Sound perturbation.
- - Using makros and defines to make templated vectors and hashtables and such.
- - When switching between text editor and debugger, synchronize open files.
- - Entity introspection in gui.
- - Shadow mapping, start with cloud texture projection.
+- 3d animation system. (Search Opengl vertex skinning.)
+- Sound perturbation.
+- When switching between text editor and debugger, synchronize open files.
+- Entity introspection in gui.
+- Shadow mapping, start with cloud texture projection.
 
 - atomicAdd sections are not thread proof. 
   We could have multiple equal jobs in thread queue.
@@ -65,22 +39,14 @@ Changing course for now:
 - Fix selection algorithm.
 - Cubemap not seemless.
 - Sound starts to glitch when under 30 hz because audio buffer is 2*framrate.
+- Make positions chunk based to avoid distance and collision loss of precision. 
 
 //-------------------------------------
 //               BUGS
 //-------------------------------------
-- look has to be negative to work in view projection matrix
-- distance jumping collision bug, possibly precision loss in distances
-- game input gets stuck when buttons are pressed right at the start
-- release build takes forever
+- Release build for appMain takes forever.
 
 */
-
-/*
-	switching shader -> 550 ticks
-	using namedBufferSubData vs uniforms for vertices -> 2400 ticks vs 400 ticks
-*/
-
 
 // Intrinsics.
 
@@ -109,12 +75,10 @@ Changing course for now:
 // #define STBI_ONLY_PNG
 // #include "external\stb_image_write.h"
 
-
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_PARAMETER_TAGS_H
 #include FT_MODULE_H
-
 
 #define STB_VOXEL_RENDER_IMPLEMENTATION
 // #define STBVOX_CONFIG_LIGHTING_SIMPLE
@@ -122,8 +86,6 @@ Changing course for now:
 // #define STBVOX_CONFIG_MODE 0
 #define STBVOX_CONFIG_MODE 1
 #include "external\stb_voxel_render.h"
-
-
 
 //
 
@@ -134,13 +96,13 @@ struct DrawCommandList;
 struct MemoryBlock;
 struct DebugState;
 struct Timer;
-ThreadQueue* theThreadQueue;
-GraphicsState* theGraphicsState;
-AudioState* theAudioState;
+ThreadQueue*     theThreadQueue;
+GraphicsState*   theGraphicsState;
+AudioState*      theAudioState;
 DrawCommandList* globalCommandList;
-MemoryBlock* theMemory;
-DebugState* theDebugState;
-Timer* theTimer;
+MemoryBlock*     theMemory;
+DebugState*      theDebugState;
+Timer*           theTimer;
 
 // Internal.
 
@@ -163,159 +125,11 @@ Timer* theTimer;
 
 #include "entity.cpp"
 #include "voxel.cpp"
+#include "menu.cpp"
 
 #include "debug.cpp"
 
 
-
-
-
-struct GameSettings {
-	bool fullscreen;
-	bool vsync;
-	float resolutionScale;
-	float volume;
-	float mouseSensitivity;
-	int fieldOfView;
-	int viewDistance;
-};
-
-enum Game_Mode {
-	GAME_MODE_MENU,
-	GAME_MODE_LOAD,
-	GAME_MODE_MAIN,
-};
-
-enum Menu_Screen {
-	MENU_SCREEN_MAIN,
-	MENU_SCREEN_SETTINGS,
-};
-
-struct MainMenu {
-	bool gameRunning;
-
-	int screen;
-	int activeId;
-	int currentId;
-
-	float buttonAnimState;
-
-	Font* font;
-	Vec4 cOption;
-	Vec4 cOptionActive;
-	Vec4 cOptionShadow;
-	Vec4 cOptionShadowActive;
-
-	float optionShadowSize;
-
-	bool pressedEnter;
-	bool pressedEscape;
-	bool pressedBackspace;
-	bool pressedUp;
-	bool pressedDown;
-	bool pressedLeft;
-	bool pressedRight;
-};
-
-void menuSetInput(MainMenu* menu, Input* input) {
-	menu->pressedEnter = input->keysPressed[KEYCODE_RETURN];
-	menu->pressedEscape = input->keysPressed[KEYCODE_ESCAPE];
-	menu->pressedBackspace = input->keysPressed[KEYCODE_BACKSPACE];
-	menu->pressedUp = input->keysPressed[KEYCODE_UP];
-	menu->pressedDown = input->keysPressed[KEYCODE_DOWN];
-	menu->pressedLeft = input->keysPressed[KEYCODE_LEFT];
-	menu->pressedRight = input->keysPressed[KEYCODE_RIGHT];
-}
-
-bool menuOption(MainMenu* menu, char* text, Vec2 pos, Vec2i alignment) {
-
-	bool isActive = menu->activeId == menu->currentId;
-	Vec4 textColor = isActive ? menu->cOptionActive : menu->cOption;
-	Vec4 shadowColor = isActive ? menu->cOptionShadowActive : menu->cOptionShadow;
-
-	dcText(text, menu->font, pos, textColor, alignment, 0, menu->optionShadowSize, shadowColor);
-
-	bool result = menu->pressedEnter && menu->activeId == menu->currentId;
-
-	menu->currentId++;
-
-	return result;
-}
-
-bool menuOptionBool(MainMenu* menu, Vec2 pos, bool* value) {
-	bool isSelected = menu->activeId == menu->currentId-1;
-
-	bool active = false;
-	if(isSelected) {
-		if(menu->pressedEnter) {
-			*value = !(*value);
-			active = true;
-		}
-		if(menu->pressedLeft) {
-			if(*value == true) {
-				*value = false;
-				active = true;
-			}
-		}
-		if(menu->pressedRight) {
-			if(*value == false) {
-				*value = true;
-				active = true;
-			}
-		}
-	}
-
-	char* str;
-	if((*value) == true) str = "True";
-	else str = "False";
-
-	dcText(str, menu->font, pos, menu->cOption, vec2i(1,0), 0, menu->optionShadowSize, menu->cOptionShadow);
-
-	return active;
-}
-
-bool menuOptionSliderFloat(MainMenu* menu, Vec2 pos, float* value, float rangeMin, float rangeMax, float step, float precision) {
-	bool isSelected = menu->activeId == menu->currentId-1;
-
-	bool active = false;
-
-	float valueBefore = *value;
-	if(isSelected) {
-		if(menu->pressedLeft)  (*value) -= step;
-		if(menu->pressedRight) (*value) += step;
-		clamp(value, rangeMin, rangeMax);
-	}
-
-	if(valueBefore != (*value)) active = true;
-
-	char* str = getTString(20);
-	floatToStr(str, *value, precision);
-
-	dcText(str, menu->font, pos, menu->cOption, vec2i(1,0), 0, menu->optionShadowSize, menu->cOptionShadow);
-
-	return active;
-}
-
-bool menuOptionSliderInt(MainMenu* menu, Vec2 pos, int* value, int rangeMin, int rangeMax, int step) {
-	bool isSelected = menu->activeId == menu->currentId-1;
-
-	bool active = false;
-
-	int valueBefore = *value;
-	if(isSelected) {
-		if(menu->pressedLeft)  (*value) -= step;
-		if(menu->pressedRight) (*value) += step;
-		*value = clampInt(*value, rangeMin, rangeMax);
-	}
-
-	if(valueBefore != (*value)) active = true;
-
-	char* str = fillString("%i", *value);
-
-	dcText(str, menu->font, pos, menu->cOption, vec2i(1,0), 0, menu->optionShadowSize, menu->cOptionShadow);
-
-	return active;
-}
 
 
 
@@ -383,6 +197,12 @@ struct AppData {
 
 	//
 
+	Particle* particleLists[50];
+	bool particleListUsage[50];
+	int particleListsSize;
+
+	//
+
 	bool playerMode;
 	bool pickMode;
 	int selectionRadius;
@@ -402,6 +222,11 @@ struct AppData {
 	float footstepSoundValue;
 	int lastFootstepSoundId;
 
+	bool activeBreaking;
+	Vec3i breakingBlock;
+	float breakingBlockTime;
+	float hardnessModifier;
+
 	//
 
 	VoxelWorldSettings voxelSettings;
@@ -416,12 +241,10 @@ struct AppData {
 
 	// Particles.
 
-	GLuint testBufferId;
-	char* testBuffer;
-	int testBufferSize;
+	// GLuint testBufferId;
+	// char* testBuffer;
+	// int testBufferSize;
 };
-
-
 
 
 
@@ -626,10 +449,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 			mesh->vertCount = meshMap->size / sizeof(Vertex);
 		}
 
-		ad->testBufferSize = megaBytes(10);
-		ad->testBuffer = getPArray(char, ad->testBufferSize);
-		glCreateBuffers(1, &ad->testBufferId);
-		glNamedBufferData(ad->testBufferId, ad->testBufferSize, ad->testBuffer, GL_STREAM_DRAW);
+		// ad->testBufferSize = megaBytes(10);
+		// ad->testBuffer = getPArray(char, ad->testBufferSize);
+		// glCreateBuffers(1, &ad->testBufferId);
+		// glNamedBufferData(ad->testBufferId, ad->testBufferSize, ad->testBuffer, GL_STREAM_DRAW);
 
 		// 
 		// Samplers.
@@ -862,12 +685,18 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		//
 
+		ad->particleListsSize = 100;
+		for(int i = 0; i < arrayCount(ad->particleLists); i++) {
+			ad->particleLists[i] = getPArray(Particle, ad->particleListsSize);
+			ad->particleListUsage[i] = false;
+		}
+
 		// Entity.
 
 		ad->playerMode = true;
 		ad->pickMode = true;
 
-		ad->selectionRadius = 5;
+		ad->selectionRadius = 4;
 
 		ad->entityList.size = 1000;
 		ad->entityList.e = (Entity*)getPMemory(sizeof(Entity)*ad->entityList.size);
@@ -878,6 +707,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->skyBoxId = CUBEMAP_5;
 		ad->bombFireInterval = 0.1f;
 		ad->bombButtonDown = false;
+
+		ad->hardnessModifier = 0.2f;
 
 		// Hashes and thread data.
 		{
@@ -902,19 +733,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			Rect bounds = rect(0, 0, 64, 64);
 			Vec2* noiseSamples;
-			// int noiseSamplesSize = blueNoise(bounds, 5, &noiseSamples);
 			int noiseSamplesSize = blueNoise(bounds, treeRadius, &noiseSamples);
-			// int noiseSamplesSize = 10;
 			for(int i = 0; i < noiseSamplesSize; i++) {
 				Vec2 s = noiseSamples[i];
-				// Vec2i p = vec2i((int)(s.x/gridCell) * gridCell, (int)(s.y/gridCell) * gridCell);
-				// drawRect(rectCenDim(vec2(p), vec2(5,5)), rect(0,0,1,1), vec4(1,0,1,1), ad->textures[0]);
 				Vec2i index = vec2i(s);
 				ad->voxelSettings.treeNoise[index.y*VOXEL_X + index.x] = 1;
 			}
 			free(noiseSamples);
 		}
-
 
 		// Load game settings.
 		
@@ -926,7 +752,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				settings.fullscreen = true;
 				settings.vsync = true;
 				settings.resolutionScale = 1;
-				settings.volume = 1;
+				settings.volume = 0.5f;
 				settings.mouseSensitivity = 0.2f;
 				settings.fieldOfView = 60;
 				settings.viewDistance = 5;
@@ -1191,20 +1017,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glEnable(GL_DEPTH_TEST);
 		glEnable(GL_CULL_FACE);
 		glDisable(GL_SCISSOR_TEST);
-		// glEnable(GL_LINE_SMOOTH);
-		// glEnable(GL_POLYGON_SMOOTH);
-		// glDisable(GL_POLYGON_SMOOTH);
-		// glDisable(GL_SMOOTH);
-		
+
 		glEnable(GL_TEXTURE_2D);
-		// glEnable(GL_ALPHA_TEST);
-		// glAlphaFunc(GL_GREATER, 0.9);
-		// glDisable(GL_LIGHTING);
-		// glDepthFunc(GL_LESS);
-		// glClearDepth(1);
-		// glDepthMask(GL_TRUE);
 		glEnable(GL_MULTISAMPLE);
-		// glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
 		glEnable(GL_BLEND);
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		glBlendEquation(GL_FUNC_ADD);
@@ -1275,7 +1090,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		float rWidth = rectW(sr);
 
 		int titleFontHeight = ds->fontHeight * ws->windowScale * 6.0f;
-		int optionFontHeight = titleFontHeight * 0.5f;
+		int optionFontHeight = titleFontHeight * 0.45f;
 		Font* titleFont = getFont("Merriweather-Regular.ttf", titleFontHeight);
 		Font* font = getFont(FONT_SOURCESANS_PRO, optionFontHeight);
 
@@ -1579,9 +1394,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 					Entity player = {};
 					Vec3 playerDim = vec3(0.8f, 0.8f, 1.8f);
 					float camOff = playerDim.z*0.5f - playerDim.x*0.25f;
-					initEntity(&player, ET_Player, vec3(0.5f,0.5f,40), playerDim, vec3(0,0,camOff));
+					initEntity(&player, ET_Player, vec3(0.5f,0.5f,40), playerDim);
+					player.camOff = vec3(0,0,camOff);
 					player.rot = startRot;
-					player.playerOnGround = false;
+					player.onGround = false;
 					strCpy(player.name, "Player");
 					ad->footstepSoundValue = 0;
 					
@@ -1590,8 +1406,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 				// Debug cam.
 				{
-					Entity freeCam;
-					initEntity(&freeCam, ET_Camera, vec3(35,35,32), vec3(0,0,0), vec3(0,0,0));
+					Entity freeCam = {};
+					initEntity(&freeCam, ET_Camera, vec3(35,35,32), vec3(0,0,0));
 					strCpy(freeCam.name, "Camera");
 					ad->cameraEntity = addEntity(&ad->entityList, &freeCam);
 				}
@@ -1622,7 +1438,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			// Push the player up until he is right above the ground.
 
 			Entity* player = ad->player;
-			while(collisionVoxelWidthBox(&ad->voxelData, player->pos, player->dim)) {
+			while(collisionVoxelBox(&ad->voxelData, player->pos, player->dim)) {
 				player->pos.z += 2;
 			}
 
@@ -1684,8 +1500,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		input->keysDown[KEYCODE_SPACE] = false;
 	}
 
-	// spawn bomb
 	#if 0
+	// spawn bomb
 	{
 		bool spawnBomb = false;
 		if(input->mouseButtonPressed[2]) {
@@ -1715,7 +1531,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 	#endif
 
-
 	TIMER_BLOCK_BEGIN_NAMED(entities, "Upd Entities");
 	// @update entities
 	for(int i = 0; i < ad->entityList.size; i++) {
@@ -1726,6 +1541,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		Vec3 up = vec3(0,0,1);
 
 		switch(e->type) {
+
 			case ET_Player: {
 				if(ad->playerMode == false) continue;
 
@@ -1757,106 +1573,49 @@ extern "C" APPMAINFUNCTION(appMain) {
 					if(input->keysDown[KEYCODE_S]) acceleration += -normVec3(cam.look);
 					if(input->keysDown[KEYCODE_D]) acceleration +=  normVec3(cam.right);
 					if(input->keysDown[KEYCODE_A]) acceleration += -normVec3(cam.right);
-					e->acc += normVec3(acceleration)*speed;
+
+					if(acceleration != vec3(0,0,0)) {
+						e->acc += normVec3(acceleration)*speed;
+					}
 				}
 
 				e->acc.z = 0;
 
-				bool playerOnGroundStart = player->playerOnGround;
+				bool onGroundStart = player->onGround;
 
 				if(ad->playerMode) {
 					// if(input->keysPressed[KEYCODE_SPACE]) {
 					if(input->keysDown[KEYCODE_SPACE]) {
-						if(player->playerOnGround) {
+						if(player->onGround) {
 							player->vel += up*7.0f;
-							player->playerOnGround = false;
+							player->onGround = false;
 						}
 					}
 				}
 
 				float gravity = 20.0f;
-				if(!e->playerOnGround) e->acc += -up*gravity;
+				if(!e->onGround) e->acc += -up*gravity;
 				e->vel = e->vel + e->acc*dt;
 				float friction = 0.01f;
 				e->vel.x *= pow(friction,dt);
 				e->vel.y *= pow(friction,dt);
 				// e->vel *= 0.9f;
 
-				if(e->playerOnGround) e->vel.z = 0;
+				if(e->onGround) e->vel.z = 0;
 
-				bool playerGroundCollision = false;
-				bool playerCeilingCollision = false;
-				bool playerSideCollision = false;
+				Vec3 collisionNormal = vec3(0,0,0);
 
 				Vec2 positionOffset = vec2(0,0);
 
 				if(e->vel != vec3(0,0,0)) {
 					if(e->vel.xy != vec2(0,0)) ad->firstWalk = true;
 
-					Vec3 pPos = e->pos;
-					Vec3 pSize = e->dim;
+					Vec3 nPos = e->pos + -0.5f*e->acc*dt*dt + e->vel*dt;
 
-					Vec3 nPos = pPos + -0.5f*e->acc*dt*dt + e->vel*dt;
+					bool result = collisionVoxelBoxDistance(&ad->voxelData, nPos, e->dim, &nPos, &collisionNormal);
 
-					int collisionCount = 0;
-					bool collision = true;
-					while(collision) {
-
-						float minDistance;
-						Vec3 collisionBox;
-						collision = collisionVoxelWidthBox(&ad->voxelData, nPos, pSize, &minDistance, &collisionBox);
-
-						if(collision) {
-							collisionCount++;
-
-							float minDistance;
-							Vec3 dir = vec3(0,0,0);
-							int face;
-
-								// check all the 6 planes and take the one with the shortest distance
-							for(int i = 0; i < 6; i++) {
-								Vec3 n;
-								if(i == 0) 		n = vec3(1,0,0);
-								else if(i == 1) n = vec3(-1,0,0);
-								else if(i == 2) n = vec3(0,1,0);
-								else if(i == 3) n = vec3(0,-1,0);
-								else if(i == 4) n = vec3(0,0,1);
-								else if(i == 5) n = vec3(0,0,-1);
-
-									// assuming voxel size is 1
-									// this could be simpler because the voxels are axis aligned
-								Vec3 p = collisionBox + (n * ((pSize/2) + 0.5));
-								float d = -dot(p, n);
-								float d2 = dot(nPos, n);
-
-									// distances are lower then zero in this case where the point is 
-									// not on the same side as the normal
-								float distance = d + d2;
-
-								if(i == 0 || distance > minDistance) {
-									minDistance = distance;
-									dir = n;
-									face = i;
-								}
-							}
-
-							float error = 0.001f;
-								// float error = 0;
-							nPos += dir*(-minDistance + error);
-
-							if(face == 5) playerCeilingCollision = true;
-							else if(face == 4) playerGroundCollision = true;
-							else playerSideCollision = true;
-						}
-
-						// something went wrong and we reject the move, for now
-						if(collisionCount > 5) {
-							// nPos = ad->playerPos;
-
-							nPos.z += 5;
-							// ad->playerVel = vec3(0,0,0);
-							break;	
-						}
+					if(!result) {
+						nPos.z += 5;
 					}
 
 					float stillnessThreshold = 0.0001f;
@@ -1864,18 +1623,20 @@ extern "C" APPMAINFUNCTION(appMain) {
 						e->vel.z = 0;
 					}
 
-					if(playerCeilingCollision) {
+					if(collisionNormal.z < 0) {
 						e->vel.z = 0;
 					}
 
-					if(playerSideCollision) {
-						float sideFriction = 0.0010f;
+					if(collisionNormal.xy != vec2(0,0)) {
+						// float sideFriction = 0.001f;
+						float sideFriction = 0.01f;
 						e->vel.x *= pow(sideFriction,dt);
 						e->vel.y *= pow(sideFriction,dt);
 					}
 
-					if(collisionCount > 5) {
+					if(!result) {
 						e->vel = vec3(0,0,0);
+						assert(false);
 					}
 
 					positionOffset = nPos.xy - e->pos.xy;
@@ -1885,62 +1646,37 @@ extern "C" APPMAINFUNCTION(appMain) {
 				// raycast for touching ground
 				if(ad->playerMode) {
 
-					if(playerGroundCollision && e->vel.z <= 0) {
-						e->playerOnGround = true;
+					if(collisionNormal.z > 0 && e->vel.z <= 0) {
+						e->onGround = true;
 						e->vel.z = 0;
 					}
 
 					uchar groundCollisionBlockType = 0;
 
-					if(e->playerOnGround) {
-						Vec3 pos = e->pos;
-						Vec3 size = e->dim;
-						Rect3 box = rect3CenDim(pos, size);
+					if(e->onGround) {
 
-						bool groundCollision = false;
-
-						for(int i = 0; i < 5; i++) {
-							Vec3 gp;
-							if(i == 0) 		gp = box.min + size*vec3(0.5f,0.5f,0); // For sound.
-							else if(i == 1) gp = box.min + size*vec3(0,0,0);
-							else if(i == 2) gp = box.min + size*vec3(1,0,0);
-							else if(i == 3) gp = box.min + size*vec3(0,1,0);
-							else if(i == 4) gp = box.min + size*vec3(1,1,0);
-
-							float raycastThreshold = 0.01f;
-							gp -= up*raycastThreshold;
-
-							Vec3 block = coordToVoxelCoord(gp);
-							uchar* blockType = getBlockFromCoord(&ad->voxelData, gp);
-							if(!blockType) continue;
-
-							if(*blockType > 0) {
-								groundCollision = true;
-								groundCollisionBlockType = *blockType;
-								break;
-							}
-						}
+						bool groundCollision = raycastGroundVoxelBox(&ad->voxelData, e->pos, e->dim, &groundCollisionBlockType);
 
 						if(groundCollision) {
 							if(e->vel.z <= 0) {
-								e->playerOnGround = true;
+								e->onGround = true;
 							}
 						} else {
-							e->playerOnGround = false;
+							e->onGround = false;
 						}
 
 						if(ad->firstWalk) {
 							// Hit the ground.
-							if(!playerOnGroundStart && player->playerOnGround) ad->footstepSoundValue = 100;
+							if(!onGroundStart && player->onGround) ad->footstepSoundValue = 100;
 
-							if(!e->playerOnGround) ad->footstepSoundValue = 0;
+							if(!e->onGround) ad->footstepSoundValue = 0;
 						}
 					}
 
 					// Footstep sound.
 					if(e->vel != vec3(0,0,0) && groundCollisionBlockType) {
 						float moveLength = lenVec2(positionOffset);
-						if(player->playerOnGround) ad->footstepSoundValue += moveLength;
+						if(player->onGround) ad->footstepSoundValue += moveLength;
 
 						float stepDistance = 2.3f;
 						if(ad->footstepSoundValue > stepDistance) {
@@ -1997,7 +1733,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 					if(input->keysDown[KEYCODE_A]) acceleration += -normVec3(cam.right);
 					if(input->keysDown[KEYCODE_E]) acceleration +=  normVec3(up);
 					if(input->keysDown[KEYCODE_Q]) acceleration += -normVec3(up);
-					e->acc += normVec3(acceleration)*speed;
+					if(acceleration != vec3(0,0,0)) {
+						e->acc += normVec3(acceleration)*speed;
+					}
 				}
 
 				e->vel = e->vel + e->acc*dt;
@@ -2006,6 +1744,105 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 				if(e->vel != vec3(0,0,0)) {
 					e->pos = e->pos - 0.5f*e->acc*dt*dt + e->vel*dt;
+				}
+
+			} break;
+
+			case ET_ParticleEmitter: {
+
+				ParticleEmitter* emitter = &e->emitter;
+				emitter->pos = e->pos;
+				emitter->time += ad->dt;
+
+				float timeToLive = 10;
+				float startAlphaFade = 0.75f;
+
+				// Don't spawn new particles if we're done.
+				if(emitter->liveTimeSpawns < emitter->liveTimeSpawnCount) {
+					emitter->spawnTime += ad->dt;
+					while(emitter->spawnTime >= emitter->spawnRate) {
+						emitter->spawnTime -= emitter->spawnRate;
+
+						for(int i = 0; i < emitter->spawnCount; i++) {
+							if(emitter->particleListCount >= emitter->particleListSize) break;
+
+							Particle p = {};
+							float velSpeed = randomFloatPCG(0.5f,1.0f,0.001f);
+							p.vel = randomUnitSphereDirection() * velSpeed;
+
+							// p.pos = emitter->pos;
+							p.pos = emitter->pos + p.vel*0.3f;
+
+							p.acc = vec3(0,0,-1) * 2.0f;
+							p.size = vec3(0.05f);
+							p.timeToLive = timeToLive;
+
+							p.color = emitter->color;
+
+							emitter->particleList[emitter->particleListCount++] = p;
+						}
+
+						emitter->liveTimeSpawns++;
+					}
+				}
+
+				float animSpeed = 2;
+				float dt = ad->dt*animSpeed;
+
+				particleEmitterUpdate(emitter, dt, ad->dt);
+				particleEmitterFinish(emitter);
+
+				// Particle world collision.
+				{
+					for(int i = 0; i < emitter->particleListCount; i++) {
+						Particle* p = emitter->particleList + i;
+
+						Vec3 pos = p->pos;
+						Vec3 size = p->size;
+
+						float friction = 0.01f;
+
+						Vec3 collisionNormal;
+						bool result = collisionVoxelBoxDistance(&ad->voxelData, pos, size, &pos, &collisionNormal);
+
+						bool groundRaycast = raycastGroundVoxelBox(&ad->voxelData, pos, size, 0);
+
+						if(collisionNormal.xy != vec2(0,0) || groundRaycast) {
+							p->vel.x *= pow(friction,dt);
+							p->vel.y *= pow(friction,dt);
+						} 
+
+						if(collisionNormal.xy != vec2(0,0)) {
+							p->vel = reflectVector(p->vel, collisionNormal);
+							p->vel *= 0.5f;
+						}
+
+						if(collisionNormal.z != 0) {
+							p->vel.z = 0;
+						}
+
+						p->pos = pos;
+					}
+				}
+
+				for(int i = 0; i < emitter->particleListCount; i++) {
+					Particle* p = emitter->particleList + i;
+
+					float alpha = p->color.a;
+					if(p->time > (startAlphaFade*timeToLive)) {
+						alpha = mapRange(p->time, startAlphaFade*timeToLive, timeToLive, p->color.a, 0);
+					}
+
+					uchar* lighting = getLightingFromCoord(&ad->voxelData, p->pos);
+					float fLighting = 1;
+					if(lighting) fLighting = (*lighting) / 255.0f;
+					dcCube(p->pos, p->size, vec4(p->color.rgb * fLighting, alpha));
+				}
+
+				if(emitter->liveTimeSpawns == emitter->liveTimeSpawnCount && 
+				   emitter->particleListCount == 0) {
+					e->init = false;
+					ad->particleListUsage[emitter->particleListIndex] = false;
 				}
 
 			} break;
@@ -2208,13 +2045,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				uchar* blockType = getBlockFromCoord(&ad->voxelData, block);
 				Vec3 temp = voxelToVoxelCoord(coordToVoxel(block));
 
-				// Vec4 c;
-				// if(i == 0) c = vec4(1,0,1,1);
-				// else c = vec4(0,0,1,1);
-				// glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-				// drawCube(&ad->pipelineIds, temp, vec3(1.0f,1.0f,1.0f), c, 0, vec3(0,0,0));
-
-				if(*blockType > 0) {
+				if(blockType && *blockType > 0) {
 					Vec3 iBox = voxelToVoxelCoord(coordToVoxel(block));
 					float distance;
 					int face;
@@ -2240,17 +2071,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 			if(intersection) break;
 		}
 
+		ad->activeBreaking = false;
+
 		if(intersection) {
 			ad->selectedBlock = intersectionBox;
 			ad->blockSelected = true;
 
-			Vec3 faceDir = vec3(0,0,0);
-			if(intersectionFace == 0) faceDir = vec3(-1,0,0);
-			else if(intersectionFace == 1) faceDir = vec3(1,0,0);
-			else if(intersectionFace == 2) faceDir = vec3(0,-1,0);
-			else if(intersectionFace == 3) faceDir = vec3(0,1,0);
-			else if(intersectionFace == 4) faceDir = vec3(0,0,-1);
-			else if(intersectionFace == 5) faceDir = vec3(0,0,1);
+			Vec3 faceDirs[] = { vec3(-1,0,0), vec3(1,0,0), vec3(0,-1,0), 
+								vec3(0,1,0), vec3(0,0,-1), vec3(0,0,1) };
+			Vec3 faceDir = faceDirs[intersectionFace];
 			ad->selectedBlockFaceDir = faceDir;
 
 			if(ad->playerMode && ad->fpsMode) {
@@ -2260,11 +2089,30 @@ extern "C" APPMAINFUNCTION(appMain) {
 				uchar* lighting = getLightingFromCoord(&ad->voxelData, intersectionBox);
 
 				bool mouse1 = input->mouseButtonPressed[0];
-				bool mouse2 = input->mouseButtonPressed[1];
+				bool mouse2 = input->mouseButtonDown[1];
 				bool placeBlock = (!ad->fpsMode && ad->pickMode && mouse1) || (ad->fpsMode && mouse1);
 				bool removeBlock = (!ad->fpsMode && !ad->pickMode && mouse1) || (ad->fpsMode && mouse2);
 
-				if(placeBlock || removeBlock) {
+				bool breakedBlock = false;
+				if(removeBlock) {
+					ad->activeBreaking = true;
+
+					Vec3i selectedBlockCoordinate = coordToVoxel(ad->selectedBlock);
+					if(selectedBlockCoordinate != ad->breakingBlock) {
+						ad->breakingBlockTime = 0;
+						ad->breakingBlock = selectedBlockCoordinate;
+					}
+
+					ad->breakingBlockTime += ad->dt;
+
+					if(ad->breakingBlockTime >= blockTypeHardness[*block]*ad->hardnessModifier) {
+						ad->breakingBlockTime = 0;
+
+						breakedBlock = true;
+					}
+				}
+
+				if(placeBlock || breakedBlock) {
 					vm->upToDate = false;
 					vm->uploaded = false;
 					vm->modified = true;
@@ -2322,21 +2170,63 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 						addTrack("general\\place.wav", ad->volumeGeneral, true, 1);
 					}
-				} else if(removeBlock) {
+				} else if(breakedBlock) {
 					if(*block > 0) {
+						uchar blockType = *block;
 						*block = 0;
 						*lighting = ad->voxelSettings.globalLumen;
+
+						// @SpawnParticles.
+						{
+							ParticleEmitter emitter = {};
+
+							emitter.particleListSize = ad->particleListsSize;
+
+							emitter.particleListIndex = -1;
+							for(int i = 0; i < arrayCount(ad->particleLists); i++) {
+								if(!ad->particleListUsage[i]) {
+									ad->particleListUsage[i] = true;
+
+									emitter.particleList = ad->particleLists[i];
+									emitter.particleListIndex = i;
+									break;
+								}
+							}
+							if(emitter.particleListIndex != -1) {
+
+								emitter.spawnRate = 10000;
+								emitter.spawnCount = 20;
+								emitter.spawnTime = emitter.spawnRate;
+								emitter.liveTimeSpawnCount = 1;
+								emitter.color = blockTypeParticleColor[blockType];
+
+								Entity e;
+								initEntity(&e, ET_ParticleEmitter, intersectionBox, vec3(0,0,0));
+
+								e.emitter = emitter;
+
+								addEntity(&ad->entityList, &e);
+							}
+						}
 
 						addTrack("general\\remove.wav", ad->volumeGeneral, true, 1);
 					}
 				}
 			}
 		}
+
+		if(!ad->activeBreaking) {
+			ad->breakingBlockTime = 0;
+			// ad->breakingBlockTime -= ad->dt*2;
+			// clampMin(&ad->breakingBlockTime, 0);
+		}
 	}
 
 	// Main view proj setup.
 	Mat4 view, proj;
 	{
+		ad->farPlane = ad->voxelSettings.viewDistance * VOXEL_X;
+
 		viewMatrix(&view, ad->activeCam.pos, -ad->activeCam.look, ad->activeCam.up, ad->activeCam.right);
 		projMatrix(&proj, degreeToRadian(ad->fieldOfView), ad->aspectRatio, ad->nearPlane, ad->farPlane);
 
@@ -2451,7 +2341,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				Vec3 cu = ad->activeCam.up;
 				Vec3 cr = ad->activeCam.right;
 
-				float aspect = (ws->currentRes.x / (float)ws->currentRes.y);
+				float aspect = ad->aspectRatio;
 				float fovV = degreeToRadian(ad->fieldOfView);
 				float fovH = degreeToRadian(ad->fieldOfView) * aspect;
 
@@ -2530,9 +2420,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		radixSortPair(sortList, sortListSize);
 
-		for(int i = 0; i < sortListSize-1; i++) {
-			assert(sortList[i].key <= sortList[i+1].key);
-		}
+		// for(int i = 0; i < sortListSize-1; i++) {
+		// 	assert(sortList[i].key <= sortList[i+1].key);
+		// }
 	}
 
 	// Store chunks that are in store region.
@@ -2693,31 +2583,87 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// Draw player and selected block.
 	{
-		dcState(STATE_LINEWIDTH, 3);
 		if(!ad->playerMode) {
 			Camera cam = getCamData(ad->player->pos, ad->player->rot);
 			Vec3 pCamPos = player->pos + player->camOff;
 			float lineLength = 0.5f;
 
+			dcState(STATE_LINEWIDTH, 3);
+
 			dcLine(pCamPos, pCamPos + cam.look*lineLength, vec4(1,0,0,1));
 			dcLine(pCamPos, pCamPos + cam.up*lineLength, vec4(0,1,0,1));
 			dcLine(pCamPos, pCamPos + cam.right*lineLength, vec4(0,0,1,1));
+
+			dcState(STATE_LINEWIDTH, 1);
 
 			dcState(STATE_POLYGONMODE, POLYGON_MODE_LINE);
 			dcCube(player->pos, player->dim, vec4(1,1,1,1), 0, vec3(0,0,0));
 			dcState(STATE_POLYGONMODE, POLYGON_MODE_FILL);
 		} else {
-			if(ad->blockSelected) {
-				dcDisable(STATE_CULL);
+
+			// @DrawBreakingBlock.
+			if(ad->breakingBlockTime > 0)
+			{
+				float breakingOverlayAlpha = 0.5f;
+				uchar* blockType = getBlockFromVoxel(&ad->voxelData, ad->breakingBlock);
+				float blockTime = blockTypeHardness[*blockType]*ad->hardnessModifier;
+
+				dcEnable(STATE_POLYGON_OFFSET);
+
+				dcPolygonOffset(-1.0f,-1.0f);
+
+				Vec3 block = voxelToVoxelCoord(ad->breakingBlock);
+				Vec3 fds[3] = {};
+				getVoxelShowingVoxelFaceDirs(ad->activeCam.pos - ad->selectedBlock, fds);
+
+				for(int i = 0; i < 3; i++) {
+
+					Vec3 vs[4];
+					getVoxelQuadFromFaceDir(block, fds[i], vs);
+
+					int breakStage = (ad->breakingBlockTime/blockTime) * 10;
+
+					int texId = TEXTURE_DESTROY_STAGES;
+					Texture* tex = getTexture(texId);
+					float texSize = (float)tex->dim.h/(float)tex->dim.w;
+					float texPos = texSize * breakStage;
+					Rect uv = rect(texPos + texSize, 0, texPos, 1);
+
+					dcQuad(vs[0], vs[1], vs[2], vs[3], vec4(1,breakingOverlayAlpha), texId, uv);
+				}
+
+				dcDisable(STATE_POLYGON_OFFSET);
+			}
+
+			// @SelectedBlock.
+			if(ad->blockSelected) 
+			{
+
+				dcBlend(GL_DST_COLOR, GL_ONE, GL_ZERO, GL_ONE, GL_FUNC_ADD, GL_FUNC_ADD);
+				dcEnable(STATE_POLYGON_OFFSET);
+
+				// dcPolygonOffset(-10.0f,-10.0f);
+				dcPolygonOffset(-2.0f,-2.0f);
+
+				float highlight1 = 0.75f;
+				float highlight2 = 1.0f;
+
+				Vec3 fds[3] = {};
+				getVoxelShowingVoxelFaceDirs(ad->activeCam.pos - ad->selectedBlock, fds);
+
 				Vec3 vs[4];
-				getPointsFromQuadAndNormal(ad->selectedBlock + ad->selectedBlockFaceDir*0.5f*1.01f, ad->selectedBlockFaceDir, 1, vs);
 
-				dcQuad(vs[0], vs[1], vs[2], vs[3], vec4(1,1,1,0.025f));
-				dcEnable(STATE_CULL);
+				for(int i = 0; i < 3; i++) {
+					Vec3 c = fds[i] == ad->selectedBlockFaceDir ? vec3(highlight2) : vec3(highlight1); 
+					getVoxelQuadFromFaceDir(ad->selectedBlock, fds[i], vs);
 
-				dcState(STATE_POLYGONMODE, POLYGON_MODE_LINE);
-				dcCube(ad->selectedBlock, vec3(1.01f), vec4(0.9f), 0, vec3(0,0,0));
-				dcState(STATE_POLYGONMODE, POLYGON_MODE_FILL);
+					dcQuad(vs[0], vs[1], vs[2], vs[3], vec4(c,0));
+				}
+
+				dcDisable(STATE_POLYGON_OFFSET);
+				dcBlend(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_FUNC_ADD);
+
+
 			}
 		}
 	}
@@ -2761,7 +2707,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		globalCommandList = &ad->commandList3d;
 	}
 
-
 	// Start fading.
 
 	if(ad->startFade < 1.0f)
@@ -2787,9 +2732,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 		dcRect(getScreenRect(ws), c, &ad->commandList2d);
 	}
 
-	// Particle test.
 
 	#if 0
+	// Particle test.
+
 	if(false)
 	{
 		bindShader(SHADER_CUBE);
@@ -3040,8 +2986,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	}
 
-	// Visualize chunk storing/restoring.
 	#if 0
+
+	// Visualize chunk storing/restoring.
+
 	if(false)
 	{
 		VoxelData* vd = &ad->voxelData;
@@ -3089,96 +3037,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	endOfMainLabel:
 
-	// Update Audio.
-	{
-		AudioState* as = &ad->audioState;
-
-		int framesPerFrame = ad->dt * as->waveFormat->nSamplesPerSec * as->latency;
-
-		uint numFramesPadding;
-		as->audioClient->GetCurrentPadding(&numFramesPadding);
-		uint numFramesAvailable = as->bufferFrameCount - numFramesPadding;
-		framesPerFrame = min(framesPerFrame, numFramesAvailable);
-
-		// int framesToPush = framesPerFrame - numFramesPadding;
-		// printf("%i %i %i %i\n", numFramesAvailable, numFramesPadding, as->bufferFrameCount, framesToPush);
-
-		// numFramesPadding = framesPerFrame;
-		// framesPerFrame = framesToPush;
-
-		// if(framesPerFrame && framesToPush > 0) 
-		if(framesPerFrame) 
-		{
-
-			float* buffer;
-			as->renderClient->GetBuffer(numFramesAvailable, (BYTE**)&buffer);
-
-			// Clear to zero.
-
-			for(int i = 0; i < numFramesAvailable*2; i++) buffer[i] = 0.0f;
-
-			for(int trackIndex = 0; trackIndex < arrayCount(as->tracks); trackIndex++) {
-				Track* track = as->tracks + trackIndex;
-				Audio* audio = track->audio;
-
-				if(!track->used) continue;
-
-
-				int index = track->index;
-				int channels = audio->channels;
-
-				int normalFrameCount = audio->frameCount;
-				float speed = track->speed * ((float)audio->sampleRate / as->sampleRate);
-				int frameCount = audio->frameCount;
-				if(speed != 1.0f) {
-					frameCount = roundFloat((frameCount-1) * (float)(1/speed)) + 1;
-				}
-
-				int availableFrames = min(frameCount - index, numFramesAvailable);
-
-				float volume = as->masterVolume * track->volume;
-				for(int i = 0; i < availableFrames; i++) {
-					for(int channelIndex = 0; channelIndex < channels; channelIndex++) {
-						float finalValue;
-
-						if(speed == 1.0f) {
-							short value = audio->data[(index + i)*channels + channelIndex];
-							finalValue = (float)value/SHRT_MAX;
-
-						} else {
-							float fIndex = (index + i) * speed;
-
-							if(fIndex > (normalFrameCount-1)) break;
-
-							int leftIndex = (int)fIndex;
-							int rightIndex = leftIndex + 1;
-
-							short leftValue = audio->data[leftIndex*channels + channelIndex];
-							short rightValue = audio->data[rightIndex*channels + channelIndex];
-
-							float fLeftValue = (float)leftValue/SHRT_MAX;
-							float fRightValue = (float)rightValue/SHRT_MAX;
-
-							float percent = fIndex - leftIndex;
-							finalValue = fLeftValue + (fRightValue-fLeftValue) * percent;
-
-						}
-
-						buffer[(i*2) + channelIndex] += finalValue * volume;
-						if(channels == 1) buffer[(i*2) + 1] += finalValue * volume;
-					}
-				}
-
-				track->index += framesPerFrame;
-
-				if(track->index >= audio->frameCount) {
-					track->used = false;
-				}
-			}
-
-			as->renderClient->ReleaseBuffer(framesPerFrame, 0);
-		}
-	}
+	updateAudio(&ad->audioState, ad->dt);
 
 	// Render.
 	{
@@ -3362,7 +3221,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 
 		float dt2 = timerUpdate(&timer);
-		printf("%f %f\n", dt, dt2);
+		// printf("%f %f\n", dt, dt2);
 	}
 
 	// Save game settings.

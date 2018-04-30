@@ -4,7 +4,6 @@ extern DrawCommandList* globalCommandList;
 struct GraphicsState;
 extern GraphicsState* theGraphicsState;
 
-
 // 
 // Misc.
 // 
@@ -123,7 +122,6 @@ char* fillString(char* text, ...) {
 	return buffer;
 }
 
-
 //
 // CommandList.
 //
@@ -131,9 +129,11 @@ char* fillString(char* text, ...) {
 enum CommandState {
 	STATE_SCISSOR,
 	STATE_POLYGONMODE, 
+	STATE_POLYGON_OFFSET, 
 	STATE_LINEWIDTH,
 	STATE_CULL,
-	STATE_DEPTH_TEST
+	STATE_DEPTH_TEST,
+	STATE_DEPTH_FUNC,
 };
 
 enum Polygon_Mode {
@@ -154,6 +154,8 @@ enum DrawListCommand {
 	Draw_Command_RoundedRect_Type,
 	Draw_Command_Text_Type,
 	Draw_Command_Scissor_Type,
+	Draw_Command_Blend_Type,
+	Draw_Command_PolygonOffset_Type,
 };
 
 struct DrawCommandList {
@@ -192,6 +194,8 @@ struct Draw_Command_Line2d {
 struct Draw_Command_Quad {
 	Vec3 p0, p1, p2, p3;
 	Vec4 color;
+	int textureId;
+	Rect uv;
 };
 
 struct Draw_Command_Rect {
@@ -237,6 +241,20 @@ struct Draw_Command_State {
 	int state;
 	int value;
 };
+
+struct Draw_Command_Blend {
+	int sourceColor;
+	int destinationColor;
+	int sourceAlpha;
+	int destinationAlpha;
+	int functionColor;
+	int functionAlpha;
+};
+
+struct Draw_Command_PolygonOffset {
+	float factor;
+	float units;
+};
 #pragma pack(pop)
 
 
@@ -277,7 +295,7 @@ void dcLine2d(Vec2 p0, Vec2 p1, Vec4 color, DrawCommandList* drawList = 0) {
 	command->color = color;
 }
 
-void dcQuad(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec4 color, DrawCommandList* drawList = 0) {
+void dcQuad(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec4 color, int textureId = 0, Rect uv = rect(0,0,1,1), DrawCommandList* drawList = 0) {
 	PUSH_DRAW_COMMAND(Quad, Quad);
 
 	command->p0 = p0;
@@ -285,6 +303,8 @@ void dcQuad(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec4 color, DrawCommandList* dra
 	command->p2 = p2;
 	command->p3 = p3;
 	command->color = color;
+	command->textureId = textureId;
+	command->uv = uv;
 }
 
 void dcRect(Rect r, Rect uv, Vec4 color, int texture = -1, int texZ = -1, DrawCommandList* drawList = 0) {
@@ -368,6 +388,37 @@ void dcDisable(int state, DrawCommandList* drawList = 0) {
 	PUSH_DRAW_COMMAND(Disable, Int);
 
 	command->state = state;
+}
+
+void dcBlend(int sourceColor, int destinationColor, int sourceAlpha, int destinationAlpha, int functionColor, int functionAlpha, DrawCommandList* drawList = 0) {
+	PUSH_DRAW_COMMAND(Blend, Blend);
+
+	command->sourceColor = sourceColor;
+	command->destinationColor = destinationColor;
+	command->sourceAlpha = sourceAlpha;
+	command->destinationAlpha = destinationAlpha;
+
+	command->functionColor = functionColor;
+	command->functionAlpha = functionAlpha;
+}
+
+void dcBlend(int source, int destination, int function, DrawCommandList* drawList = 0) {
+	PUSH_DRAW_COMMAND(Blend, Blend);
+
+	command->sourceColor = source;
+	command->destinationColor = destination;
+	command->sourceAlpha = source;
+	command->destinationAlpha = destination;
+
+	command->functionColor = function;
+	command->functionAlpha = function;
+}
+
+void dcPolygonOffset(float factor, float units, DrawCommandList* drawList = 0) {
+	PUSH_DRAW_COMMAND(PolygonOffset, PolygonOffset);
+
+	command->factor = factor;
+	command->units = units;
 }
 
 //
@@ -1845,7 +1896,7 @@ void drawLine(Vec3 p0, Vec3 p1, Vec4 color) {
 	glDrawArrays(GL_LINES, 0, arrayCount(verts));
 }
 
-void drawQuad(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec4 color) {
+void drawQuad(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec4 color, int textureId = TEXTURE_WHITE, Rect uv = rect(0,0,1,1)) {
 
 	// Disabling these arrays is very important.
 
@@ -1855,10 +1906,12 @@ void drawQuad(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec4 color) {
 	
 	Vec3 verts[] = {p0, p1, p2, p3};
 
-	uint tex[2] = {getTexture(TEXTURE_WHITE)->id, 0};
+	uint tex[2] = {getTexture(textureId)->id, 0};
 	glBindTextures(0,2,tex);
 
-	Vec2 quadUVs[] = {{0,0}, {0,1}, {1,1}, {1,0}};
+	// Vec2 quadUVs[] = {{0,0}, {0,1}, {1,1}, {1,0}};
+	Vec2 quadUVs[] = { rectBL(uv), rectTL(uv), rectTR(uv), rectBR(uv) };
+
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_UV, quadUVs[0].e, arrayCount(quadUVs));
 
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_VERTICES, verts[0].e, arrayCount(verts));
@@ -1913,6 +1966,7 @@ int stateSwitch(int state) {
 		case STATE_CULL: return GL_CULL_FACE;
 		case STATE_SCISSOR: return GL_SCISSOR_TEST;
 		case STATE_DEPTH_TEST: return GL_DEPTH_TEST;
+		case STATE_POLYGON_OFFSET: return GL_POLYGON_OFFSET_FILL;
 	}
 	return 0;
 }
@@ -1966,7 +2020,7 @@ void executeCommandList(DrawCommandList* list, bool print = false, bool skipStri
 			case Draw_Command_Quad_Type: {
 				dcGetStructAndIncrement(Quad);
 
-				drawQuad(dc.p0, dc.p1, dc.p2, dc.p3, dc.color);
+				drawQuad(dc.p0, dc.p1, dc.p2, dc.p3, dc.color, dc.textureId, dc.uv);
 			} break;
 
 			case Draw_Command_State_Type: {
@@ -1984,6 +2038,8 @@ void executeCommandList(DrawCommandList* list, bool print = false, bool skipStri
 					} break;
 
 					case STATE_LINEWIDTH: glLineWidth(dc.value); break;
+
+					case STATE_DEPTH_FUNC: glDepthFunc(dc.value); break;
 
 					default: {} break;
 				}
@@ -2074,6 +2130,18 @@ void executeCommandList(DrawCommandList* list, bool print = false, bool skipStri
 				Vec2 dim = rectDim(r);
 				assert(dim.w >= 0 && dim.h >= 0);
 				glScissor(r.min.x, r.min.y, dim.x, dim.y);
+			} break;
+
+			case Draw_Command_Blend_Type: {
+				dcGetStructAndIncrement(Blend);
+				glBlendFuncSeparate(dc.sourceColor, dc.destinationColor, 
+				                    dc.sourceAlpha, dc.destinationAlpha);
+				glBlendEquationSeparate(dc.functionColor, dc.functionAlpha);
+			} break;
+
+			case Draw_Command_PolygonOffset_Type: {
+				dcGetStructAndIncrement(PolygonOffset);
+				glPolygonOffset(dc.factor, dc.units);
 			} break;
 
 			default: {} break;

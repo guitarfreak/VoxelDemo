@@ -16,7 +16,6 @@ struct EntityList {
 	int size;
 };
 
-
 struct Camera {
 	Vec3 pos;
 	Vec3 look;
@@ -37,13 +36,53 @@ Camera getCamData(Vec3 pos, Vec3 rot, Vec3 offset = vec3(0,0,0), Vec3 gUp = vec3
 	return c;
 }
 
+struct Particle {
+	Vec3 pos;
+	Vec3 vel;
+	Vec3 acc;
 
+	Vec4 color;
+	Vec4 velColor;
+	Vec4 accColor;
 
+	Vec3 size;
+	Vec3 velSize;
+	Vec3 accSize;
+
+	Quat rot;
+	Vec3 velRot;
+	Vec3 accRot;
+
+	float time;
+	float timeToLive;
+};
+
+struct ParticleEmitter {
+	Particle* particleList;
+	int particleListSize;
+	int particleListCount;
+	int particleListIndex;
+
+	Vec3 pos;
+	float spawnRate;
+	int spawnCount;
+	float spawnTime;
+
+	Vec4 color;
+
+	// Set either one.
+	float time;
+	float timeToLive;
+
+	int liveTimeSpawnCount;
+	int liveTimeSpawns;
+};
 
 enum Entity_Type {
 	ET_Player = 0,
 	ET_Camera,
 	ET_Rocket,
+	ET_ParticleEmitter,
 
 	ET_Size,
 };
@@ -61,8 +100,6 @@ struct Entity {
 	float rotAngle;
 	Vec3 dim;
 
-	Vec3 camOff;
-
 	Vec3 vel;
 	Vec3 acc;
 
@@ -73,11 +110,24 @@ struct Entity {
 	bool isMoving;
 	bool isColliding;
 
-	bool exploded;
+	union {
+		// Player.
+		struct {
+			bool onGround;
+			Vec3 camOff;
+		};
 
-	bool playerOnGround;
+		// ParticleEmitter.
+		struct {
+			ParticleEmitter emitter;
+		};
 
-	// void* data;
+		// Rocket.
+		struct {
+			bool exploded;
+		};
+	};
+
 };
 
 
@@ -89,16 +139,12 @@ Vec3 getRotationToVector(Vec3 start, Vec3 dest, float* angle) {
 	return side;
 }	
 
-void initEntity(Entity* e, int type, Vec3 pos, Vec3 dim, Vec3 camOff) {
+void initEntity(Entity* e, int type, Vec3 pos, Vec3 dim) {
 	*e = {};
 	e->init = true;
 	e->type = type;
 	e->pos = pos;
-	// e->dir = dir;
 	e->dim = dim;
-	e->camOff = camOff;
-	
-	// e->rot = getRotationToVector(vec3(0,1,0), dir, &e->rotAngle);
 }
 
 Entity* addEntity(EntityList* list, Entity* e) {
@@ -121,68 +167,7 @@ Entity* addEntity(EntityList* list, Entity* e) {
 	return freeEntity;
 }
 
-
-
-
-struct Particle {
-	Vec3 pos;
-	Vec3 vel;
-	Vec3 acc;
-
-	Vec4 color;
-	Vec4 velColor;
-	Vec4 accColor;
-
-	Vec3 size;
-	Vec3 velSize;
-	Vec3 accSize;
-
-	// Vec3 rot;
-	// Vec3 velRot;
-	// Vec3 accRot;
-
-	float rot;
-	float rot2;
-	float velRot;
-	float accRot;
-
-	float dt;
-	float timeToLive;
-};
-
-struct ParticleEmitter {
-	Particle* particleList;
-	int particleListSize;
-	int particleListCount;
-
-	Vec3 pos;
-	float spawnRate;
-	float timeToLive;
-	float dt;
-	float friction;
-};
-
-void particleEmitterUpdate(ParticleEmitter* e, float dt) {
-	// push particles
-	// e->dt += dt;
-	// while(e->dt >= 0.1f) {
-	// 	e->dt -= e->spawnRate;
-
-	// 	if(e->particleListCount < e->particleListSize) {
-	// 		Particle p = {};
-	// 		p.pos = e->pos;
-	// 		p.vel = normVec3(vec3(randomFloat(-1,1,0.01f), randomFloat(-1,1,0.01f), randomFloat(-1,1,0.01f))) * 10;
-	// 		p.acc = vec3(0,0,0);
-
-	// 		p.timeToLive = 1;
-
-	// 		e->particleList[e->particleListCount++] = p;
-	// 	}
-	// }
-
-	// update
-	// float friction = 0.1f;
-	float friction = e->friction;
+void particleEmitterUpdate(ParticleEmitter* e, float dt, float dtTime) {
 	for(int i = 0; i < e->particleListCount; i++) {
 		Particle* p = e->particleList + i;
 
@@ -191,25 +176,28 @@ void particleEmitterUpdate(ParticleEmitter* e, float dt) {
 		p->pos = p->pos - 0.5f*p->acc*dt*dt + p->vel*dt;
 
 		p->velColor = p->velColor + p->accColor*dt;
-		// p->velColor = p->velColor * pow(friction,dt);
+		// // // p->velColor = p->velColor * pow(friction,dt);
 		p->color = p->color - 0.5f*p->accColor*dt*dt + p->velColor*dt;
 
 		p->velSize = p->velSize + p->accSize*dt;
-		// p->velColor = p->velColor * pow(friction,dt);
+		// // // p->velColor = p->velColor * pow(friction,dt);
 		p->size = p->size - 0.5f*p->accSize*dt*dt + p->velSize*dt;
 
-		p->velRot = p->velRot + p->accRot*dt;
-		// p->velColor = p->velColor * pow(friction,dt);
-		p->rot = p->rot - 0.5f*p->accRot*dt*dt + p->velRot*dt;
+		// p->velRot = p->velRot + p->accRot*dt;
+		// // p->velColor = p->velColor * pow(friction,dt);
+		// p->rot = p->rot - 0.5f*p->accRot*dt*dt + p->velRot*dt;
 
-		p->dt += dt;
+		p->time += dtTime;
 	}
+}
 
-	// remove dead
+void particleEmitterFinish(ParticleEmitter* e) {
+
+	// Remove dead.
 	for(int i = 0; i < e->particleListCount; i++) {
 		Particle* p = e->particleList + i;
 
-		if(p->dt >= p->timeToLive) {
+		if(p->time >= p->timeToLive) {
 			if(i == e->particleListCount-1) {
 				e->particleListCount--;
 				break;
@@ -219,5 +207,5 @@ void particleEmitterUpdate(ParticleEmitter* e, float dt) {
 			e->particleListCount--;
 			i--;
 		}
-	}
+	}	
 }

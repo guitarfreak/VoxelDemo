@@ -5,7 +5,7 @@ Voxel Demo.
 
 Minimal functionality. You can walk around and add/remove blocks.
 
-Runs on Windows x64 starting with Windows XP.
+Runs on Windows x64.
 Requires Opengl 4.5 or higher.
 
 Controls:
