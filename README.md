@@ -4,8 +4,8 @@
 
 Minimal functionality. You can walk around and add/remove blocks.
 
-Runs on Windows x64.
-Requires Opengl 4.5 or higher.
+Runs on Windows x64. Requires Opengl 4.5 or higher.  
+Lines of code: 13.6K.
 
 #### Controls
 
