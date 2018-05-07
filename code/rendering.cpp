@@ -150,6 +150,7 @@ enum DrawListCommand {
 	Draw_Command_Line_Type,
 	Draw_Command_Line2d_Type,
 	Draw_Command_Quad_Type,
+	Draw_Command_Quad2d_Type,
 	Draw_Command_Rect_Type,
 	Draw_Command_RoundedRect_Type,
 	Draw_Command_Text_Type,
@@ -196,6 +197,15 @@ struct Draw_Command_Quad {
 	Vec4 color;
 	int textureId;
 	Rect uv;
+	int texZ;
+};
+
+struct Draw_Command_Quad2d {
+	Vec2 p0, p1, p2, p3;
+	Vec4 color;
+	int textureId;
+	Rect uv;
+	int texZ;
 };
 
 struct Draw_Command_Rect {
@@ -295,7 +305,20 @@ void dcLine2d(Vec2 p0, Vec2 p1, Vec4 color, DrawCommandList* drawList = 0) {
 	command->color = color;
 }
 
-void dcQuad(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec4 color, int textureId = 0, Rect uv = rect(0,0,1,1), DrawCommandList* drawList = 0) {
+void dcQuad2d(Vec2 p0, Vec2 p1, Vec2 p2, Vec2 p3, Vec4 color, int textureId = 0, Rect uv = rect(0,0,1,1), int texZ = -1, DrawCommandList* drawList = 0) {
+	PUSH_DRAW_COMMAND(Quad2d, Quad2d);
+
+	command->p0 = p0;
+	command->p1 = p1;
+	command->p2 = p2;
+	command->p3 = p3;
+	command->color = color;
+	command->textureId = textureId;
+	command->uv = uv;
+	command->texZ = texZ;
+}
+
+void dcQuad(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec4 color, int textureId = 0, Rect uv = rect(0,0,1,1), int texZ = -1, DrawCommandList* drawList = 0) {
 	PUSH_DRAW_COMMAND(Quad, Quad);
 
 	command->p0 = p0;
@@ -305,6 +328,7 @@ void dcQuad(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec4 color, int textureId = 0, R
 	command->color = color;
 	command->textureId = textureId;
 	command->uv = uv;
+	command->texZ = texZ;
 }
 
 void dcRect(Rect r, Rect uv, Vec4 color, int texture = -1, int texZ = -1, DrawCommandList* drawList = 0) {
@@ -824,17 +848,15 @@ Font* fontInit(Font* fontSlot, char* file, float height, bool enableHinting = fa
 	bool stemDarkening = true;
 	bool pixelAlign = true;
 	
-	// FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING | FT_LOAD_NO_AUTOHINT | FT_LOAD_FORCE_AUTOHINT
-	// FT_LOAD_TARGET_NORMAL | FT_LOAD_TARGET_LIGHT | FT_LOAD_TARGET_MONO
+	int target;
+	if(height <= 14.0f)   target = FT_LOAD_TARGET_MONO | FT_LOAD_FORCE_AUTOHINT;
+	else if(height <= 25) target = FT_LOAD_TARGET_NORMAL | FT_LOAD_FORCE_AUTOHINT;
+	else                  target = FT_LOAD_TARGET_NORMAL;
 
+	int loadFlags = FT_LOAD_DEFAULT | target;
 
-	int loadFlags = FT_LOAD_DEFAULT | FT_LOAD_FORCE_AUTOHINT | FT_LOAD_TARGET_NORMAL;
-	// int loadFlags = FT_LOAD_DEFAULT | FT_LOAD_TARGET_LCD;
-
-	
 	// FT_RENDER_MODE_NORMAL, FT_RENDER_MODE_LIGHT, FT_RENDER_MODE_MONO, FT_RENDER_MODE_LCD, FT_RENDER_MODE_LCD_V,
 	FT_Render_Mode renderFlags = FT_RENDER_MODE_NORMAL;
-	// FT_Render_Mode renderFlags = FT_RENDER_MODE_LCD;
 
 
 	font.glyphRangeCount = 0;
@@ -1117,6 +1139,35 @@ void drawRect(Rect r, Vec4 color, Rect uv = rect(0,0,1,1), int texture = -1, flo
 	glBindSamplers(0, 1, theGraphicsState->samplers);
 
 	glDrawArraysInstancedBaseInstance(GL_TRIANGLE_STRIP, 0, 4, 1, 0);
+}
+
+void drawQuad(Vec2 p0, Vec2 p1, Vec2 p2, Vec2 p3, Vec4 color, int textureId, Rect uv, float texZ) {
+
+	// Disabling these arrays is very important.
+
+	glDisableVertexAttribArray(0);
+	glDisableVertexAttribArray(1);
+	glDisableVertexAttribArray(2);
+	
+	Vec2 verts[] = {p0, p1, p2, p3};
+
+	if(texZ == -1) textureId = getTexture(textureId)->id;
+	uint tex[2] = {textureId, textureId};
+
+	glBindTextures(0,2,tex);
+
+	glBindSamplers(0,1,&theGraphicsState->samplers[SAMPLER_NORMAL]);
+	glBindSamplers(1,1,&theGraphicsState->samplers[SAMPLER_NORMAL]);
+
+	Vec2 quadUVs[] = { rectBL(uv), rectTL(uv), rectTR(uv), rectBR(uv) };
+
+	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_PRIMITIVE_MODE, true);
+	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_UVS, quadUVs[0].e, arrayCount(quadUVs));
+	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_COLOR, colorSRGB(color).e);
+	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_TEXZ, texZ);
+	pushUniform(SHADER_QUAD, 0, QUAD_UNIFORM_VERTS, verts[0].e, arrayCount(verts));
+
+	glDrawArrays(GL_QUADS, 0, arrayCount(verts));
 }
 
 void ortho(Rect r) {
@@ -1869,7 +1920,9 @@ void drawCube(Vec3 trans, Vec3 scale, Vec4 color, float degrees, Vec3 rot) {
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODEL, model.e);
 	// pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, color.e);
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, colorSRGB(color).e);
+
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODE, false);
+	pushUniform(SHADER_CUBE, 1, CUBE_UNIFORM_TEXZ, -1.0f);
 
 	glDrawArrays(GL_QUADS, 0, cubeMesh->vertCount);
 	// glDrawElements(GL_QUADS, cubeMesh->elementCount, GL_UNSIGNED_INT, (void*)0);
@@ -1892,11 +1945,12 @@ void drawLine(Vec3 p0, Vec3 p1, Vec4 color) {
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_VERTICES, verts[0].e, arrayCount(verts));
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, colorSRGB(color).e);
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODE, true);
+	pushUniform(SHADER_CUBE, 1, CUBE_UNIFORM_TEXZ, -1.0f);
 
 	glDrawArrays(GL_LINES, 0, arrayCount(verts));
 }
 
-void drawQuad(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec4 color, int textureId = TEXTURE_WHITE, Rect uv = rect(0,0,1,1)) {
+void drawQuad(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec4 color, int textureId = TEXTURE_WHITE, Rect uv = rect(0,0,1,1), float texZ = -1) {
 
 	// Disabling these arrays is very important.
 
@@ -1906,16 +1960,19 @@ void drawQuad(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec4 color, int textureId = TE
 	
 	Vec3 verts[] = {p0, p1, p2, p3};
 
-	uint tex[2] = {getTexture(textureId)->id, 0};
+	if(texZ == -1) textureId = getTexture(textureId)->id;
+	uint tex[2] = {textureId, textureId};
+
 	glBindTextures(0,2,tex);
+	// glBindSamplers(0, 1, theGraphicsState->samplers);
 
 	// Vec2 quadUVs[] = {{0,0}, {0,1}, {1,1}, {1,0}};
 	Vec2 quadUVs[] = { rectBL(uv), rectTL(uv), rectTR(uv), rectBR(uv) };
 
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_UV, quadUVs[0].e, arrayCount(quadUVs));
-
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_VERTICES, verts[0].e, arrayCount(verts));
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, colorSRGB(color).e);
+	pushUniform(SHADER_CUBE, 1, CUBE_UNIFORM_TEXZ, texZ);
 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODE, true);
 
 	glDrawArrays(GL_QUADS, 0, arrayCount(verts));
@@ -1956,8 +2013,6 @@ uint createSampler(float ani, int wrapS, int wrapT, int magF, int minF, int wrap
 
 	return result;
 }
-
-
 
 
 
@@ -2017,10 +2072,16 @@ void executeCommandList(DrawCommandList* list, bool print = false, bool skipStri
 				glDrawArrays(GL_LINES, 0, 2);
 			} break;
 
+			case Draw_Command_Quad2d_Type: {
+				dcGetStructAndIncrement(Quad2d);
+
+				drawQuad(dc.p0, dc.p1, dc.p2, dc.p3, dc.color, dc.textureId, dc.uv, dc.texZ);
+			} break;
+
 			case Draw_Command_Quad_Type: {
 				dcGetStructAndIncrement(Quad);
 
-				drawQuad(dc.p0, dc.p1, dc.p2, dc.p3, dc.color, dc.textureId, dc.uv);
+				drawQuad(dc.p0, dc.p1, dc.p2, dc.p3, dc.color, dc.textureId, dc.uv, dc.texZ);
 			} break;
 
 			case Draw_Command_State_Type: {

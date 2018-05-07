@@ -1,3 +1,4 @@
+
 struct GameSettings {
 	bool fullscreen;
 	bool vsync;
@@ -21,6 +22,8 @@ enum Menu_Screen {
 
 struct MainMenu {
 	bool gameRunning;
+
+	float volume;
 
 	int screen;
 	int activeId;
@@ -55,13 +58,21 @@ void menuSetInput(MainMenu* menu, Input* input) {
 	menu->pressedRight = input->keysPressed[KEYCODE_RIGHT];
 }
 
-bool menuOption(MainMenu* menu, char* text, Vec2 pos, Vec2i alignment) {
-
-	bool isActive = menu->activeId == menu->currentId;
+void menuOptionDraw(MainMenu* menu, char* text, Vec2 pos, Vec2i alignment, bool isActive) {
 	Vec4 textColor = isActive ? menu->cOptionActive : menu->cOption;
 	Vec4 shadowColor = isActive ? menu->cOptionShadowActive : menu->cOptionShadow;
 
 	dcText(text, menu->font, pos, textColor, alignment, 0, menu->optionShadowSize, shadowColor);
+}
+
+bool menuOption(MainMenu* menu, char* text, Vec2 pos, Vec2i alignment) {
+
+	bool isActive = menu->activeId == menu->currentId;
+	// Vec4 textColor = isActive ? menu->cOptionActive : menu->cOption;
+	// Vec4 shadowColor = isActive ? menu->cOptionShadowActive : menu->cOptionShadow;
+
+	// dcText(text, menu->font, pos, textColor, alignment, 0, menu->optionShadowSize, shadowColor);
+	menuOptionDraw(menu, text, pos, alignment, isActive);
 
 	bool result = menu->pressedEnter && menu->activeId == menu->currentId;
 
@@ -97,7 +108,12 @@ bool menuOptionBool(MainMenu* menu, Vec2 pos, bool* value) {
 	if((*value) == true) str = "True";
 	else str = "False";
 
-	dcText(str, menu->font, pos, menu->cOption, vec2i(1,0), 0, menu->optionShadowSize, menu->cOptionShadow);
+	menuOptionDraw(menu, str, pos, vec2i(1,0), isSelected);
+
+	if(active) {
+		menu->buttonAnimState = 0;
+		addTrack("ui\\changeOption.ogg", menu->volume, true);
+	}
 
 	return active;
 }
@@ -119,7 +135,12 @@ bool menuOptionSliderFloat(MainMenu* menu, Vec2 pos, float* value, float rangeMi
 	char* str = getTString(20);
 	floatToStr(str, *value, precision);
 
-	dcText(str, menu->font, pos, menu->cOption, vec2i(1,0), 0, menu->optionShadowSize, menu->cOptionShadow);
+	menuOptionDraw(menu, str, pos, vec2i(1,0), isSelected);
+
+	if(active) {
+		menu->buttonAnimState = 0;
+		addTrack("ui\\changeOption.ogg", menu->volume, true);
+	}
 
 	return active;
 }
@@ -140,7 +161,12 @@ bool menuOptionSliderInt(MainMenu* menu, Vec2 pos, int* value, int rangeMin, int
 
 	char* str = fillString("%i", *value);
 
-	dcText(str, menu->font, pos, menu->cOption, vec2i(1,0), 0, menu->optionShadowSize, menu->cOptionShadow);
+	menuOptionDraw(menu, str, pos, vec2i(1,0), isSelected);
+
+	if(active) {
+		menu->buttonAnimState = 0;
+		addTrack("ui\\changeOption.ogg", menu->volume, true);
+	}
 
 	return active;
 }

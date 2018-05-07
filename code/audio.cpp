@@ -4,9 +4,6 @@
 struct AudioState;
 extern AudioState* theAudioState;
 
-// WAVE_FORMAT_PCM
-// WAVE_FORMAT_IEEE_FLOAT
-
 // typedef struct tWAVEFORMATEX {
 //   WORD  wFormatTag;
 //   WORD  nChannels;
@@ -16,34 +13,6 @@ extern AudioState* theAudioState;
 //   WORD  wBitsPerSample;
 //   WORD  cbSize;
 // } WAVEFORMATEX;
-
-struct WaveFileHeader {
-	char chunkId[4];
-	int chunkSize;
-	char format[4];
-
-	char subchunk1Id[4];
-	int subchunk1Size;
-	short audioFormat;
-	short numChannels;
-	int sampleRate;
-	int byteRate;
-	short blockAlign;
-	short bitsPerSample;
-	// short cbSize;
-	// short validBitsPerSample;
-	// int channelMask;
-	// char subFormat[16];
-
-	// char subchunk2Id[4];
-	// int subchunk2Size;
-	// short data;
-};
-
-struct WaveFileChunk {
-	char id[4];
-	int size;
-};
 
 struct Audio {
 	char* name;
@@ -110,43 +79,26 @@ void addAudio(AudioState* as, char* filePath, char* name) {
 	char* extension = getFileExtension(filePath);
 	if(!extension) return;
 
-	int result = strFind(extension, "wav");
+	int result = strFind(extension, "ogg");
 	if(result == -1) return;
 
-	int size = fileSize(filePath);
-	char* file = (char*)getPMemory(size);
-	readFileToBuffer(file, filePath);
-
-	WaveFileHeader* waveHeader = (WaveFileHeader*)file;
-
-	// Only accept specific wave formats for now.
-	assert(waveHeader->audioFormat == WAVE_FORMAT_PCM);
-	assert(waveHeader->bitsPerSample == 16);
-
-	WaveFileChunk* chunk = (WaveFileChunk*)(waveHeader+1);
-
-	char* dataString = "data";
-	bool dataSection = true;
-
-	while(!strCompare("data", chunk->id, 4)) {
-		chunk = (WaveFileChunk*)((char*)chunk + sizeof(WaveFileChunk) + chunk->size);
-	}
-
-	int dataSize = chunk->size;
-	short* data = (short*)(chunk+1);
+	int channels;
+	int sampleRate;
+	short* data;
+	int frameCount = stb_vorbis_decode_filename(filePath, &channels, &sampleRate, &data);
 
 	Audio audio = {};
 
 	audio.name = getPStringCpy(name);
-	audio.file = file;
+	audio.file = 0;
 	audio.data = data;
-	audio.sampleRate = waveHeader->sampleRate;
-	audio.channels = waveHeader->numChannels;
-	audio.bitsPerSample = waveHeader->bitsPerSample;
+	audio.sampleRate = sampleRate;
+	audio.channels = channels;
+	audio.bitsPerSample = 16; // Always correct?
 
 	int bytesPerSample = audio.bitsPerSample/8;
-	audio.totalLength = dataSize/bytesPerSample;
-	audio.frameCount = audio.totalLength/audio.channels;
+	audio.totalLength = frameCount/bytesPerSample;
+	audio.frameCount = frameCount;
 
 	as->files[as->fileCount++] = audio;
 }
@@ -161,8 +113,7 @@ Audio* getAudio(AudioState* as, char* name) {
 	return 0;
 }
 
-
-void addTrack(Audio* audio, float volume = 1.0f, bool modulate = false, float modulationAmount = 0) {
+void addTrack(Audio* audio, float volume = 1.0f, bool modulate = false, float modulationAmount = 0, float speed = 1) {
 	AudioState* as = theAudioState;
 
 	if(modulate && modulationAmount == 0) modulationAmount = as->defaultModulation; 
@@ -190,7 +141,7 @@ void addTrack(Audio* audio, float volume = 1.0f, bool modulate = false, float mo
 	track->playing = true;
 	track->paused = false;
 	track->index = 0;
-	track->speed = 1;
+	track->speed = speed;
 
 	LARGE_INTEGER timeStamp;
 	QueryPerformanceCounter(&timeStamp);
@@ -198,19 +149,18 @@ void addTrack(Audio* audio, float volume = 1.0f, bool modulate = false, float mo
 
 	if(modulate) {
 		float percent = 1 + (PITCH_PERCENT * modulationAmount);
-		track->speed = randomFloatPCG(1/percent, percent, 0.00001f);
+		track->speed *= randomFloatPCG(1/percent, percent, 0.00001f);
 	}
 
 	track->volume = volume;
 }
 
-void addTrack(char* name, float volume = 1.0f, bool modulate = false, float modulationAmount = 0) {
+void addTrack(char* name, float volume = 1.0f, bool modulate = false, float modulationAmount = 0, float speed = 1) {
 	Audio* audio = getAudio(theAudioState, name);
 	if(!audio) return;
 
-	return addTrack(audio, volume, modulate, modulationAmount);
+	return addTrack(audio, volume, modulate, modulationAmount, speed);
 }
-
 
 void updateAudio(AudioState* as, float dt) {
 	{

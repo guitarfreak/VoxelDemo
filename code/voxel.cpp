@@ -15,6 +15,8 @@
 // #define DATA_CACHE_DISTANCE (VIEW_DISTANCE / 2)
 // #define STORE_DISTANCE (DATA_CACHE_DISTANCE + 2)
 
+#define chunkOffsetToVoxelOffset(c) vec3i(c * vec2i(VOXEL_X, VOXEL_Y), 0)
+
 struct VoxelWorldSettings {
 	int viewDistance = 5;
 	int storeDistanceOffset = 3;
@@ -170,6 +172,10 @@ enum BlockTextures2 {
 	BX2_Size,
 };
 
+int blockTypesInventory[] = {
+	BX_None, BX_Water, BX_Sand, BX_GrassBottom, BX_GrassTop, BX_Stone, BX_Snow, BX_TreeLogTop, BX_Leaves, BX_Glass, BX_GlowStone, BX_PumpkinTop,
+};
+
 const char* textureFilePaths[BX_Size] = {
 	DATA_FOLDER("Textures\\Minecraft\\none.png"),
 	DATA_FOLDER("Textures\\Minecraft\\water.png"),
@@ -196,34 +202,34 @@ const char* textureFilePaths2[BX2_Size] = {
 };
 
 char* footstepsDirt[] = {
-	"footsteps\\dirt1.wav",
-	"footsteps\\dirt2.wav",
-	"footsteps\\dirt3.wav",
-	"footsteps\\dirt4.wav",
+	"footsteps\\dirt1.ogg",
+	"footsteps\\dirt2.ogg",
+	"footsteps\\dirt3.ogg",
+	"footsteps\\dirt4.ogg",
 };
 char* footstepsWater[] = {
-	"footsteps\\water1.wav",
-	"footsteps\\water2.wav",
-	"footsteps\\water3.wav",
+	"footsteps\\water1.ogg",
+	"footsteps\\water2.ogg",
+	"footsteps\\water3.ogg",
 };
 char* footstepsGrass[] = {
-	"footsteps\\grass1.wav",
-	"footsteps\\grass2.wav",
-	"footsteps\\grass3.wav",
-	"footsteps\\grass4.wav",
-	"footsteps\\grass5.wav",
-	"footsteps\\grass6.wav",
+	"footsteps\\grass1.ogg",
+	"footsteps\\grass2.ogg",
+	"footsteps\\grass3.ogg",
+	"footsteps\\grass4.ogg",
+	"footsteps\\grass5.ogg",
+	"footsteps\\grass6.ogg",
 };
 char* footstepsSand[] = {
-	"footsteps\\sand1.wav",
-	"footsteps\\sand2.wav",
-	"footsteps\\sand3.wav",
+	"footsteps\\sand1.ogg",
+	"footsteps\\sand2.ogg",
+	"footsteps\\sand3.ogg",
 };
 char* footstepsSnow[] = {
-	"footsteps\\snow1.wav",
-	"footsteps\\snow2.wav",
-	"footsteps\\snow3.wav",
-	"footsteps\\snow4.wav",
+	"footsteps\\snow1.ogg",
+	"footsteps\\snow2.ogg",
+	"footsteps\\snow3.ogg",
+	"footsteps\\snow4.ogg",
 };
 
 struct FootstepArray {
@@ -359,10 +365,7 @@ static unsigned char colorPaletteCompact[64][3] =
    { 187,187,187 }, { 170,170,170 }, { 153,153,153 }, { 136,136,136 },
    { 119,119,119 }, { 102,102,102 }, {  85, 85, 85 }, {  68, 68, 68 },
    {  51, 51, 51 }, {  34, 34, 34 }, {  17, 17, 17 }, {   0,  0,  0 },
-
-   // { 220,100,30 }, { 0,100,220 }, { 255,160,160 }, { 255, 32, 32 },
-   // { 220,100,30 }, { 0,100,220 }, { 255,160,160 }, { 255, 32, 32 },
-   { 200,20,0 }, { 0,70,180 }, { 255,160,160 }, { 255, 32, 32 },
+   { 200, 20,  0 }, {   0, 70,180 }, { 255,160,160 }, { 255, 32, 32 },
    { 200,120,160 }, { 200, 60,150 }, { 220,100,130 }, { 255,  0,128 },
    { 240,240,255 }, { 220,220,255 }, { 160,160,255 }, {  32, 32,255 },
    { 120,160,200 }, {  60,150,200 }, { 100,130,220 }, {   0,128,255 },
@@ -936,7 +939,7 @@ Vec3 coordToMeshCoord(Vec3 coord) {
 // voxel -> block
 uchar* getBlockFromVoxel(VoxelData* voxelData, Vec3i voxel) {
 	VoxelMesh* vm = getVoxelMesh(voxelData, voxelToMesh(voxel));
-	if(!vm->generated) return 0;
+	if(!vm->generated || (vm->compressionStep || vm->stored)) return 0;
 
 	Vec3i localCoord = voxelToLocalVoxel(voxel);
 	uchar* block = &vm->voxels[voxelCacheArray(1 + localCoord.x, 1 + localCoord.y, 1 + localCoord.z)];
@@ -952,7 +955,7 @@ uchar* getBlockFromCoord(VoxelData* voxelData, Vec3 coord) {
 // voxel -> lighting
 uchar* getLightingFromVoxel(VoxelData* voxelData, Vec3i voxel) {
 	VoxelMesh* vm = getVoxelMesh(voxelData, voxelToMesh(voxel));
-	if(!vm->generated) return 0;
+	if(!vm->generated || (vm->compressionStep || vm->stored)) return 0;
 
 	Vec3i localCoord = voxelToLocalVoxel(voxel);
 	uchar* block = &vm->lighting[voxelCacheArray(1 + localCoord.x, 1 + localCoord.y, 1 + localCoord.z)];
@@ -963,6 +966,35 @@ uchar* getLightingFromVoxel(VoxelData* voxelData, Vec3i voxel) {
 // coord -> lighting
 uchar* getLightingFromCoord(VoxelData* voxelData, Vec3 coord) {
 	return getLightingFromVoxel(voxelData, coordToVoxel(coord));
+}
+
+void getVoxelQuadFromFaceDir(Vec3 p, Vec3 faceDir, Vec3 vs[4], float size);
+void drawVoxelCube(Vec3 pos, float size, Vec4 color, int type) {
+
+	int colorPalleteIndex = blockColor[type];
+	Vec3 blockColor;
+	blockColor.r = colorPaletteCompact[colorPalleteIndex][0] / 255.0f;
+	blockColor.g = colorPaletteCompact[colorPalleteIndex][1] / 255.0f;
+	blockColor.b = colorPaletteCompact[colorPalleteIndex][2] / 255.0f;
+	color.rgb = color.rgb * blockColor;
+	color = srgbToLinear(color);
+
+	int dirIndex = 1;
+	for(int faceIndex = 0; faceIndex < 6; faceIndex++) {
+
+		Vec3 faceDir = vec3(0,0,0);
+		faceDir.e[abs(dirIndex)-1] = dirIndex > 0 ? 1 : -1;
+		if(dirIndex > 0) dirIndex *= -1;
+		else dirIndex = abs(dirIndex) + 1;
+
+		Vec3 vs[4];
+		getVoxelQuadFromFaceDir(pos, faceDir, vs, size);
+		for(int i = 0; i < arrayCount(vs); i++) vs[i] = vs[i];
+
+		int faceTextureId = texture1Faces[type][faceIndex];
+
+		dcQuad(vs[0], vs[1], vs[2], vs[3], color, (int)theGraphicsState->textures3d[0].id, rect(0,0,1,1), faceTextureId);
+	}
 }
 
 void setupVoxelUniforms(Vec3 cameraPos, Mat4 view, Mat4 proj, Vec3 fogColor, int viewDistance, Vec3 trans = vec3(0,0,0), Vec3 scale = vec3(1,1,1), Vec3 rotation = vec3(0,0,0)) {
@@ -1080,7 +1112,7 @@ void setupVoxelUniforms(Vec3 cameraPos, Mat4 view, Mat4 proj, Vec3 fogColor, int
 	pushUniform(SHADER_VOXEL, 0, VOXEL_UNIFORM_MODEL_VIEW, finalMat.e);
 }
 
-void drawVoxelMesh(VoxelMesh* m, int drawMode = 0) {
+void drawVoxelMesh(VoxelMesh* m, Vec2i chunkOffset, int drawMode = 0) {
 	TIMER_BLOCK();
 
 	theGraphicsState->textureUnits[0] = theGraphicsState->textures3d[0].id;
@@ -1094,6 +1126,11 @@ void drawVoxelMesh(VoxelMesh* m, int drawMode = 0) {
 	glBindSamplers(0,16,theGraphicsState->samplerUnits);
 
 	bindShader(SHADER_VOXEL);
+
+	stbvox_mesh_maker mm;
+	stbvox_set_mesh_coordinates(&mm, (-chunkOffset.x + m->coord.x)*VOXEL_X, (-chunkOffset.y + m->coord.y)*VOXEL_Y, 0);
+	stbvox_get_transform(&mm, m->transform);
+
 	pushUniform(SHADER_VOXEL, 2, VOXEL_UNIFORM_TRANSFORM, m->transform[0], 3);
 
 	if(drawMode == 0 || drawMode == 2) {
@@ -1228,7 +1265,7 @@ void loadVoxelTextures(char* folderPath, float waterAlpha, int internalFormat, b
 
 }
 
-bool collisionVoxelBox(VoxelData* voxelData, Vec3 boxPos, Vec3 boxSize, float* minDistance = 0, Vec3* collisionVoxel = 0) {
+bool collisionVoxelBox(VoxelData* voxelData, Vec3 boxPos, Vec3 boxSize, Vec2i chunkOffset, float* minDistance = 0, Vec3* collisionVoxel = 0) {
 
 	// First get the mesh coords that touch the player box.
 
@@ -1243,24 +1280,28 @@ bool collisionVoxelBox(VoxelData* voxelData, Vec3 boxPos, Vec3 boxSize, float* m
 
 	// Check collision with the voxel that's closest.
 
+	Vec3i voxelOffset = vec3i(chunkOffset * vec2i(VOXEL_X, VOXEL_Y), 0);
+
 	for(int x = voxelMin.x; x < voxelMax.x; x++) {
 		for(int y = voxelMin.y; y < voxelMax.y; y++) {
 			for(int z = voxelMin.z; z < voxelMax.z; z++) {
 				Vec3i coord = vec3i(x,y,z);
-				uchar* block = getBlockFromVoxel(voxelData, coord);
+				uchar* block = getBlockFromVoxel(voxelData, coord + voxelOffset);
 
-				if(block && *block > 0) {
-					if(checkDistance) {
-						Vec3 cBox = voxelToVoxelCoord(coord);
-						float distance = lenVec3(boxPos - cBox);
-						
-						if(distance < *minDistance) {
-							*minDistance = distance;
-							*collisionVoxel = cBox;
+				if(block) {
+					if(*block > 0) {
+						if(checkDistance) {
+							Vec3 cBox = voxelToVoxelCoord(coord);
+							float distance = lenVec3(boxPos - cBox);
+							
+							if(distance < *minDistance) {
+								*minDistance = distance;
+								*collisionVoxel = cBox;
+							}
 						}
-					}
 
-					collision = true;
+						collision = true;
+					}
 				}
 			}
 		}
@@ -1269,7 +1310,7 @@ bool collisionVoxelBox(VoxelData* voxelData, Vec3 boxPos, Vec3 boxSize, float* m
 	return collision;
 }
 
-bool collisionVoxelBoxDistance(VoxelData* voxelData, Vec3 pos, Vec3 size, Vec3* newPos, Vec3* collisionNormal) {
+bool collisionVoxelBoxDistance(VoxelData* voxelData, Vec3 pos, Vec3 size, Vec2i chunkOffset, Vec3* newPos, Vec3* collisionNormal) {
 
 	*collisionNormal = vec3(0,0,0);
 
@@ -1281,7 +1322,7 @@ bool collisionVoxelBoxDistance(VoxelData* voxelData, Vec3 pos, Vec3 size, Vec3* 
 
 		float md;
 		Vec3 collisionBox;
-		collision = collisionVoxelBox(voxelData, pos, size, &md, &collisionBox);
+		collision = collisionVoxelBox(voxelData, pos, size, chunkOffset, &md, &collisionBox);
 
 		if(collision) {
 			collisionCount++;
@@ -1329,7 +1370,7 @@ bool collisionVoxelBoxDistance(VoxelData* voxelData, Vec3 pos, Vec3 size, Vec3* 
 	return result;
 }
 
-bool raycastGroundVoxelBox(VoxelData* voxelData, Vec3 pos, Vec3 size, uchar* collisionBlockType) {
+bool raycastGroundVoxelBox(VoxelData* voxelData, Vec3 pos, Vec3 size, Vec2i chunkOffset, uchar* collisionBlockType) {
 	float raycastThreshold = 0.01f;
 
 	bool groundCollision = false;
@@ -1339,17 +1380,21 @@ bool raycastGroundVoxelBox(VoxelData* voxelData, Vec3 pos, Vec3 size, uchar* col
 					  vec2(0.5f, 0.5f), vec2(-0.5f, 0.5f),
 					  vec2(0.5f,-0.5f), vec2(-0.5f,-0.5f),};
 
+	Vec3i voxelOffset = vec3i(chunkOffset * vec2i(VOXEL_X, VOXEL_Y), 0);
+
 	for(int i = 0; i < 5; i++) {
 		Vec3 gp = bottomCenter + vec3(offsets[i],0)*size;
 		gp.z -= raycastThreshold;
 
-		Vec3 block = coordToVoxelCoord(gp);
-		uchar* blockType = getBlockFromCoord(voxelData, gp);
+		Vec3i voxel = coordToVoxel(gp);
+		uchar* blockType = getBlockFromVoxel(voxelData, voxel + voxelOffset);
 
-		if(blockType && *blockType > 0) {
-			groundCollision = true;
-			if(collisionBlockType) *collisionBlockType = *blockType;
-			break;
+		if(blockType) {
+			if(*blockType > 0) {
+				groundCollision = true;
+				if(collisionBlockType) *collisionBlockType = *blockType;
+				break;
+			}
 		}
 	}
 
@@ -1460,7 +1505,7 @@ void drawCubeMap(int skyBoxId, Entity* player, Entity* camera, bool playerMode, 
 	glDisable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 }
 
-void getVoxelQuadFromFaceDir(Vec3 p, Vec3 faceDir, Vec3 vs[4]) {
+void getVoxelQuadFromFaceDir(Vec3 p, Vec3 faceDir, Vec3 vs[4], float size) {
 
 	Vec3* voxelVerts;
 	     if(faceDir.x > 0) voxelVerts = voxelVertices + 0*4;
@@ -1471,31 +1516,15 @@ void getVoxelQuadFromFaceDir(Vec3 p, Vec3 faceDir, Vec3 vs[4]) {
 	else if(faceDir.z < 0) voxelVerts = voxelVertices + 5*4;
 	else assert(false);
 
-	for(int i = 0; i < 4; i++) vs[i] = p + voxelVerts[i]*0.5f;
+	for(int i = 0; i < 4; i++) vs[i] = p + voxelVerts[i]*(size * 0.5f);
+}
 
-	// int axis = getBiggestAxis(faceDir);
+void getVoxelQuadFromFaceDir(Vec3 p, int faceIndex, Vec3 vs[4], float size) {
 
-	// for(int i = 0; i < 4; i++) {
-	// 	vs[i] = p + voxelVerts[i]*0.5f;
+	Vec3 dirs[] = {vec3(1,0,0), vec3(-1,0,0), vec3(0,1,0), 
+	               vec3(0,-1,0), vec3(0,0,1), vec3(0,0,-1), };
 
-	// 	float before = vs[i].e[axis];
-	// 	// vs[i].e[axis] = nextafterf(vs[i].e[axis], vs[i].e[axis] + faceDir.e[axis]);
-
-	// 	// float diff = nextafterf(vs[i].e[axis], vs[i].e[axis] + faceDir.e[axis]);
-	// 	// diff -= vs[i].e[axis];
-	// 	// diff *= 100;
-
-	// 	for(int j = 0; j < 50; j++) {
-	// 		vs[i].e[axis] = nextafterf(vs[i].e[axis], vs[i].e[axis] + faceDir.e[axis]);
-	// 	}
-
-	// 	// vs[i].e[axis] += diff;
-
-	// 	printf("DIFF:%f\n", before - vs[i].e[axis]);
-
-	// 	// vs[i].e[axis] -= vs[i].e[axis]*0.1f;
-	// 	// vs[i].e[axis] *= 1.001f;
-	// }
+	return getVoxelQuadFromFaceDir(p, dirs[faceIndex], vs, size);
 }
 
 void getVoxelShowingVoxelFaceDirs(Vec3 dirFromVoxelToCam, Vec3 faceDirs[3]) {
@@ -1504,3 +1533,25 @@ void getVoxelShowingVoxelFaceDirs(Vec3 dirFromVoxelToCam, Vec3 faceDirs[3]) {
 		faceDirs[i].e[i] = dirFromVoxelToCam.e[i] < 0 ? -1 : 1;
 	}
 }
+
+// struct VoxelRaycastData { 
+// 	Vec3 voxel;
+// 	Vec3 pos;
+// 	Vec3 dir;
+
+// 	float t;
+
+// 	Vec3 offset;
+// 	Vec3 maxOffset;
+// };
+
+// VoxelRaycastData voxelRaycastInit(Vec3 pos, Vec3 dir) {
+// 	VoxelRaycastData vd;
+// 	vd->pos = pos;
+// 	vd->dir = dir;
+
+// 	vd->t = 0;
+// 	vd->offset = 
+
+// 	return vd;
+// }

@@ -246,6 +246,7 @@ enum CubeUniforms {
 	CUBE_UNIFORM_VERTICES,
 	CUBE_UNIFORM_CPLANE,
 	CUBE_UNIFORM_UV,
+	CUBE_UNIFORM_TEXZ,
 	CUBE_UNIFORM_ALPHA_TEST,
 	CUBE_UNIFORM_ALPHA,
 	CUBE_UNIFORM_SIZE,
@@ -260,6 +261,7 @@ ShaderUniformType cubeShaderUniformType[] = {
 	{UNIFORM_TYPE_VEC3, "vertices"},
 	{UNIFORM_TYPE_VEC4, "cPlane"},
 	{UNIFORM_TYPE_VEC2, "setUV"},
+	{UNIFORM_TYPE_FLOAT, "texZ"},
 	{UNIFORM_TYPE_FLOAT, "alpha"},
 	{UNIFORM_TYPE_INT, "alphaTest"},
 };
@@ -267,7 +269,7 @@ ShaderUniformType cubeShaderUniformType[] = {
 const char* vertexShaderCube = GLSL (
 	out gl_PerVertex { vec4 gl_Position; };
 	out vec4 Color;
-	smooth out vec3 uv;
+	smooth out vec2 uv;
 
 	layout(location = 0) in vec3 attr_verts;
 	layout(location = 1) in vec2 attr_texUV;
@@ -287,32 +289,38 @@ const char* vertexShaderCube = GLSL (
 		Color = setColor;
 
 		vec4 pos;
-		if(mode == true) {
+		if(mode) {
 			pos = vec4(vertices[gl_VertexID], 1);
 			gl_Position = proj*view*pos;
-			uv = vec3(setUV[gl_VertexID],0);
+			uv = setUV[gl_VertexID];
 		} else {
 			pos = vec4(attr_verts, 1);
 			gl_Position = proj*view*model*pos;
-			uv = vec3(attr_texUV, 0);
+			uv = attr_texUV;
 		}
 	}
 );
 
 const char* fragmentShaderCube = GLSL (
 	layout(binding = 0) uniform sampler2D s;
+	layout(binding = 1) uniform sampler2DArray sArray[2];
 
-	smooth in vec3 uv;
+	smooth in vec2 uv;
 	in vec4 Color;
 
 	layout(depth_less) out float gl_FragDepth;
 	out vec4 color;
 
+	uniform float texZ;
 	uniform bool alphaTest = false;
 	uniform float alpha = 0.5f;
 
 	void main() {
-		color = texture(s, uv.xy) * Color;
+		vec4 texColor;
+		if(texZ != -1) texColor = texture(sArray[0], vec3(uv, floor(texZ)));
+		else texColor = texture(s, uv);
+
+		color = texColor * Color;
 
 		if(alphaTest) {
 			if(color.a <= alpha) discard;
@@ -331,6 +339,7 @@ enum QuadUniforms {
 	
 	QUAD_UNIFORM_PRIMITIVE_MODE,
 	QUAD_UNIFORM_VERTS,
+	QUAD_UNIFORM_UVS,
 
 	QUAD_UNIFORM_SIZE,
 };
@@ -344,6 +353,7 @@ ShaderUniformType quadShaderUniformType[] = {
 
 	{UNIFORM_TYPE_INT, "primitiveMode"},
 	{UNIFORM_TYPE_VEC2, "verts"},
+	{UNIFORM_TYPE_VEC2, "uvs"},
 };
 
 const char* vertexShaderQuad = GLSL (
@@ -369,6 +379,7 @@ const char* vertexShaderQuad = GLSL (
 
 	uniform bool primitiveMode = false;
 	uniform vec2 verts[32];
+	uniform vec2 uvs[32];
 
 	out gl_PerVertex { vec4 gl_Position; };
 	smooth out vec3 uv;
@@ -377,7 +388,8 @@ const char* vertexShaderQuad = GLSL (
 	void main() {
 
 		if(primitiveMode) {
-			uv = vec3(0,0,-1);
+			uv = vec3(uvs[gl_VertexID],texZ);
+
 			Color = setColor;
 
 			vec2 model = verts[gl_VertexID];
@@ -404,7 +416,6 @@ const char* fragmentShaderQuad = GLSL (
 	layout(binding = 0) uniform sampler2D s;
 	layout(binding = 1) uniform sampler2DArray sArray[2];
 
-// smooth in vec2 uv;
 	smooth in vec3 uv;
 	in vec4 Color;
 

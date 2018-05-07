@@ -83,6 +83,7 @@ enum Entity_Type {
 	ET_Camera,
 	ET_Rocket,
 	ET_ParticleEmitter,
+	ET_BlockResource,
 
 	ET_Size,
 };
@@ -93,6 +94,8 @@ struct Entity {
 	int type;
 	int id;
 	char name[16];
+
+	Vec2i chunk;
 
 	Vec3 pos;
 	Vec3 dir;
@@ -122,6 +125,11 @@ struct Entity {
 			ParticleEmitter emitter;
 		};
 
+		// Block.
+		struct {
+			uchar blockType;
+		};
+
 		// Rocket.
 		struct {
 			bool exploded;
@@ -139,12 +147,13 @@ Vec3 getRotationToVector(Vec3 start, Vec3 dest, float* angle) {
 	return side;
 }	
 
-void initEntity(Entity* e, int type, Vec3 pos, Vec3 dim) {
+void initEntity(Entity* e, int type, Vec3 pos, Vec3 dim, Vec2i chunk) {
 	*e = {};
 	e->init = true;
 	e->type = type;
 	e->pos = pos;
 	e->dim = dim;
+	e->chunk = chunk;
 }
 
 Entity* addEntity(EntityList* list, Entity* e) {
@@ -167,12 +176,52 @@ Entity* addEntity(EntityList* list, Entity* e) {
 	return freeEntity;
 }
 
+//
+
+void entityMouseLook(Entity* e, Input* input, float mouseSensitivity) {
+	float turnRate = mouseSensitivity * 0.01f;
+	e->rot.y -= turnRate * input->mouseDelta.y;
+	e->rot.x -= turnRate * input->mouseDelta.x;
+
+	float margin = 0.05f;
+	clamp(&e->rot.y, -M_PI_2+margin, M_PI_2-margin);
+	e->rot.x = modFloat(e->rot.x, (float)M_PI*2);
+}
+
+void entityKeyboardAcceleration(Entity* e, Input* input, float speed, float boost, bool freeForm) {
+
+	Vec3 up = vec3(0,0,1);
+
+	Camera cam = getCamData(e->pos, e->rot);
+
+	bool rightLock = !freeForm || input->keysDown[KEYCODE_CTRL];
+	if(rightLock) cam.look = cross(up, cam.right);
+
+	Vec3 acceleration = vec3(0,0,0);
+	if(input->keysDown[KEYCODE_SHIFT]) speed *= boost;
+	if(input->keysDown[KEYCODE_W]) acceleration +=  normVec3(cam.look);
+	if(input->keysDown[KEYCODE_S]) acceleration += -normVec3(cam.look);
+	if(input->keysDown[KEYCODE_D]) acceleration +=  normVec3(cam.right);
+	if(input->keysDown[KEYCODE_A]) acceleration += -normVec3(cam.right);
+
+	if(freeForm) {
+		if(input->keysDown[KEYCODE_E]) acceleration +=  normVec3(up);
+		if(input->keysDown[KEYCODE_Q]) acceleration += -normVec3(up);
+	}
+
+	if(acceleration != vec3(0,0,0)) {
+		e->acc += normVec3(acceleration)*speed;
+	}
+}
+
+//
+
 void particleEmitterUpdate(ParticleEmitter* e, float dt, float dtTime) {
 	for(int i = 0; i < e->particleListCount; i++) {
 		Particle* p = e->particleList + i;
 
 		p->vel = p->vel + p->acc*dt;
-		// p->vel = p->vel * pow(friction,dt);
+		// p->vel = p->vel * pow(0.01f,dt);
 		p->pos = p->pos - 0.5f*p->acc*dt*dt + p->vel*dt;
 
 		p->velColor = p->velColor + p->accColor*dt;

@@ -1217,6 +1217,12 @@ inline Vec2i & operator-=(Vec2i & a, int b) {
 	return a;
 }
 
+inline Vec2i operator*(Vec2i a, Vec2i b) {
+	a.x *= b.x;
+	a.y *= b.y;
+	return a;
+}
+
 inline Vec2i operator*(Vec2i a, int b) {
 	a.x *= b;
 	a.y *= b;
@@ -1280,9 +1286,10 @@ inline Vec2 operator*(float b, Vec2 a) {
 	return a;
 }
 
-inline float operator*(Vec2 a, Vec2 b) {
-	float dot = a.x*b.x + a.y*b.y;
-	return dot;
+inline Vec2 operator*(Vec2 a, Vec2 b) {
+	a.x *= b.x;
+	a.y *= b.y;
+	return a;
 }
 
 inline Vec2 & operator*=(Vec2 & a, float b) {
@@ -1355,12 +1362,8 @@ inline bool operator!=(Vec2 a, Vec2 b) {
 	return !(a==b);
 }
 
-inline Vec2 mulVec2(Vec2 a, Vec2 b) {
-	Vec2 result;
-	result.x = a.x * b.x;
-	result.y = a.y * b.y;
-
-	return result;
+inline float dot(Vec2 a, Vec2 b) {
+	return a.x*b.x + a.y*b.y;
 }
 
 inline float lenVec2(Vec2 a) {
@@ -1384,9 +1387,9 @@ inline Vec2 normVec2Unsafe(Vec2 a) {
 }
 
 inline float angleVec2(Vec2 dir1, Vec2 dir2) {
-	float dot = normVec2(dir1) * normVec2(dir2);
-	dot = clamp(dot, -1, 1);
-	float angle = acos(dot);
+	float dt = dot(normVec2(dir1), normVec2(dir2));
+	dt = clamp(dt, -1, 1);
+	float angle = acos(dt);
 	return angle;
 }
 
@@ -1555,7 +1558,7 @@ void closestPointToTriangle(float closest[2], float a[2], float b[2], float c[2]
 Vec2 projectPointOnLine(Vec2 p0, Vec2 lp0, Vec2 lp1) {
 	Vec2 a = lp1 - lp0;
 	Vec2 b = p0 - lp0;
-	Vec2 result = lp0 + (((a*b)*a) / pow(lenVec2(a),2));
+	Vec2 result = lp0 + ((dot(a,b)*a) / pow(lenVec2(a),2));
 
  // Point e1 = new Point(v2.x - v1.x, v2.y - v1.y);
   // Point e2 = new Point(p.x - v1.x, p.y - v1.y);
@@ -1572,9 +1575,9 @@ inline bool lineCircleIntersection(Vec2 lp0, Vec2 lp1, Vec2 cp, float r, Vec2 * 
 	Vec2 d = lp1 - lp0;
 	Vec2 f = lp0 - cp;
 
-	float a = d*d;
-	float b = 2*f*d;
-	float c = f*f - r*r;
+	float a = dot(d,d);
+	float b = 2*dot(f,d);
+	float c = dot(f,f) - r*r;
 
 	float discriminant = b*b-4*a*c;
 	if( discriminant < 0 )
@@ -1970,8 +1973,8 @@ bool boxRaycast(Vec3 lp, Vec3 ld, Rect3 box, float* distance = 0, int* face = 0)
 		else if(tmin == t6) *face = 5;
 	}
 
-	t = tmin;
-	if(distance != 0) *distance = t;
+	if(distance) *distance = tmin;
+	
 	return true;
 }
 
@@ -2052,6 +2055,13 @@ inline Vec3 reflectVector(Vec3 dir, Vec3 normal) {
 	return result;
 }
 
+Vec3 randomUnitHalfSphereDirection(Vec3 dir) {
+	Vec3 p = randomUnitSphereDirection();
+	if(dot(dir, p) < 0) p = reflectVector(p, dir);
+
+	return p;
+}
+
 //
 //
 //
@@ -2066,6 +2076,10 @@ inline Vec3i vec3i(int a, int b, int c) {
 
 inline Vec3i vec3i(Vec3 a) {
 	return vec3i(a.x,a.y,a.z);
+}
+
+inline Vec3i vec3i(Vec2i a, int b) {
+	return vec3i(a.x, a.y, b);
 }
 
 inline Vec3i operator+(Vec3i a, float b) {
@@ -2453,8 +2467,8 @@ Vec3 operator*(Quat q, Vec3 v) {
 
 Vec3 rotateVec3(Vec3 v, float a, Vec3 axis) {
 	Vec3 r = quat(a, axis)*v;
-	return normVec3(r);
-	// return r;
+	// return normVec3(r);
+	return r;
 }
 
 void rotateVec3(Vec3* v, float a, Vec3 axis) {
@@ -2794,6 +2808,21 @@ Rect3 rect3Expand(Rect3 r, Vec3 dim) {
 	return r;
 }
 
+inline bool boxIntersection(Vec3 b1, Vec3 d1, Vec3 b2, Vec3 d2) {
+	Vec3 min1 = b1 - d1/2.0f;
+	Vec3 max1 = b1 + d1/2.0f;
+	Vec3 min2 = b2 - d2/2.0f;
+	Vec3 max2 = b2 + d2/2.0f;
+
+	bool result = !( min2.x > max1.x ||
+					 max2.x < min1.x ||
+					 max2.y < min1.y ||
+					 min2.y > max1.y ||
+					 max2.z < min1.z ||
+					 min2.z > max1.z);
+	return result;
+}
+
 //
 //
 //
@@ -2888,8 +2917,7 @@ bool ellipseGetLineIntersection(float a, float b, float h, float k, Vec2 p0, Vec
 
 Vec2 ellipseNormal(Vec2 pos, float width, float height, Vec2 point) {
 	Vec2 dir = vec2((point.x-pos.x)/pow(width,2), (point.y-pos.y)/pow(height,2));
-	dir = normVec2(dir);
-	dir *= -1;
+	dir = -normVec2(dir);
 	return dir;
 }
 
@@ -3134,6 +3162,13 @@ Vec3 colorSRGB(Vec3 color) {
 	return color;
 }
 
+Vec4 srgbToLinear(Vec4 color) {
+	color.r = powf(color.r, 1/2.2f);
+	color.g = powf(color.g, 1/2.2f);
+	color.b = powf(color.b, 1/2.2f);
+	// color.a = powf(color.a, 2.2f);
+	return color;
+}
 
 struct SortPair {
 	float key;

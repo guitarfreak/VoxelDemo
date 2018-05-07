@@ -115,6 +115,7 @@ struct DebugState {
 	//
 
 	int fontHeight;
+	int fontHeightScaled;
 	float fontScale;
 
 	GuiInput gInput;
