@@ -12,9 +12,10 @@ Lines of code: 14.0K.
 W,A,S,D     - Move.  
 Shift       - Run.  
 Space       - Jump.  
-RightMB     - Place block.  
-LeftMB      - Remove block.  
-MWheel, 0-9 - Switch selected block.  
+LeftMB      - Place block.  
+RightMB     - Remove block.  
+MWheel, 0-9 - Select item.  
+Tab, I      - Inventory.
 
 #### Debug Controls
 
