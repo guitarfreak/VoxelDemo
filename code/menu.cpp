@@ -68,10 +68,6 @@ void menuOptionDraw(MainMenu* menu, char* text, Vec2 pos, Vec2i alignment, bool 
 bool menuOption(MainMenu* menu, char* text, Vec2 pos, Vec2i alignment) {
 
 	bool isActive = menu->activeId == menu->currentId;
-	// Vec4 textColor = isActive ? menu->cOptionActive : menu->cOption;
-	// Vec4 shadowColor = isActive ? menu->cOptionShadowActive : menu->cOptionShadow;
-
-	// dcText(text, menu->font, pos, textColor, alignment, 0, menu->optionShadowSize, shadowColor);
 	menuOptionDraw(menu, text, pos, alignment, isActive);
 
 	bool result = menu->pressedEnter && menu->activeId == menu->currentId;

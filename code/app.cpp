@@ -351,8 +351,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ds->gui = getPStructDebug(Gui);
 		ds->gui->init(rectCenDim(vec2(1300,1), vec2(300, ws->currentRes.h)), 0);
 
-		// ds->gui->cornerPos = 
-
 		ds->gui2 = getPStructDebug(Gui);
 		ds->gui2->init(rectCenDim(vec2(1300,1), vec2(300, ws->currentRes.h)), 3);
 
@@ -384,20 +382,19 @@ extern "C" APPMAINFUNCTION(appMain) {
 		initSystem(sd, ws, windowsData, vec2i(1920*0.85f, 1080*0.85f), windowStyle, 1);
 
 		windowHandle = sd->windowHandle;
-
 		SetWindowText(windowHandle, APP_NAME);
 
 		loadFunctions();
 
-		if(true) {
+		#if 1
 			wglSwapIntervalEXT(1);
 			ws->vsync = true;
 			ws->frameRate = ws->refreshRate;
-		} else {
+		#else 
 			wglSwapIntervalEXT(0);
 			ws->vsync = false;
 			ws->frameRate = 200;
-		}
+		#endif
 
 		initInput(&ad->input);
 		sd->input = &ad->input;
@@ -515,82 +512,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		AudioState* as = &ad->audioState;
 		(*as) = {};
-
-		{
-			int hr;
-
-			// as->latency = 1.5f;
-			as->latency = 2.0f;
-
-			const CLSID CLSID_MMDeviceEnumerator = __uuidof(MMDeviceEnumerator);
-			const IID IID_IMMDeviceEnumerator = __uuidof(IMMDeviceEnumerator);
-			hr = CoCreateInstance(
-			       CLSID_MMDeviceEnumerator, NULL,
-			       CLSCTX_ALL, IID_IMMDeviceEnumerator,
-			       (void**)&as->deviceEnumerator);
-			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
-
-			hr = as->deviceEnumerator->GetDefaultAudioEndpoint(eRender, eConsole, &as->immDevice);
-			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
-
-			hr = as->immDevice->Activate(__uuidof(IAudioClient),CLSCTX_ALL,NULL,(void**)&as->audioClient);
-			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
-
-			int referenceTimeToSeconds = 10 * 1000 * 1000;
-			REFERENCE_TIME referenceTime = referenceTimeToSeconds * ((float)1/ws->frameRate) * as->latency; // 100 nano-seconds -> 1 second.
-			// REFERENCE_TIME referenceTime = referenceTimeToSeconds * 1; // 100 nano-seconds -> 1 second.
-			hr = as->audioClient->GetMixFormat(&as->waveFormat);
-
-			{
-				WAVEFORMATEX* format = as->waveFormat;
-				format->wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
-				format->nChannels = 2;
-				format->wBitsPerSample = 32;
-				format->cbSize = 0;
-
-				WAVEFORMATEX what = {};
-				WAVEFORMATEX* formatClosest = &what;
-				hr = as->audioClient->IsFormatSupported(AUDCLNT_SHAREMODE_SHARED, format, &formatClosest);
-				if(hr) { printf("Failed to initialise sound."); assert(!hr); };
-
-				as->channelCount = format->nChannels;
-				as->sampleRate = format->nSamplesPerSec;
-			}
-
-			as->audioClient->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, referenceTime, 0, as->waveFormat, 0);
-			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
-
-			REFERENCE_TIME latency;
-			as->audioClient->GetStreamLatency(&latency);
-			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
-
-			as->latencyInSeconds = (float)latency / referenceTimeToSeconds;
-
-			hr = as->audioClient->GetBufferSize(&as->bufferFrameCount);
-			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
-
-			hr = as->audioClient->GetService(__uuidof(IAudioRenderClient), (void**)&as->renderClient);
-			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
-
-			// Fill with silence before starting.
-
-			float* buffer;
-			hr = as->renderClient->GetBuffer(as->bufferFrameCount, (BYTE**)&buffer);
-			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
-
-			// hr = as->renderClient->ReleaseBuffer(as->bufferFrameCount, AUDCLNT_BUFFERFLAGS_SILENT);
-			hr = as->renderClient->ReleaseBuffer(0, AUDCLNT_BUFFERFLAGS_SILENT);
-			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
-
-			// // Calculate the actual duration of the allocated buffer.
-			// hnsActualDuration = (double)REFTIMES_PER_SEC *
-			//                     as->bufferFrameCount / pwfx->nSamplesPerSec;
-
-			hr = as->audioClient->Start();  // Start playing.
-			if(hr) { printf("Failed to initialise sound."); assert(!hr); };
-		}
-
 		as->masterVolume = 1.0f;
+
+		audioDeviceInit(as, ws->frameRate);
 
 		as->fileCountMax = 100;
 		as->files = getPArray(Audio, as->fileCountMax);
@@ -623,17 +547,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 				addAudio(as, folderPath, fd.fileName);
 			}
 		}
-
-		// {
-		// 	char* file = "C:\\Projects\\VoxelGame\\data\\Audio\\ui\\select.ogg";
-
-		// 	int channels;
-		// 	int sampleRate;
-		// 	short* data;
-		// 	int result = stb_vorbis_decode_filename(file, &channels, &sampleRate, &data);
-
-		// 	int sotp = 234;
-		// }
 
 		//
 		//
@@ -694,8 +607,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->captureMouse = false;
 		ad->debugMouse = true;
 		#endif
-
-		// showCursor(false);
 
 		folderExistsCreate(SAVES_FOLDER);	
 
@@ -767,7 +678,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 
 		// Load game settings.
-		
 		{
 			// Init default.
 			if(!fileExists(Game_Settings_File)) {
@@ -886,12 +796,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 			memSet(ad->input.keysPressed, 0, sizeof(ad->input.keysPressed));
 			memSet(ad->input.keysDown, 0, sizeof(ad->input.keysDown));
 		}
-
-		// if(mouseInClientArea(windowHandle)) {
-		// 	showCursor(false);
-		// } else {
-		// 	showCursor(true);
-		// }
 
 		ad->dt = ds->dt;
 		ad->time = ds->time;
@@ -1653,13 +1557,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 				bool onGroundStart = player->onGround;
 
-				if(ad->playerMode) {
-					// if(input->keysPressed[KEYCODE_SPACE]) {
-					if(input->keysDown[KEYCODE_SPACE]) {
-						if(player->onGround) {
-							player->vel += up*7.0f;
-							player->onGround = false;
-						}
+				if(input->keysDown[KEYCODE_SPACE]) {
+					if(player->onGround) {
+						player->vel += up*7.0f;
+						player->onGround = false;
 					}
 				}
 
@@ -1674,10 +1575,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 				if(e->onGround) e->vel.z = 0;
 
 				Vec3 collisionNormal = vec3(0,0,0);
-
 				Vec2 positionOffset = vec2(0,0);
+				uchar groundCollisionBlockType = 0;
 
-				if(e->vel != vec3(0,0,0)) {
+				{
 					if(e->vel.xy != vec2(0,0)) ad->firstWalk = true;
 
 					Vec3 nPos = e->pos + -0.5f*e->acc*dt*dt + e->vel*dt;
@@ -1686,6 +1587,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 					if(!result) {
 						nPos.z += 5;
+						e->vel = vec3(0,0,0);
+						// assert(false);
 					}
 
 					float stillnessThreshold = 0.0001f;
@@ -1704,24 +1607,16 @@ extern "C" APPMAINFUNCTION(appMain) {
 						e->vel.y *= pow(sideFriction,dt);
 					}
 
-					if(!result) {
-						e->vel = vec3(0,0,0);
-						// assert(false);
-					}
-
 					positionOffset = nPos.xy - e->pos.xy;
 					e->pos = nPos;
-				}
 
-				// raycast for touching ground
-				if(ad->playerMode) {
+
+					// raycast for touching ground
 
 					if(collisionNormal.z > 0 && e->vel.z <= 0) {
 						e->onGround = true;
 						e->vel.z = 0;
 					}
-
-					uchar groundCollisionBlockType = 0;
 
 					if(e->onGround) {
 
@@ -1742,31 +1637,30 @@ extern "C" APPMAINFUNCTION(appMain) {
 							if(!e->onGround) ad->footstepSoundValue = 0;
 						}
 					}
+				}
 
-					// Footstep sound.
-					if(e->vel != vec3(0,0,0) && groundCollisionBlockType) {
-						float moveLength = lenVec2(positionOffset);
-						if(player->onGround) ad->footstepSoundValue += moveLength;
+				// Footstep sound.
+				if(e->vel != vec3(0,0,0) && groundCollisionBlockType) {
+					float moveLength = lenVec2(positionOffset);
+					if(player->onGround) ad->footstepSoundValue += moveLength;
 
-						float stepDistance = 2.3f;
-						if(ad->footstepSoundValue > stepDistance) {
+					float stepDistance = 2.3f;
+					if(ad->footstepSoundValue > stepDistance) {
 
-							int footstepType = blockTypeFootsteps[groundCollisionBlockType];
-							FootstepArray fa = footstepFiles[footstepType];
-							char** files = fa.files;
-							int filesCount = fa.count;
+						int footstepType = blockTypeFootsteps[groundCollisionBlockType];
+						FootstepArray fa = footstepFiles[footstepType];
+						char** files = fa.files;
+						int filesCount = fa.count;
 
-							int soundId = randomInt(0,filesCount-1);
-							if(soundId == ad->lastFootstepSoundId) 
-								soundId = (soundId+1)%(filesCount-1);
+						int soundId = randomInt(0,filesCount-1);
+						if(soundId == ad->lastFootstepSoundId) 
+							soundId = (soundId+1)%(filesCount-1);
 
-							addTrack(files[soundId], ad->volumeFootsteps, true, 2.0f);
-							ad->footstepSoundValue = 0;
-							
-							ad->lastFootstepSoundId = soundId;
-						}
+						addTrack(files[soundId], ad->volumeFootsteps, true, 2.0f);
+						ad->footstepSoundValue = 0;
+						
+						ad->lastFootstepSoundId = soundId;
 					}
-
 				}
 			} break;
 
@@ -1849,31 +1743,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 					for(int i = 0; i < emitter->particleListCount; i++) {
 						Particle* p = emitter->particleList + i;
 
-						Vec3 pos = p->pos;
-						Vec3 size = p->size;
-
-						float friction = 0.01f;
-
-						Vec3 collisionNormal;
-						bool result = collisionVoxelBoxDistance(&ad->voxelData, pos, size, e->chunk, &pos, &collisionNormal);
-
-						bool groundRaycast = raycastGroundVoxelBox(&ad->voxelData, pos, size, e->chunk, 0);
-
-						if(collisionNormal.xy != vec2(0,0) || groundRaycast) {
-							p->vel.x *= pow(friction,dt);
-							p->vel.y *= pow(friction,dt);
-						} 
-
-						if(collisionNormal.xy != vec2(0,0)) {
-							p->vel = reflectVector(p->vel, collisionNormal);
-							p->vel *= 0.5f;
-						}
-
-						if(collisionNormal.z != 0) {
-							p->vel.z = 0;
-						}
-
-						p->pos = pos;
+						entityWorldCollision(&p->pos, p->size, &p->vel, e->chunk, &ad->voxelData, dt);
 					}
 				}
 
@@ -1908,41 +1778,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			case ET_BlockResource: {
 
-				float dt = ad->dt;
-
 				float gravity = 10.0f;
 				e->acc = vec3(0,0,-1)*gravity;
+
 				e->vel = e->vel + e->acc*dt;
+				e->pos = e->pos - 0.5f*e->acc*dt*dt + e->vel*dt;
 
-				if(e->vel != vec3(0,0,0)) {
-					e->pos = e->pos - 0.5f*e->acc*dt*dt + e->vel*dt;
-				}
-
-				{
-					float friction = 0.01f;
-
-					Vec3 collisionNormal;
-					Vec3 pos;
-					bool result = collisionVoxelBoxDistance(&ad->voxelData, e->pos, e->dim, e->chunk, &pos, &collisionNormal);
-
-					bool groundRaycast = raycastGroundVoxelBox(&ad->voxelData, pos, e->dim, e->chunk, 0);
-
-					if(collisionNormal.xy != vec2(0,0) || groundRaycast) {
-						e->vel.x *= pow(friction,dt);
-						e->vel.y *= pow(friction,dt);
-					} 
-
-					if(collisionNormal.xy != vec2(0,0)) {
-						e->vel = reflectVector(e->vel, collisionNormal);
-						e->vel *= 0.5f;
-					}
-
-					if(collisionNormal.z != 0) {
-						e->vel.z = 0;
-					}
-
-					e->pos = pos;
-				}
+				entityWorldCollision(e, &ad->voxelData, ad->dt);
 
 				Vec3i voxelOffset = chunkOffsetToVoxelOffset(e->chunk);
 				Vec3 pos = e->pos + vec3(voxelOffset - ad->voxelOffset);
@@ -2501,30 +2343,27 @@ extern "C" APPMAINFUNCTION(appMain) {
 				Vec3 boxPos = vec3(coord.x*VOXEL_X+VOXEL_X*0.5f, coord.y*VOXEL_Y+VOXEL_Y*0.5f, VOXEL_Z*0.5f);
 				Vec3 boxSize = vec3(VOXEL_X, VOXEL_Y, VOXEL_Z);
 
+				Vec3 testNormals[] = {normalLeftPlane, normalRightPlane, normalTopPlane, normalBottomPlane};
+
+				Vec3 offsets[] = {
+					vec3( 0.5f,  0.5f, -0.5f),
+					vec3(-0.5f,  0.5f, -0.5f),
+					vec3( 0.5f, -0.5f, -0.5f),
+					vec3(-0.5f, -0.5f, -0.5f),
+					vec3( 0.5f,  0.5f,  0.5f),
+					vec3(-0.5f,  0.5f,  0.5f),
+					vec3( 0.5f, -0.5f,  0.5f),
+					vec3(-0.5f, -0.5f,  0.5f),
+				};
+
 				bool isIntersecting = true;	
 				for(int test = 0; test < 4; test++) {
 
-					Vec3 testNormal;
-					if(test == 0) testNormal = normalLeftPlane;
-					else if(test == 1) testNormal = normalRightPlane;
-					else if(test == 2) testNormal = normalTopPlane;
-					else if(test == 3) testNormal = normalBottomPlane;
+					Vec3 testNormal = testNormals[test];
 
 					bool inside = false;
 					for(int i = 0; i < 8; i++) {
-						Vec3 off;
-						switch (i) {
-							case 0: off = vec3( 0.5f,  0.5f, -0.5f); break;
-							case 1: off = vec3(-0.5f,  0.5f, -0.5f); break;
-							case 2: off = vec3( 0.5f, -0.5f, -0.5f); break;
-							case 3: off = vec3(-0.5f, -0.5f, -0.5f); break;
-							case 4: off = vec3( 0.5f,  0.5f,  0.5f); break;
-							case 5: off = vec3(-0.5f,  0.5f,  0.5f); break;
-							case 6: off = vec3( 0.5f, -0.5f,  0.5f); break;
-							case 7: off = vec3(-0.5f, -0.5f,  0.5f); break;
-						}
-
-						Vec3 boxPoint = boxPos + boxSize*off;
+						Vec3 boxPoint = boxPos + boxSize*offsets[i];
 						Vec3 p = boxPoint - cp;
 
 						if(dot(p, testNormal) < 0) {
@@ -2542,7 +2381,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 				if(isIntersecting) {
 					coordList[coordListSize++] = m->coord;
 
-					// triangleCount += m->quadCount*4;
 					ad->voxelTriangleCount += m->quadCount/(float)2;
 					ad->voxelDrawCount++;
 				}

@@ -70,14 +70,90 @@ struct AudioState {
 	float defaultModulation = 0.25;
 };
 
+void audioDeviceInit(AudioState* as, int frameRate) {
+
+	int hr;
+
+	// as->latency = 1.5f;
+	as->latency = 2.0f;
+
+	const CLSID CLSID_MMDeviceEnumerator = __uuidof(MMDeviceEnumerator);
+	const IID IID_IMMDeviceEnumerator = __uuidof(IMMDeviceEnumerator);
+	hr = CoCreateInstance(
+	       CLSID_MMDeviceEnumerator, NULL,
+	       CLSCTX_ALL, IID_IMMDeviceEnumerator,
+	       (void**)&as->deviceEnumerator);
+	if(hr) { printf("Failed to initialise sound."); assert(!hr); };
+
+	hr = as->deviceEnumerator->GetDefaultAudioEndpoint(eRender, eConsole, &as->immDevice);
+	if(hr) { printf("Failed to initialise sound."); assert(!hr); };
+
+	hr = as->immDevice->Activate(__uuidof(IAudioClient),CLSCTX_ALL,NULL,(void**)&as->audioClient);
+	if(hr) { printf("Failed to initialise sound."); assert(!hr); };
+
+	int referenceTimeToSeconds = 10 * 1000 * 1000;
+	REFERENCE_TIME referenceTime = referenceTimeToSeconds * ((float)1/frameRate) * as->latency; // 100 nano-seconds -> 1 second.
+	// REFERENCE_TIME referenceTime = referenceTimeToSeconds * 1; // 100 nano-seconds -> 1 second.
+	hr = as->audioClient->GetMixFormat(&as->waveFormat);
+
+	{
+		WAVEFORMATEX* format = as->waveFormat;
+		format->wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
+		format->nChannels = 2;
+		format->wBitsPerSample = 32;
+		format->cbSize = 0;
+
+		WAVEFORMATEX what = {};
+		WAVEFORMATEX* formatClosest = &what;
+		hr = as->audioClient->IsFormatSupported(AUDCLNT_SHAREMODE_SHARED, format, &formatClosest);
+		if(hr) { printf("Failed to initialise sound."); assert(!hr); };
+
+		as->channelCount = format->nChannels;
+		as->sampleRate = format->nSamplesPerSec;
+	}
+
+	as->audioClient->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, referenceTime, 0, as->waveFormat, 0);
+	if(hr) { printf("Failed to initialise sound."); assert(!hr); };
+
+	REFERENCE_TIME latency;
+	as->audioClient->GetStreamLatency(&latency);
+	if(hr) { printf("Failed to initialise sound."); assert(!hr); };
+
+	as->latencyInSeconds = (float)latency / referenceTimeToSeconds;
+
+	hr = as->audioClient->GetBufferSize(&as->bufferFrameCount);
+	if(hr) { printf("Failed to initialise sound."); assert(!hr); };
+
+	hr = as->audioClient->GetService(__uuidof(IAudioRenderClient), (void**)&as->renderClient);
+	if(hr) { printf("Failed to initialise sound."); assert(!hr); };
+
+	// Fill with silence before starting.
+
+	float* buffer;
+	hr = as->renderClient->GetBuffer(as->bufferFrameCount, (BYTE**)&buffer);
+	if(hr) { printf("Failed to initialise sound."); assert(!hr); };
+
+	// hr = as->renderClient->ReleaseBuffer(as->bufferFrameCount, AUDCLNT_BUFFERFLAGS_SILENT);
+	hr = as->renderClient->ReleaseBuffer(0, AUDCLNT_BUFFERFLAGS_SILENT);
+	if(hr) { printf("Failed to initialise sound."); assert(!hr); };
+
+	// // Calculate the actual duration of the allocated buffer.
+	// hnsActualDuration = (double)REFTIMES_PER_SEC *
+	//                     as->bufferFrameCount / pwfx->nSamplesPerSec;
+
+	hr = as->audioClient->Start();  // Start playing.
+	if(hr) { printf("Failed to initialise sound."); assert(!hr); };
+
+}
+
 void addAudio(AudioState* as, char* filePath, char* name) {
 
 	if(as->fileCount == as->fileCountMax) return;
 
-	// Only load wav files.
-
 	char* extension = getFileExtension(filePath);
 	if(!extension) return;
+
+	// Only load ogg files.
 
 	int result = strFind(extension, "ogg");
 	if(result == -1) return;

@@ -1,19 +1,12 @@
 
-struct Bomb {
-	Vec3 pos;
-	Vec3 size;
-	Vec3 vel;
-	Vec3 acc;
+enum Entity_Type {
+	ET_Player = 0,
+	ET_Camera,
+	ET_Rocket,
+	ET_ParticleEmitter,
+	ET_BlockResource,
 
-	Vec3 dir;
-	bool active;
-	Vec3 exploded;
-};
-
-struct Entity;
-struct EntityList {
-	Entity* e;
-	int size;
+	ET_Size,
 };
 
 struct Camera {
@@ -22,19 +15,6 @@ struct Camera {
 	Vec3 up;
 	Vec3 right;
 };
-
-Camera getCamData(Vec3 pos, Vec3 rot, Vec3 offset = vec3(0,0,0), Vec3 gUp = vec3(0,0,1), Vec3 startDir = vec3(0,1,0)) {
-	Camera c;
-	c.pos = pos + offset;
-	c.look = startDir;
-	rotateVec3(&c.look, rot.x, gUp);
-	rotateVec3(&c.look, rot.y, normVec3(cross(gUp, c.look)));
-	c.up = normVec3(cross(c.look, normVec3(cross(gUp, c.look))));
-	c.right = normVec3(cross(gUp, c.look));
-	c.look = -c.look;
-
-	return c;
-}
 
 struct Particle {
 	Vec3 pos;
@@ -78,16 +58,6 @@ struct ParticleEmitter {
 	int liveTimeSpawns;
 };
 
-enum Entity_Type {
-	ET_Player = 0,
-	ET_Camera,
-	ET_Rocket,
-	ET_ParticleEmitter,
-	ET_BlockResource,
-
-	ET_Size,
-};
-
 struct Entity {
 	int init;
 
@@ -109,6 +79,8 @@ struct Entity {
 	int movementType;
 	int spatial;
 
+	bool onGround;
+
 	bool deleted;
 	bool isMoving;
 	bool isColliding;
@@ -116,7 +88,6 @@ struct Entity {
 	union {
 		// Player.
 		struct {
-			bool onGround;
 			Vec3 camOff;
 		};
 
@@ -138,6 +109,25 @@ struct Entity {
 
 };
 
+struct EntityList {
+	Entity* e;
+	int size;
+};
+
+Camera getCamData(Vec3 pos, Vec3 rot, Vec3 offset = vec3(0,0,0), Vec3 gUp = vec3(0,0,1), Vec3 startDir = vec3(0,1,0)) {
+	Camera c;
+	c.pos = pos + offset;
+	c.look = startDir;
+	rotateVec3(&c.look, rot.x, gUp);
+	rotateVec3(&c.look, rot.y, normVec3(cross(gUp, c.look)));
+	c.up = normVec3(cross(c.look, normVec3(cross(gUp, c.look))));
+	c.right = normVec3(cross(gUp, c.look));
+	c.look = -c.look;
+
+	return c;
+}
+
+//
 
 Vec3 getRotationToVector(Vec3 start, Vec3 dest, float* angle) {
 	Vec3 side = normVec3(cross(start, normVec3(dest)));
@@ -258,3 +248,61 @@ void particleEmitterFinish(ParticleEmitter* e) {
 		}
 	}	
 }
+
+
+
+// for(int i = 0; i < emitter->particleListCount; i++) {
+// 	Particle* p = emitter->particleList + i;
+
+// 	Vec3 pos = p->pos;
+// 	Vec3 size = p->size;
+
+// 	float friction = 0.01f;
+
+// 	Vec3 collisionNormal;
+// 	bool result = collisionVoxelBoxDistance(&ad->voxelData, pos, size, e->chunk, &pos, &collisionNormal);
+
+// 	bool groundRaycast = raycastGroundVoxelBox(&ad->voxelData, pos, size, e->chunk, 0);
+
+// 	if(collisionNormal.xy != vec2(0,0) || groundRaycast) {
+// 		p->vel.x *= pow(friction,dt);
+// 		p->vel.y *= pow(friction,dt);
+// 	} 
+
+// 	if(collisionNormal.xy != vec2(0,0)) {
+// 		p->vel = reflectVector(p->vel, collisionNormal);
+// 		p->vel *= 0.5f;
+// 	}
+
+// 	if(collisionNormal.z != 0) {
+// 		p->vel.z = 0;
+// 	}
+
+// 	p->pos = pos;
+// }
+
+// {
+// 	float friction = 0.01f;
+
+// 	Vec3 collisionNormal;
+// 	Vec3 pos;
+// 	bool result = collisionVoxelBoxDistance(&ad->voxelData, e->pos, e->dim, e->chunk, &pos, &collisionNormal);
+
+// 	bool groundRaycast = raycastGroundVoxelBox(&ad->voxelData, pos, e->dim, e->chunk, 0);
+
+// 	if(collisionNormal.xy != vec2(0,0) || groundRaycast) {
+// 		e->vel.x *= pow(friction,dt);
+// 		e->vel.y *= pow(friction,dt);
+// 	} 
+
+// 	if(collisionNormal.xy != vec2(0,0)) {
+// 		e->vel = reflectVector(e->vel, collisionNormal);
+// 		e->vel *= 0.5f;
+// 	}
+
+// 	if(collisionNormal.z != 0) {
+// 		e->vel.z = 0;
+// 	}
+
+// 	e->pos = pos;
+// }

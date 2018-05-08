@@ -1534,6 +1534,45 @@ void getVoxelShowingVoxelFaceDirs(Vec3 dirFromVoxelToCam, Vec3 faceDirs[3]) {
 	}
 }
 
+void entityWorldCollision(Vec3* pos, Vec3 dim, Vec3* vel, Vec2i chunk, VoxelData* vd, float dt) {
+
+	float friction = 0.01f;
+	float stillnessThreshold = 0.0001f;
+
+	Vec3 newPos = *pos;
+	Vec3 newVel = *vel;
+	Vec3 cNormal;
+	bool result = collisionVoxelBoxDistance(vd, newPos, dim, chunk, &newPos, &cNormal);
+
+	bool groundRaycast = raycastGroundVoxelBox(vd, newPos, dim, chunk, 0);
+
+	if(valueBetween(newVel.z, -stillnessThreshold, stillnessThreshold)) {
+		newVel.z = 0;
+	}
+
+	// Wall bounce.
+	if(cNormal.xy != vec2(0,0)) {
+		newVel = reflectVector(newVel, cNormal);
+		newVel *= 0.5f;
+	}
+
+	if(cNormal.xy != vec2(0,0) || groundRaycast) {
+		newVel.x *= pow(friction,dt);
+		newVel.y *= pow(friction,dt);
+	} 
+
+	if(cNormal.z != 0) {
+		newVel.z = 0;
+	}
+
+	*pos = newPos;
+	*vel = newVel;
+}
+
+void entityWorldCollision(Entity* e, VoxelData* vd, float dt) {
+	return entityWorldCollision(&e->pos, e->dim, &e->vel, e->chunk, vd, dt);
+}
+
 // struct VoxelRaycastData { 
 // 	Vec3 voxel;
 // 	Vec3 pos;
@@ -1555,3 +1594,4 @@ void getVoxelShowingVoxelFaceDirs(Vec3 dirFromVoxelToCam, Vec3 faceDirs[3]) {
 
 // 	return vd;
 // }
+
