@@ -13,6 +13,7 @@ enum Game_Mode {
 	GAME_MODE_MENU,
 	GAME_MODE_LOAD,
 	GAME_MODE_MAIN,
+	GAME_MODE_TEST,
 };
 
 enum Menu_Screen {
@@ -150,7 +151,7 @@ bool menuOptionSliderInt(MainMenu* menu, Vec2 pos, int* value, int rangeMin, int
 	if(isSelected) {
 		if(menu->pressedLeft)  (*value) -= step;
 		if(menu->pressedRight) (*value) += step;
-		*value = clampInt(*value, rangeMin, rangeMax);
+		clamp(value, rangeMin, rangeMax);
 	}
 
 	if(valueBefore != (*value)) active = true;

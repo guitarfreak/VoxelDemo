@@ -100,7 +100,7 @@ void inventoryDrawIcon(InventorySlot slot, Rect r, Font* font, Vec4 cFont, Vec4 
 	color.r = colorPaletteCompact[colorPalleteIndex][0] / 255.0f;
 	color.g = colorPaletteCompact[colorPalleteIndex][1] / 255.0f;
 	color.b = colorPaletteCompact[colorPalleteIndex][2] / 255.0f;
-	color = srgbToLinear(color);
+	color = gammaToLinear(color);
 
 	// Because we can't draw in 3d with commandList2d
 	// we calculate it by hand for now.
@@ -111,6 +111,8 @@ void inventoryDrawIcon(InventorySlot slot, Rect r, Font* font, Vec4 cFont, Vec4 
 	rot = quat(M_PI_2, vec3(-1,0,0)) * rot;
 	rot = quat(angle1, vec3(1,0,0)) * rot;
 	rot = rot * quat(angle2,vec3(0,0,1));
+
+	int voxelTextureId = getTexture("voxelTextures")->id;
 
 	int dirIndex = 1;
 	for(int faceIndex = 0; faceIndex < 6; faceIndex++) {
@@ -125,7 +127,7 @@ void inventoryDrawIcon(InventorySlot slot, Rect r, Font* font, Vec4 cFont, Vec4 
 		}
 
 		int faceTextureId = texture1Faces[slot.type][faceIndex];
-		dcQuad2d(vs[0].xy, vs[1].xy, vs[2].xy, vs[3].xy, color, (int)theGraphicsState->textures3d[0].id, rect(0,0,1,1), faceTextureId);
+		dcQuad2d(vs[0].xy, vs[1].xy, vs[2].xy, vs[3].xy, color, voxelTextureId, rect(0,0,1,1), faceTextureId);
 	}
 
 	// Draw quantity.
@@ -140,8 +142,7 @@ void inventoryDrawIcon(InventorySlot slot, Rect r, Font* font, Vec4 cFont, Vec4 
 void inventoryInitResource(Entity* e, int type) {
 	e->blockType = type;
 
-	float off = 0.02f;
-	e->dim = vec3(0.3f + randomFloatPCG(-off,off,0.001f));
+	e->dim = vec3(0.3f + randomOffset(0.02f));
 }
 
 void inventoryThrowAway(InventorySlot slot, EntityList* entityList, Entity* player, Camera* cam) {
@@ -149,9 +150,9 @@ void inventoryThrowAway(InventorySlot slot, EntityList* entityList, Entity* play
 	initEntity(&e, ET_BlockResource, player->pos, vec3(1), player->chunk);
 
 	Vec3 dir = cam->look;
-	dir = normVec3(cross(vec3(0,0,1), cam->right));
+	dir = norm(cross(vec3(0,0,1), cam->right));
 	e.pos += dir * 1;
-	e.vel = dir * 2 * randomFloatPCG(1,1.5f,0.001f);
+	e.vel = dir * 2 * randomFloat(1,1.5f);
 
 	Vec3 p = e.pos;
 

@@ -251,6 +251,15 @@ struct SystemData {
 	bool windowIsFocused;
 
 	bool vsyncTempTurnOff;
+
+	//
+
+	#if USE_DIRECT3D
+	IDXGISwapChain* swapChain;
+	ID3D11Device* d3dDevice;
+	ID3D11DeviceContext* d3dDeviceContext;
+	ID3D11RenderTargetView* renderTargetView;
+	#endif
 };
 
 void systemDataInit(SystemData* sd, HINSTANCE instance) {
@@ -1093,12 +1102,16 @@ void sleep(int milliseconds) {
     Sleep(milliseconds);
 }
 
+//
+
 void folderExistsCreate(char* path) {
 	bool folderExists = PathFileExists(path);
 	if(!folderExists) {
 		CreateDirectory(path, 0);
 	}
 }
+
+//
 
 enum FileType {
 	FILE_TYPE_FILE = 0,
@@ -1155,6 +1168,70 @@ int folderFileCount(char* folder) {
 	return count;
 }
 
-void setVsync() {
+struct RecursiveFolderSearchData {
+	FolderSearchData data[10];
 
+	int index;
+	char* startFolder;
+	int strSizes[10];
+	char folder[200];
+
+	char* filePath;
+	char* fileName;
+};
+
+void recursiveFolderSearchStart(RecursiveFolderSearchData* rfd, char* folder) {
+
+	rfd->index = 0;
+	rfd->startFolder = folder;
+	strClear(rfd->folder);
+
+	char* folderPath = fillString("%s*", folder);
+	folderSearchStart(rfd->data + rfd->index, folderPath);
+}
+
+bool recursiveFolderSearchNext(RecursiveFolderSearchData* rfd) {
+
+	for(;;) {
+		FolderSearchData* fd = rfd->data + rfd->index;
+
+		for(;;) {
+			bool result = folderSearchNextFile(fd);
+			if(!result) {
+				if(rfd->index == 0) return false;
+				else {
+					// Pop stack.
+					rfd->index--;
+					int index = rfd->strSizes[rfd->index];
+					index = strLen(rfd->folder) - index;
+					if(rfd->index > 0) index--;
+					rfd->folder[index] = '\0';
+
+					fd = rfd->data + rfd->index;
+				}
+			} else {
+				break;
+			}
+		}
+
+		if(fd->type == FILE_TYPE_FOLDER) {
+			// Push stack.
+
+			rfd->strSizes[rfd->index] = strLen(fd->fileName);
+			if(rfd->index > 0) strAppend(rfd->folder, "\\");
+			strAppend(rfd->folder, fd->fileName);
+
+			rfd->index++;
+
+			char* folderPath = fillString("%s%s\\*", rfd->startFolder, rfd->folder);
+			folderSearchStart(rfd->data + rfd->index, folderPath);
+		} else {
+			rfd->filePath = fillString("%s%s%s%s", rfd->startFolder, rfd->folder, strLen(rfd->folder)?"\\":"", fd->fileName);
+			rfd->fileName = fillString("%s%s%s", rfd->folder, strLen(rfd->folder)?"\\":"", fd->fileName);
+
+			break;
+		}
+	}
+
+	return true;
 }

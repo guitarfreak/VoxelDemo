@@ -1,4 +1,7 @@
 
+#define GL_ACTIVE_UNIFORMS                0x8B86
+#define GL_ACTIVE_UNIFORM_MAX_LENGTH      0x8B87
+
 #define GL_TEXTURE_CUBE_MAP_SEAMLESS      0x884F
 #define GL_FRAMEBUFFER_SRGB               0x8DB9
 #define GL_FRAMEBUFFER_SRGB               0x8DB9
@@ -56,6 +59,7 @@
 typedef char GLchar;
 typedef ptrdiff_t GLsizeiptr;
 typedef ptrdiff_t GLintptr;
+#define GL_CONSTANT_COLOR                 0x8001
 
 
 #define makeGLFunction(returnType, name, ...) \
@@ -143,10 +147,15 @@ typedef ptrdiff_t GLintptr;
 	GLOP(void, BlendFuncSeparate, GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha) \
 	GLOP(void, BlendEquation, GLenum mode) \
 	GLOP(void, BlendEquationSeparate, GLenum modeRGB, GLenum modeAlpha) \
+	GLOP(void, BlendColor, GLclampf red​, GLclampf green​, GLclampf blue​, GLclampf alpha​) \
 	GLOP(void, GetTextureSubImage, uint texture, int level, int xoffset, int yoffset, int zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, GLsizei bufSize, void *pixels) \
 	GLOP(GLubyte*, GetStringi, GLenum name, GLuint index) \
 	GLOP(void, DrawArraysInstanced, GLenum mode, GLint first, GLsizei count, GLsizei primcount) \
-	GLOP(void, VertexAttribDivisor, GLuint index, GLuint divisor)
+	GLOP(void, VertexAttribDivisor, GLuint index, GLuint divisor) \
+	GLOP(void, GetProgramiv, GLuint program, GLenum pname, GLint *params) \
+	GLOP(void, GetActiveUniform, GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name)
+
+
 
 #define GLOP(returnType, name, ...) makeGLFunction(returnType, name, __VA_ARGS__) 
 	GL_FUNCTION_LIST

@@ -46,7 +46,7 @@ int myAssert(bool check) {
 		}
 		exit(1);
 	}
-	return 234;
+	return -1;
 }
 
 void memSet(void* dest, int value, int numOfBytes) {
@@ -188,7 +188,7 @@ inline char * intToStr(char* buffer, i64 var) {
 };
 
 char* floatToStr(char * buffer, float f, int precision = 0) {
-	int stringSize = sprintf(buffer, "%1.*f", precision, f); // TODO: Make more robust.
+	int stringSize = sprintf(buffer, "%1.*f", precision, f);
 	if(precision == 0) {
 		int stringIndex = stringSize-1;
 		while(buffer[stringIndex] == '0') {
@@ -676,329 +676,21 @@ char* getFileExtension(char* file) {
 // ???
 //
 
-int timeToSeconds(int year = 0, int month = 0, int day = 0, int hour = 0, int minute = 0, int seconds = 0)
-{
+int timeToSeconds(int year = 0, int month = 0, int day = 0, int hour = 0, int minute = 0, int seconds = 0) {
 	// year is 20XX, only works up to ~2060
 	return (year * 31556926 + month * 2629743.83 + day * 86400 +
 		hour * 3600 + minute * 60 + seconds);
 };
 
-inline i64 terraBytes(i64 count)
-{
-	i64 result = count * 1024 * 1024 * 1024 * 1024;
-	return result;
-}
-
-inline i64 gigaBytes(i64 count)
-{
-	i64 result = count * 1024 * 1024 * 1024;
-	return result;
-}
-
-inline int megaBytes(int count)
-{
-	int result = count * 1024 * 1024;
-	return result;
-}
-
-inline int kiloBytes(int count)
-{
-	int result = count * 1024;
-	return result;
-}
-
-inline int roundDown(int i, int size) {
-	int val = (i/size) * size;
-	return val;
-}
-
-inline int roundUp(int i, int size) {
-	int val = roundDown(i, size);
-	if(val != 0) val += size;
-	return val;	
-}
-
-//
-//
-//
-
-struct MemoryArray {
-	bool initialized;
-
-	char * data;
-	int index;
-	int size;
-};
-
-void initMemoryArray(MemoryArray * memory, int slotSize, void* baseAddress = 0) {
-    if(baseAddress) {
-	    memory->data = (char*)VirtualAlloc(baseAddress, slotSize, MEM_COMMIT, PAGE_READWRITE);
-	    // memory->data = (char*)malloc(slotSize);
-	    int errorCode = GetLastError();
-    } else memory->data = (char*)malloc(slotSize);
-
-    myAssert(memory->data);
-
-    memory->index = 0;
-    memory->size = slotSize;
-    memory->initialized = true;
-}
-
-
-
-MemoryArray* theMemoryArray;
-
-void* getMemoryArray(int size, MemoryArray * memory = 0) {
-    if(!memory) memory = theMemoryArray;
-    myAssert(memory->index + size <= memory->size);
-
-    void * location = memory->data + memory->index;
-    memory->index += size;
-
-    return location;
-}
-
-void freeMemoryArray(int size, MemoryArray * memory = 0) {
-    if(!memory) memory = theMemoryArray;
-    myAssert(memory->size >= memory->index);
-
-    memory->index -= size;
-}
-
-void clearMemoryArray(MemoryArray* memory = 0) {
-    if(!memory) memory = theMemoryArray;
-	memory->index = 0;
-}
-
-void* getBaseMemoryArray(MemoryArray* ma) {
-	void* base = ma->data;
-	return base;
-}
-
-
-
-struct ExtendibleMemoryArray {
-	void* startAddress;
-	int slotSize;
-	int allocGranularity;
-	MemoryArray arrays[32];
-	int index;
-};
-
-void initExtendibleMemoryArray(ExtendibleMemoryArray* memory, int slotSize, int allocGranularity, void* baseAddress = 0) {
-	memory->startAddress = baseAddress;
-	memory->index = 0;
-	memory->allocGranularity = allocGranularity;
-	memory->slotSize = roundUp(slotSize, memory->allocGranularity);
-
-	initMemoryArray(memory->arrays, memory->slotSize, memory->startAddress);
-}
-
-ExtendibleMemoryArray* globalExtendibleMemoryArray;
-
-void* getExtendibleMemoryArray(int size, ExtendibleMemoryArray* memory = 0) {
-	if(!memory) memory = globalExtendibleMemoryArray;
-	myAssert(size <= memory->slotSize);
-
-	MemoryArray* currentArray = memory->arrays + memory->index;
-	if(currentArray->index + size > currentArray->size) {
-		memory->index++;
-		myAssert(memory->index < arrayCount(memory->arrays));
-		i64 baseOffset = (i64)memory->index*(i64)memory->slotSize;
-
-		MemoryArray* mArray = memory->arrays + memory->index;
-		if(!mArray->initialized)
-			initMemoryArray(&memory->arrays[memory->index], memory->slotSize, (char*)memory->startAddress + baseOffset);
-		else
-			mArray->index = 0;
-
-		currentArray = memory->arrays + memory->index;
-	}
-
-	void* location = getMemoryArray(size, currentArray);
-	return location;
-}
-
-void* getBaseExtendibleMemoryArray(ExtendibleMemoryArray* ema) {
-	void* base = ema->arrays[0].data;
-	return base;
-}
-
-
-
-struct BucketMemory {
-	int pageSize;
-	int count;
-	int useCount;
-	char* data;
-	bool* used;
-};
-
-// slotSize has to be dividable by pageSize
-void initBucketMemory(BucketMemory* memory, int pageSize, int slotSize, void* baseAddress = 0) {
-	memory->pageSize = pageSize;
-	memory->count = slotSize / pageSize;
-	memory->useCount = 0;
-
-	if(baseAddress) {
-		memory->data = (char*)VirtualAlloc(baseAddress, slotSize + memory->count, MEM_COMMIT, PAGE_READWRITE);
-		// memory->data = (char*)malloc(slotSize + memory->count);
-	}
-	else memory->data = (char*)malloc(slotSize + memory->count);
-	myAssert(memory->data);
-
-	memory->used = (bool*)memory->data + slotSize;
-	memSet(memory->used, 0, memory->count);
-}
-
-void deleteBucketMemory(BucketMemory* memory) {
-	VirtualFree(memory->data, 0, MEM_RELEASE);
-	// free(memory->data);
-}
-
-BucketMemory* globalBucketMemory;
-
-void* getBucketMemory(BucketMemory* memory = 0) {
-	if(memory == 0) memory = globalBucketMemory;
-	myAssert(memory);
-
-	if(memory->useCount == memory->count) return 0;
-
-	char* address = 0;
-	int index;
-	for(int i = 0; i < memory->count; i++) {
-		if(memory->used[i] == 0) {
-			address = memory->data + i*memory->pageSize;
-			index = i;
-			break;
-		}
-	}
-
-	myAssert(address);
-
-	if(address) {
-		memory->used[index] = true;
-
-		memory->useCount++;
-		myAssert(memory->useCount <= memory->count);
-
-		return address;
-	}
-
-	return 0;
-}
-
-void freeBucketMemory(void* address, BucketMemory* memory = 0) {
-	if(memory == 0) memory = globalBucketMemory;
-	myAssert(memory);
-
-	memory->useCount--;
-	myAssert(memory->useCount >= 0);
-
-	int dataOffset = ((char*)address - memory->data) / memory->pageSize;
-	memory->used[dataOffset] = false;
-}
-
-
-
-struct ExtendibleBucketMemory {
-	void* startAddress;
-	int slotSize;
-	int fullSize;
-	int allocGranularity;
-	BucketMemory arrays[32];
-	bool allocated[32];
-
-	int pageSize;
-};
-
-ExtendibleBucketMemory* globalExtendibleBucketMemory;
-
-void initExtendibleBucketMemory(ExtendibleBucketMemory* memory, int pageSize, int slotSize, int allocGranularity, void* baseAddress = 0) {
-	memory->startAddress = baseAddress;
-	memory->allocGranularity = allocGranularity;
-	memory->slotSize = slotSize;
-	memory->fullSize = roundUp(slotSize + (slotSize / pageSize), memory->allocGranularity);
-	memory->pageSize = pageSize;
-
-	memSet(memory->allocated, 0, arrayCount(memory->arrays));
-}
-
-void* getExtendibleBucketMemory(ExtendibleBucketMemory* memory = 0) {
-	if(!memory) memory = globalExtendibleBucketMemory;
-
-	// check all allocated arrays for a free slot
-	BucketMemory* availableBucket = 0;
-	for(int i = 0; i < arrayCount(memory->arrays); i++) {
-		if(memory->allocated[i] && (memory->arrays[i].useCount < memory->arrays[i].count)) {
-			availableBucket = memory->arrays + i;
-			break;
-		}
-	}
-
-	// allocate array
-	if(!availableBucket) {
-		// get first array that is not allocated
-		int arrayIndex = -1;
-		for(int i = 0; i < arrayCount(memory->allocated); i++) {
-			if(!memory->allocated[i]) {
-				availableBucket = memory->arrays + i;
-				arrayIndex = i;
-				break;
-			}
-		}
-
-		myAssert(availableBucket);
-
-		int slotSize = memory->slotSize;
-		i64 baseOffset = arrayIndex * memory->fullSize;
-		initBucketMemory(availableBucket, memory->pageSize, memory->slotSize, (char*)memory->startAddress + baseOffset);
-
-		memory->allocated[arrayIndex] = true;
-	}
-
-	void* location = getBucketMemory(availableBucket);
-	return location;
-}
-
-void freeExtendibleBucketMemory(void* address, ExtendibleBucketMemory* memory = 0) {
-	if(!memory) memory = globalExtendibleBucketMemory;
-
-	// calculate array index with address
-	int arrayIndex = ((char*)address - (char*)memory->startAddress) / memory->fullSize;
-	BucketMemory* bMemory = memory->arrays + arrayIndex;
-	freeBucketMemory(address, bMemory);
-
-	if(bMemory->useCount == 0) {
-		deleteBucketMemory(bMemory);
-		memory->allocated[arrayIndex] = false;
-	}
-}
-
-struct AppMemory {
-	MemoryArray memoryArrays[4];
-	int memoryArrayCount;
-	
-	ExtendibleMemoryArray extendibleMemoryArrays[4];
-	int extendibleMemoryArrayCount;
-
-	BucketMemory bucketMemories[4];
-	int bucketMemoryCount;
-
-	ExtendibleBucketMemory extendibleBucketMemories[4];
-	int extendibleBucketMemoryCount;
-};
-
-//
-//
-//
+inline i64 terraBytes(i64 count) { return count * 1024 * 1024 * 1024 * 1024; }
+inline i64 gigaBytes(i64 count)  { return count * 1024 * 1024 * 1024; }
+inline int megaBytes(int count)  { return count * 1024 * 1024; }
+inline int kiloBytes(int count)  { return count * 1024; }
 
 inline int flagSet(int flags, int flagType) { return flags | flagType; }
 inline int flagRemove(int flags, int flagType) { return flags &= ~flagType; }
-
 inline void flagSet(int* flags, int flagType) { (*flags) |= flagType; }
 inline void flagRemove(int* flags, int flagType) { (*flags) &= ~flagType; }
-
 inline bool flagGet(int flags, int flagType) { return (flags | flagType) == flags; }
 
 //
@@ -1150,17 +842,21 @@ uint32_t pcg32_boundedrand(uint32_t bound)
     return pcg32_boundedrand_r(&pcg32_global, bound);
 }
 
-inline int randomIntPCG(int from, int to) {
+inline int randomInt(int from, int to) {
 	return pcg32_boundedrand(to - from + 1) + from;
 }
 
-inline float randomFloatPCG(float from, float to, float precision /* eg.: 0.01f*/) {
-	return randomIntPCG(from/precision, to/precision) * precision;
+inline float randomFloat(float from, float to) {
+	return randomInt(from/0.000001f, to/0.000001f) * 0.000001f;
+}
+
+inline float randomOffset(float offset) {
+	return randomFloat(-offset, offset);
 }
 
 //
 
-template <typename T>
+template <class T>
 struct DArray {
 	T* data = 0;
 	int count = 0;
@@ -1252,7 +948,7 @@ struct DArray {
 	}
 
 	void insert(T element, int index) {
-		assert(index <= count);
+		myAssert(index <= count);
 		
 		if(index == count) return push(element);
 		push(data[index]);
@@ -1297,3 +993,4 @@ struct DArray {
 	T*   operator+(int i)  { return data + i; }
 	T*   atr(int i)        { return data + i; }
 };
+

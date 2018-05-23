@@ -5,6 +5,7 @@
 #include <windows.h>
 
 #include "rt_misc.cpp"
+#include "rt_memory.cpp"
 #include "rt_hotload.cpp"
 #include "rt_misc_win32.cpp"
 

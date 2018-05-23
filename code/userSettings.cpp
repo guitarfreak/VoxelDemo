@@ -1,12 +1,13 @@
 
+// #define USE_DIRECT3D
+
 #define USE_SRGB 1
 const int INTERNAL_TEXTURE_FORMAT = USE_SRGB ? GL_SRGB8_ALPHA8 : GL_RGBA8;
 
 #define COLOR_SRGB(color) \
-	(theGraphicsState->useSRGB ? colorSRGB(color) : color);
+	(theGraphicsState->useSRGB ? linearToGamma(color) : color);
 
 #define APP_NAME "VoxelGame"
-
 
 #define editor_executable_path "C:\\Program Files\\Sublime Text 3\\sublime_text.exe"
 
@@ -26,30 +27,21 @@ const int INTERNAL_TEXTURE_FORMAT = USE_SRGB ? GL_SRGB8_ALPHA8 : GL_RGBA8;
 
 #define GUI_SETTINGS_FILE DATA_FOLDER("guiSettings.txt")
 
-#define App_Font_Folder DATA_FOLDER("Fonts\\")
-// #define App_Image_Folder DATA_FOLDER("Images\\")
-#define App_Audio_Folder DATA_FOLDER("Audio\\")
-
-#define FONT_SOURCESANS_PRO "LiberationSans-Regular.ttf"
-#define FONT_CONSOLAS "consola.ttf"
-#define FONT_CALIBRI "LiberationSans-Regular.ttf"
-
-// #define FONT_SOURCESANS_PRO "SourceSansPro-Regular.ttf"
-// #define FONT_CONSOLAS "consola.ttf"
-// #define FONT_CALIBRI "calibri.ttf"
+#define App_Font_Folder    DATA_FOLDER("Fonts\\")
+#define App_Texture_Folder DATA_FOLDER("Textures\\")
+#define App_Audio_Folder   DATA_FOLDER("Audio\\")
 
 #define Windows_Font_Folder "\\Fonts\\"
 #define Windows_Font_Path_Variable "windir"
 
-// #define minecraftTextureFolderPath = DATA_FOLDER("Textures\\Minecraft\\");
-#define MINECRAFT_TEXTURE_FOLDER DATA_FOLDER("Textures\\Minecraft\\")
+#define MINECRAFT_TEXTURE_FOLDER DATA_FOLDER("Textures\\minecraft\\")
 
 //
 
 const char* watchFolders[] = {
-	DATA_FOLDER("Textures\\Misc\\"),
-	DATA_FOLDER("Textures\\Skyboxes\\"),
-	DATA_FOLDER("Textures\\Minecraft\\"),
+	DATA_FOLDER("Textures\\misc\\"),
+	DATA_FOLDER("Textures\\skyboxes\\"),
+	DATA_FOLDER("Textures\\minecraft\\"),
 };
 
 struct AppSessionSettings {
@@ -70,7 +62,6 @@ void saveAppSettings(AppSessionSettings at) {
 	}
 }
 
-
 //
 
 enum TextureId {
@@ -83,36 +74,33 @@ enum TextureId {
 };
 
 char* texturePaths[] = {
-	DATA_FOLDER("Textures\\Misc\\white.png"),
-	DATA_FOLDER("Textures\\Misc\\rect.png"),
-	DATA_FOLDER("Textures\\Misc\\circle.png"),
-	DATA_FOLDER("Textures\\Misc\\test.png"),
-	DATA_FOLDER("Textures\\Minecraft\\destroyStages.png"),
+	DATA_FOLDER("Textures\\misc\\white.png"),
+	DATA_FOLDER("Textures\\misc\\rect.png"),
+	DATA_FOLDER("Textures\\misc\\circle.png"),
+	DATA_FOLDER("Textures\\misc\\test.png"),
+	DATA_FOLDER("Textures\\minecraft\\destroyStages.png"),
 };
 
 //
 
 enum CubeMapIds {
-	// CUBEMAP_1 = 0,
-	// CUBEMAP_2,
-	// CUBEMAP_3,
-	// CUBEMAP_4,
-	// CUBEMAP_5,
 	CUBEMAP_5 = 0,
 	CUBEMAP_SIZE,
 };
 
 char* cubeMapPaths[] = {
-	// "..\\data\\Textures\\Skyboxes\\sb1.png",
-	// "..\\data\\Textures\\Skyboxes\\sb2.png", 
-	// "..\\data\\Textures\\Skyboxes\\sb3.jpg", 
-	// "..\\data\\Textures\\Skyboxes\\sb4.png", 
-	DATA_FOLDER("Textures\\Skyboxes\\xoGVD3X.jpg"),
+	DATA_FOLDER("Textures\\skyboxes\\skybox1.png"),
 };
 
 //
 // Shaders.
 //
+
+struct DVertex {
+      Vec3 pos;
+      Vec4 color;
+      Vec2 uv;
+};
 
 struct Vertex {
 	Vec3 pos;
@@ -196,31 +184,6 @@ enum FrameBufferType {
 
 //
 
-
-struct ShaderUniformType {
-	uint type;
-	char* name;
-};
-
-struct MakeShaderInfo {
-	char* vertexString;
-	char* fragmentString;
-
-	int uniformCount;
-	ShaderUniformType* uniformNameMap;
-};
-
-enum UniformType {
-	UNIFORM_TYPE_VEC4 = 0,
-	UNIFORM_TYPE_VEC3,
-	UNIFORM_TYPE_VEC2,
-	UNIFORM_TYPE_MAT4,
-	UNIFORM_TYPE_INT,
-	UNIFORM_TYPE_FLOAT,
-
-	UNIFORM_TYPE_SIZE,
-};
-
 #define GLSL(src) "#version 430\n \
 	#extension GL_ARB_bindless_texture 			: enable\n \
 	#extension GL_ARB_shading_language_include 	: enable\n \
@@ -236,35 +199,6 @@ enum UniformType {
 	#extension GL_ARB_explicit_uniform_location : enable\n" #src
 
 //
-
-enum CubeUniforms {
-	CUBE_UNIFORM_MODEL = 0,
-	CUBE_UNIFORM_VIEW,
-	CUBE_UNIFORM_PROJ,
-	CUBE_UNIFORM_COLOR,
-	CUBE_UNIFORM_MODE,
-	CUBE_UNIFORM_VERTICES,
-	CUBE_UNIFORM_CPLANE,
-	CUBE_UNIFORM_UV,
-	CUBE_UNIFORM_TEXZ,
-	CUBE_UNIFORM_ALPHA_TEST,
-	CUBE_UNIFORM_ALPHA,
-	CUBE_UNIFORM_SIZE,
-};
-
-ShaderUniformType cubeShaderUniformType[] = {
-	{UNIFORM_TYPE_MAT4, "model"},
-	{UNIFORM_TYPE_MAT4, "view"},
-	{UNIFORM_TYPE_MAT4, "proj"},
-	{UNIFORM_TYPE_VEC4, "setColor"},
-	{UNIFORM_TYPE_INT,  "mode"},
-	{UNIFORM_TYPE_VEC3, "vertices"},
-	{UNIFORM_TYPE_VEC4, "cPlane"},
-	{UNIFORM_TYPE_VEC2, "setUV"},
-	{UNIFORM_TYPE_FLOAT, "texZ"},
-	{UNIFORM_TYPE_FLOAT, "alpha"},
-	{UNIFORM_TYPE_INT, "alphaTest"},
-};
 
 const char* vertexShaderCube = GLSL (
 	out gl_PerVertex { vec4 gl_Position; };
@@ -329,32 +263,6 @@ const char* fragmentShaderCube = GLSL (
 );
 
 //
-
-enum QuadUniforms {
-	QUAD_UNIFORM_UV = 0,
-	QUAD_UNIFORM_TEXZ,
-	QUAD_UNIFORM_MOD,
-	QUAD_UNIFORM_COLOR,
-	QUAD_UNIFORM_CAMERA,
-	
-	QUAD_UNIFORM_PRIMITIVE_MODE,
-	QUAD_UNIFORM_VERTS,
-	QUAD_UNIFORM_UVS,
-
-	QUAD_UNIFORM_SIZE,
-};
-
-ShaderUniformType quadShaderUniformType[] = {
-	{UNIFORM_TYPE_VEC4, "setUV"},
-	{UNIFORM_TYPE_FLOAT, "texZ"},
-	{UNIFORM_TYPE_VEC4, "mod"},
-	{UNIFORM_TYPE_VEC4, "setColor"},
-	{UNIFORM_TYPE_VEC4, "camera"},
-
-	{UNIFORM_TYPE_INT, "primitiveMode"},
-	{UNIFORM_TYPE_VEC2, "verts"},
-	{UNIFORM_TYPE_VEC2, "uvs"},
-};
 
 const char* vertexShaderQuad = GLSL (
 	const vec2 quad[] = vec2[] (
@@ -433,19 +341,84 @@ const char* fragmentShaderQuad = GLSL (
 
 //
 
-enum ParticleUniforms {
-	PARTICLE_UNIFORM_MODEL = 0,
-	PARTICLE_UNIFORM_VIEW,
-	PARTICLE_UNIFORM_PROJ,
+const char* vertexShaderFont = GLSL (
+	const vec2 quad[] = vec2[] (
+		vec2( -0.5f, -0.5f ),
+		vec2( -0.5f,  0.5f ),
+		vec2(  0.5f, -0.5f ),
+		vec2(  0.5f,  0.5f )
+		);
 
-	PARTICLE_UNIFORM_SIZE,
-};
+	const ivec2 quad_uv[] = ivec2[] (
+		ivec2(  0.0,  0.0 ),
+		ivec2(  0.0,  1.0 ),
+		ivec2(  1.0,  0.0 ),
+		ivec2(  1.0,  1.0 )
+		);
 
-ShaderUniformType particleShaderUniformType[] = {
-	{UNIFORM_TYPE_MAT4, "model"},
-	{UNIFORM_TYPE_MAT4, "view"},
-	{UNIFORM_TYPE_MAT4, "proj"},
-};
+	uniform vec4 setUV;
+	uniform vec4 mod;
+	uniform vec4 camera; // left bottom right top
+
+	out gl_PerVertex { vec4 gl_Position; };
+	smooth out vec2 uv;
+
+	void main() {
+
+		ivec2 pos = quad_uv[gl_VertexID];
+		uv = vec2(setUV[pos.x], setUV[2 + pos.y]);
+		vec2 v = quad[gl_VertexID];
+
+		vec2 model = v*mod.zw + mod.xy;
+		vec2 view = model/(camera.zw*0.5f) - camera.xy/(camera.zw*0.5f);
+		gl_Position = vec4(view, 0, 1);
+
+	}
+);
+
+const char* fragmentShaderFont = GLSL (
+	layout(binding = 0) uniform sampler2D s;
+
+	uniform float uvstep;
+
+	smooth in vec2 uv;
+
+	out vec4 color;
+
+	// const float pixelFilter[] = float[] (
+	//     1,2,3,4,5
+ //    );
+
+    const float fi[] = float[] ( 
+        0.03f, 0.30f, 0.34f, 0.30f, 0.03f
+    );
+
+	void main() {
+
+		vec3 cl = texture(s, uv - vec2(uvstep,0)).rgb;
+		vec3 cr = texture(s, uv + vec2(uvstep,0)).rgb;
+		vec3 cm = texture(s, uv).rgb;
+
+		// cm.r = pow(cm.r, 1/2.2f);
+		// cm.g = pow(cm.g, 1/2.2f);
+		// cm.b = pow(cm.b, 1/2.2f);
+
+		// cm.r = pow(cm.r, 2.2f);
+		// cm.g = pow(cm.g, 2.2f);
+		// cm.b = pow(cm.b, 2.2f);
+
+		vec4 finalColor;
+		// finalColor.r = cl.g*fi[0] + cl.b*fi[1] + cm.r*fi[2] + cm.g*fi[3] + cm.b*fi[4];
+		// finalColor.g = cl.b*fi[0] + cm.r*fi[1] + cm.g*fi[2] + cm.b*fi[3] + cr.r*fi[4];
+		// finalColor.b = cm.r*fi[0] + cm.g*fi[1] + cm.b*fi[2] + cr.r*fi[3] + cr.g*fi[4];
+
+		finalColor = vec4(cm,1);
+
+		color = finalColor;
+	}
+);
+
+//
 
 struct ParticleVertex {
 	Mat4 m;
@@ -504,67 +477,49 @@ const char* fragmentShaderParticle = GLSL (
 
 //
 
-enum CubemapUniforms {
-	CUBEMAP_UNIFORM_VIEW = 0,
-	CUBEMAP_UNIFORM_PROJ,
-	CUBEMAP_UNIFORM_CLIPPLANE,
-	CUBEMAP_UNIFORM_CPLANE1,
-	CUBEMAP_UNIFORM_FOGCOLOR,
-
-	CUBEMAP_UNIFORM_SIZE,
-};
-
-ShaderUniformType cubemapShaderUniformType[] = {
-	{UNIFORM_TYPE_MAT4, "view"},
-	{UNIFORM_TYPE_MAT4, "proj"},
-	{UNIFORM_TYPE_INT, "clipPlane"},
-	{UNIFORM_TYPE_VEC4, "cPlane"},
-	{UNIFORM_TYPE_VEC4, "fogColor"},
-};
-
 const char* vertexShaderCubeMap = GLSL (
 	const vec3 cube[] = vec3[] (
-	  vec3( -1.0,  1.0, -1.0 ),
-	  vec3( -1.0, -1.0, -1.0 ),
-	  vec3(  1.0, -1.0, -1.0 ),
-	  vec3(  1.0, -1.0, -1.0 ),
-	  vec3(  1.0,  1.0, -1.0 ),
-	  vec3( -1.0,  1.0, -1.0 ),
+	  vec3( -1.0f,  1.0f, -1.0f ),
+	  vec3( -1.0f, -1.0f, -1.0f ),
+	  vec3(  1.0f, -1.0f, -1.0f ),
+	  vec3(  1.0f, -1.0f, -1.0f ),
+	  vec3(  1.0f,  1.0f, -1.0f ),
+	  vec3( -1.0f,  1.0f, -1.0f ),
 
-	  vec3( -1.0, -1.0,  1.0 ),
-	  vec3( -1.0, -1.0, -1.0 ),
-	  vec3( -1.0,  1.0, -1.0 ),
-	  vec3( -1.0,  1.0, -1.0 ),
-	  vec3( -1.0,  1.0,  1.0 ),
-	  vec3( -1.0, -1.0,  1.0 ),
+	  vec3( -1.0f, -1.0f,  1.0f ),
+	  vec3( -1.0f, -1.0f, -1.0f ),
+	  vec3( -1.0f,  1.0f, -1.0f ),
+	  vec3( -1.0f,  1.0f, -1.0f ),
+	  vec3( -1.0f,  1.0f,  1.0f ),
+	  vec3( -1.0f, -1.0f,  1.0f ),
 
-	  vec3(  1.0, -1.0, -1.0 ),
-	  vec3(  1.0, -1.0,  1.0 ),
-	  vec3(  1.0,  1.0,  1.0 ),
-	  vec3(  1.0,  1.0,  1.0 ),
-	  vec3(  1.0,  1.0, -1.0 ),
-	  vec3(  1.0, -1.0, -1.0 ),
+	  vec3(  1.0f, -1.0f, -1.0f ),
+	  vec3(  1.0f, -1.0f,  1.0f ),
+	  vec3(  1.0f,  1.0f,  1.0f ),
+	  vec3(  1.0f,  1.0f,  1.0f ),
+	  vec3(  1.0f,  1.0f, -1.0f ),
+	  vec3(  1.0f, -1.0f, -1.0f ),
 
-	  vec3( -1.0, -1.0,  1.0 ),
-	  vec3( -1.0,  1.0,  1.0 ),
-	  vec3(  1.0,  1.0,  1.0 ),
-	  vec3(  1.0,  1.0,  1.0 ),
-	  vec3(  1.0, -1.0,  1.0 ),
-	  vec3( -1.0, -1.0,  1.0 ),
+	  vec3( -1.0f, -1.0f,  1.0f ),
+	  vec3( -1.0f,  1.0f,  1.0f ),
+	  vec3(  1.0f,  1.0f,  1.0f ),
+	  vec3(  1.0f,  1.0f,  1.0f ),
+	  vec3(  1.0f, -1.0f,  1.0f ),
+	  vec3( -1.0f, -1.0f,  1.0f ),
 
-	  vec3( -1.0,  1.0, -1.0 ),
-	  vec3(  1.0,  1.0, -1.0 ),
-	  vec3(  1.0,  1.0,  1.0 ),
-	  vec3(  1.0,  1.0,  1.0 ),
-	  vec3( -1.0,  1.0,  1.0 ),
-	  vec3( -1.0,  1.0, -1.0 ),
+	  vec3( -1.0f,  1.0f, -1.0f ),
+	  vec3(  1.0f,  1.0f, -1.0f ),
+	  vec3(  1.0f,  1.0f,  1.0f ),
+	  vec3(  1.0f,  1.0f,  1.0f ),
+	  vec3( -1.0f,  1.0f,  1.0f ),
+	  vec3( -1.0f,  1.0f, -1.0f ),
 
-	  vec3( -1.0, -1.0, -1.0 ),
-	  vec3( -1.0, -1.0,  1.0 ),
-	  vec3(  1.0, -1.0, -1.0 ),
-	  vec3(  1.0, -1.0, -1.0 ),
-	  vec3( -1.0, -1.0,  1.0 ),
-	  vec3(  1.0, -1.0,  1.0 )
+	  vec3( -1.0f, -1.0f, -1.0f ),
+	  vec3( -1.0f, -1.0f,  1.0f ),
+	  vec3(  1.0f, -1.0f, -1.0f ),
+	  vec3(  1.0f, -1.0f, -1.0f ),
+	  vec3( -1.0f, -1.0f,  1.0f ),
+	  vec3(  1.0f, -1.0f,  1.0f )
 	);
 
 	out gl_PerVertex { vec4 gl_Position; float gl_ClipDistance[]; };
@@ -622,74 +577,97 @@ const char* fragmentShaderCubeMap = GLSL (
 			} else color = fogColor;
 
 		} else color = texture(s, vec4(clipPos, 0));
-
-		// color = texture(s, vec4(pos, 0));
 	}
 );
-
-//
-
-enum VoxelUniforms {
-	VOXEL_UNIFORM_FACE_DATA = 0,
-	VOXEL_UNIFORM_TRANSFORM,
-	VOXEL_UNIFORM_TEX_ARRAY,
-	VOXEL_UNIFORM_TEXSCALE,
-	VOXEL_UNIFORM_COLOR_TABLE,
-	VOXEL_UNIFORM_NORMALS,
-	VOXEL_UNIFORM_TEXGEN,
-	VOXEL_UNIFORM_AMBIENT,
-	VOXEL_UNIFORM_CAMERA_POS,
-
-	VOXEL_UNIFORM_LIGHT_SOURCE,
-
-	VOXEL_UNIFORM_MODEL,
-	VOXEL_UNIFORM_MODEL_VIEW,
-	VOXEL_UNIFORM_CLIPPLANE,
-	VOXEL_UNIFORM_CPLANE1,
-	VOXEL_UNIFORM_CPLANE2,
-	VOXEL_UNIFORM_ALPHATEST,
-
-	VOXEL_UNIFORM_SIZE,
-};
-
-ShaderUniformType voxelShaderUniformType[] = {
-	{UNIFORM_TYPE_INT, "facearray"},
-	{UNIFORM_TYPE_VEC3, "transform"},
-	{UNIFORM_TYPE_INT, "tex_array"},
-	{UNIFORM_TYPE_VEC4, "texscale"},
-	{UNIFORM_TYPE_VEC4, "color_table"},
-	{UNIFORM_TYPE_VEC3, "normal_table"},
-	{UNIFORM_TYPE_VEC3, "texgen"},
-	{UNIFORM_TYPE_VEC4, "ambient"},
-	{UNIFORM_TYPE_VEC4, "camera_pos"},
-
-	{UNIFORM_TYPE_VEC3, "light_source"},
-
-	{UNIFORM_TYPE_MAT4, "model"},
-	{UNIFORM_TYPE_MAT4, "model_view"},
-	{UNIFORM_TYPE_INT, "clipPlane"},
-	{UNIFORM_TYPE_VEC4, "cPlane"},
-	{UNIFORM_TYPE_VEC4, "cPlane2"},
-	{UNIFORM_TYPE_FLOAT, "alphaTest"},
-};
-
-// Shader defined in stb_voxel_render.h
 
 enum ShaderProgram {
 	SHADER_CUBE = 0,
 	SHADER_QUAD,
-	SHADER_VOXEL,
+	SHADER_FONT,
 	SHADER_PARTICLE,
 	SHADER_CUBEMAP,
+	SHADER_VOXEL,
 
 	SHADER_SIZE,
 };
 
 MakeShaderInfo makeShaderInfo[SHADER_SIZE] = {
-	{(char*)vertexShaderCube, (char*)fragmentShaderCube, CUBE_UNIFORM_SIZE, cubeShaderUniformType},
-	{(char*)vertexShaderQuad, (char*)fragmentShaderQuad, QUAD_UNIFORM_SIZE, quadShaderUniformType},
-	{(char*)stbvox_get_vertex_shader(), (char*)stbvox_get_fragment_shader(), VOXEL_UNIFORM_SIZE, voxelShaderUniformType},
-	{(char*)vertexShaderParticle, (char*)fragmentShaderParticle, PARTICLE_UNIFORM_SIZE, particleShaderUniformType},
-	{(char*)vertexShaderCubeMap, (char*)fragmentShaderCubeMap, CUBEMAP_UNIFORM_SIZE, cubemapShaderUniformType},
+	{(char*)vertexShaderCube, (char*)fragmentShaderCube},
+	{(char*)vertexShaderQuad, (char*)fragmentShaderQuad},
+	{(char*)vertexShaderFont, (char*)fragmentShaderFont},
+	{(char*)vertexShaderParticle, (char*)fragmentShaderParticle},
+	{(char*)vertexShaderCubeMap, (char*)fragmentShaderCubeMap},
+	{(char*)stbvox_get_vertex_shader(), (char*)stbvox_get_fragment_shader()},
 };
 
+//
+
+#define HLSL(src) "" #src
+
+const char* d3dShader = HLSL (
+
+    struct PSInput {
+          float4 pos : SV_POSITION;
+          float4 color : COLOR;
+          float2 uv : TEXCOORD;
+    };
+
+    PSInput vertexShader(float3 pos : POSITION, float4 color : COLOR, float2 uv : TEXCOORD ) {
+        PSInput output;
+        
+    	output.pos = float4(pos,1);
+    	output.color = color;
+    	output.uv = uv;
+        
+        return output;
+    }
+
+    Texture2D simpleTexture : register(t0);
+    SamplerState simpleSampler : register(s0);
+
+    float4 pixelShader(PSInput input) : SV_Target {
+        float4 output;
+
+        output = float4(simpleTexture.Sample(simpleSampler, input.uv),1);
+
+        return output;
+    }
+);
+
+// &lt;pre&gt;matrix World;
+// matrix View;
+// matrix Projection;
+ 
+// struct PS_INPUT
+// {
+//     float4 Pos : SV_POSITION;
+//     float4 Color : COLOR0;
+// };
+ 
+// PS_INPUT VS( float4 Pos : POSITION, float4 Color : COLOR )
+// {
+//     PS_INPUT psInput;
+ 
+//     Pos = mul( Pos, World );
+//     Pos = mul( Pos, View );
+ 
+//     psInput.Pos = mul( Pos, Projection );
+//     psInput.Color = Color;
+ 
+//     return psInput;
+// }
+ 
+// float4 PS( PS_INPUT psInput ) : SV_Target
+// {
+//     return psInput.Color;
+// }
+ 
+// technique10 Render
+// {
+//     pass P0
+//     {
+//         SetVertexShader( CompileShader( vs_4_0, VS() ) );
+//         SetGeometryShader( NULL );
+//         SetPixelShader( CompileShader( ps_4_0, PS() ) );
+//     }
+// }

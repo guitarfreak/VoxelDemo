@@ -119,9 +119,9 @@ Camera getCamData(Vec3 pos, Vec3 rot, Vec3 offset = vec3(0,0,0), Vec3 gUp = vec3
 	c.pos = pos + offset;
 	c.look = startDir;
 	rotateVec3(&c.look, rot.x, gUp);
-	rotateVec3(&c.look, rot.y, normVec3(cross(gUp, c.look)));
-	c.up = normVec3(cross(c.look, normVec3(cross(gUp, c.look))));
-	c.right = normVec3(cross(gUp, c.look));
+	rotateVec3(&c.look, rot.y, norm(cross(gUp, c.look)));
+	c.up = norm(cross(c.look, norm(cross(gUp, c.look))));
+	c.right = norm(cross(gUp, c.look));
 	c.look = -c.look;
 
 	return c;
@@ -130,8 +130,8 @@ Camera getCamData(Vec3 pos, Vec3 rot, Vec3 offset = vec3(0,0,0), Vec3 gUp = vec3
 //
 
 Vec3 getRotationToVector(Vec3 start, Vec3 dest, float* angle) {
-	Vec3 side = normVec3(cross(start, normVec3(dest)));
-	*angle = dot(start, normVec3(dest));
+	Vec3 side = norm(cross(start, norm(dest)));
+	*angle = dot(start, norm(dest));
 	*angle = acos(*angle)*2;
 
 	return side;
@@ -174,8 +174,8 @@ void entityMouseLook(Entity* e, Input* input, float mouseSensitivity) {
 	e->rot.x -= turnRate * input->mouseDelta.x;
 
 	float margin = 0.05f;
-	clamp(&e->rot.y, -M_PI_2+margin, M_PI_2-margin);
-	e->rot.x = modFloat(e->rot.x, (float)M_PI*2);
+	clamp(&e->rot.y, (float)-M_PI_2+margin, (float)M_PI_2-margin);
+	e->rot.x = modf(e->rot.x, (float)M_PI*2);
 }
 
 void entityKeyboardAcceleration(Entity* e, Input* input, float speed, float boost, bool freeForm) {
@@ -189,18 +189,18 @@ void entityKeyboardAcceleration(Entity* e, Input* input, float speed, float boos
 
 	Vec3 acceleration = vec3(0,0,0);
 	if(input->keysDown[KEYCODE_SHIFT]) speed *= boost;
-	if(input->keysDown[KEYCODE_W]) acceleration +=  normVec3(cam.look);
-	if(input->keysDown[KEYCODE_S]) acceleration += -normVec3(cam.look);
-	if(input->keysDown[KEYCODE_D]) acceleration +=  normVec3(cam.right);
-	if(input->keysDown[KEYCODE_A]) acceleration += -normVec3(cam.right);
+	if(input->keysDown[KEYCODE_W]) acceleration +=  norm(cam.look);
+	if(input->keysDown[KEYCODE_S]) acceleration += -norm(cam.look);
+	if(input->keysDown[KEYCODE_D]) acceleration +=  norm(cam.right);
+	if(input->keysDown[KEYCODE_A]) acceleration += -norm(cam.right);
 
 	if(freeForm) {
-		if(input->keysDown[KEYCODE_E]) acceleration +=  normVec3(up);
-		if(input->keysDown[KEYCODE_Q]) acceleration += -normVec3(up);
+		if(input->keysDown[KEYCODE_E]) acceleration +=  norm(up);
+		if(input->keysDown[KEYCODE_Q]) acceleration += -norm(up);
 	}
 
 	if(acceleration != vec3(0,0,0)) {
-		e->acc += normVec3(acceleration)*speed;
+		e->acc += norm(acceleration)*speed;
 	}
 }
 

@@ -1,4 +1,7 @@
 
+#include <Mmdeviceapi.h>
+#include <Audioclient.h>
+
 #define PITCH_PERCENT 0.05946309435929526456
 
 struct AudioState;
@@ -16,7 +19,6 @@ extern AudioState* theAudioState;
 
 struct Audio {
 	char* name;
-
 	char* file;
 
 	int channels;
@@ -225,7 +227,7 @@ void addTrack(Audio* audio, float volume = 1.0f, bool modulate = false, float mo
 
 	if(modulate) {
 		float percent = 1 + (PITCH_PERCENT * modulationAmount);
-		track->speed *= randomFloatPCG(1/percent, percent, 0.00001f);
+		track->speed *= randomFloat(1/percent, percent);
 	}
 
 	track->volume = volume;
@@ -247,7 +249,7 @@ void updateAudio(AudioState* as, float dt) {
 		uint numFramesPadding;
 		as->audioClient->GetCurrentPadding(&numFramesPadding);
 		uint numFramesAvailable = as->bufferFrameCount - numFramesPadding;
-		framesPerFrame = min(framesPerFrame, numFramesAvailable);
+		framesPerFrame = min(framesPerFrame, (int)numFramesAvailable);
 
 		// int framesToPush = framesPerFrame - numFramesPadding;
 		// printf("%i %i %i %i\n", numFramesAvailable, numFramesPadding, as->bufferFrameCount, framesToPush);
@@ -280,10 +282,10 @@ void updateAudio(AudioState* as, float dt) {
 				float speed = track->speed * ((float)audio->sampleRate / as->sampleRate);
 				int frameCount = audio->frameCount;
 				if(speed != 1.0f) {
-					frameCount = roundFloat((frameCount-1) * (float)(1/speed)) + 1;
+					frameCount = roundf((frameCount-1) * (float)(1/speed)) + 1;
 				}
 
-				int availableFrames = min(frameCount - index, numFramesAvailable);
+				int availableFrames = min(frameCount - index, (int)numFramesAvailable);
 
 				float volume = as->masterVolume * track->volume;
 				for(int i = 0; i < availableFrames; i++) {

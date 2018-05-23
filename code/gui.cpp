@@ -300,7 +300,7 @@ struct Gui {
 
 	void drawRect(Rect r, Vec4 color, bool scissor = false) {
 		if(scissor) scissorPush(getCurrentRegion());
-		dcRect(r, rect(0,0,1,1), color, (int)getTexture(TEXTURE_WHITE)->id);
+		dcRect(r, rect(0,0,1,1), color);
 		if(scissor) scissorPop();
 	}
 
@@ -374,8 +374,8 @@ struct Gui {
 				panelStartDim.h = oldMainScrollHeight - dragDelta.y;
 			}
 		
-			panelStartDim.h = clamp(panelStartDim.h, settings.minSize.y, screenRes.h+settings.border.h*2+1);
-			panelStartDim.w = clamp(panelStartDim.w, settings.minSize.x, screenRes.w-settings.border.w*2+1);
+			panelStartDim.h = clamp(panelStartDim.h, (float)settings.minSize.y, (float)screenRes.h+settings.border.h*2+1);
+			panelStartDim.w = clamp(panelStartDim.w, (float)settings.minSize.x, (float)screenRes.w-settings.border.w*2+1);
 
 			Vec2 dragAfterClamp = vec2(panelStartDim.w - oldPanelWidth, oldMainScrollHeight - panelStartDim.h);
 			if(showScrollBar[0] == false) dragAfterClamp.y = 0;
@@ -609,7 +609,7 @@ struct Gui {
 				if(input.shift && !input.ctrl) scrollMod *= 2;
 				if(input.shift && input.ctrl) scrollMod *= 4;
 				*scrollAmount = (*scrollAmount) + (scrollMod/diff)*input.mouseWheel*-1;
-				clamp(scrollAmount, 0, 1);
+				clamp01(scrollAmount);
 			}
 		}
 
@@ -623,7 +623,7 @@ struct Gui {
 
 			Rect regCen = rectCenDim(scrollRect);
 			float sliderHeight = regCen.dim.h - diff;
-			sliderHeight = clampMin(sliderHeight, settings.scrollBarSliderSize);
+			sliderHeight = clampMin(sliderHeight, (float)settings.scrollBarSliderSize);
 
 			slider(scrollAmount, 0, 1, true, scrollRect, sliderHeight);
 
@@ -790,8 +790,8 @@ struct Gui {
 		float sliderSize = verticalSlider ? sliderS : settings.sliderSize;
 		if(typeFloat) sliderSize = verticalSlider ? sliderS : settings.sliderSize;
 		else {
-			sliderSize = rectDim(region).w * 1/(float)((int)roundInt(max)-(int)roundInt(min) + 1);
-			sliderSize = clampMin(sliderSize, settings.sliderSize);
+			sliderSize = rectDim(region).w * 1/(float)(roundIntf(max)-roundIntf(min) + 1);
+			sliderSize = clampMin(sliderSize, (float)settings.sliderSize);
 		}
 
 		float calc = typeFloat ? *((float*)value) : *((int*)value);
@@ -826,11 +826,11 @@ struct Gui {
 			if(dist > settings.sliderResetDistance) calc = scrollValue;
 
 			if(!verticalSlider && typeFloat) {
-				if(input.ctrl) calc = roundInt(calc);
-				else if(input.shift) calc = roundFloat(calc, 10);
+				if(input.ctrl) calc = roundIntf(calc);
+				else if(input.shift) calc = roundDigits(calc, 1);
 			}
 
-			if(!typeFloat) calc = roundInt(calc);
+			if(!typeFloat) calc = roundIntf(calc);
 			
 			sliderPos = mapRangeClamp(calc, valueRange, sliderRange);
 			sliderRegion = verticalSlider ? rect(region.min.x, sliderPos, region.max.x, sliderPos+sliderSize) :
@@ -921,7 +921,7 @@ struct Gui {
 			int oldTextBoxIndex = textBoxIndex;
 			if(input.left) textBoxIndex--;
 			if(input.right) textBoxIndex++;
-			clampInt(&textBoxIndex, 0, textBoxTextSize);
+			clamp(&textBoxIndex, 0, textBoxTextSize);
 
 			if(input.ctrl) {
 				if(input.left) textBoxIndex = strFindBackwards(textBoxText, ' ', textBoxIndex);
@@ -1165,9 +1165,9 @@ void guiSettings(Gui* gui) {
 
 		if(mainUpdated) {
 			Vec3 preColor = hslColor + colorUpdate;
-			preColor.x = modFloat(preColor.x, 360);
-			preColor.y = clamp(preColor.y, 0, 1);
-			preColor.z = clamp(preColor.z, 0, 1);
+			preColor.x = modf(preColor.x, 360);
+			preColor.y = clamp01(preColor.y);
+			preColor.z = clamp01(preColor.z);
 			hslColor = preColor;
 		}
 
@@ -1374,8 +1374,8 @@ struct Console {
 		cs.bodyFontHeightPadding = 1.0f;
 		cs.bodyFontHeightResultPadding = 1.2f;
 
-		cs.bodyFont = getFont(FONT_SOURCESANS_PRO, fontHeight * 1.4f);
-		cs.inputFont = getFont(FONT_CONSOLAS, fontHeight*1.2f);
+		cs.bodyFont = getFont("LiberationSans-Regular.ttf", fontHeight * 1.4f);
+		cs.inputFont = getFont("consola.ttf", fontHeight*1.2f);
 
 		cs.inputHeightPadding = 1.5;
 		cs.fontDrawHeightOffset = 0.2f;
@@ -1764,7 +1764,7 @@ struct Console {
 					if(strLen(inputBuffer) > 0) {
 						// Push to history buffer.
 
-						int stringLength = max(strLen(inputBuffer), arrayCount(historyBuffer));
+						int stringLength = max(strLen(inputBuffer), (int)arrayCount(historyBuffer));
 						strCpy(historyBuffer[historyWriteIndex], inputBuffer, stringLength);
 						historyReadIndex = historyWriteIndex;
 						historyWriteIndex = mod(historyWriteIndex+1, arrayCount(historyBuffer));
@@ -1889,7 +1889,7 @@ struct Console {
 					if(input->keysDown[KEYCODE_CTRL]) cs.scrollWheelAmount *= cs.scrollWheelAmountMod;
 
 					scrollPercent += -input->mouseWheel * (cs.scrollWheelAmount / heightDiff);
-					clamp(&scrollPercent, 0, 1);
+					clamp01(&scrollPercent);
 				}
 
 				// Enable scrollbar keyboard navigation if we're not typing anything into the input console.
@@ -1904,7 +1904,7 @@ struct Console {
 						scrollPercent += dir * (consoleHeight*0.8f / heightDiff);
 					}
 
-					clamp(&scrollPercent, 0, 1);
+					clamp01(&scrollPercent);
 				}
 
 				// @CodeDuplication.
@@ -2002,7 +2002,7 @@ struct Console {
 
 					if(!textOutside) {
 						if(mousePressed && mouseInsideConsole) {
-							if(valueBetween(input->mousePosNegative.y, textPos.y - textHeight, textPos.y) && 
+							if(between(input->mousePosNegative.y, textPos.y - textHeight, textPos.y) && 
 							   (input->mousePosNegative.x < consoleTextRect.max.x)) {
 								bodySelectionIndex = i;
 								bodySelectionMarker1 = textMouseToIndex(mainBuffer[bodySelectionIndex], cs.bodyFont, textPos, input->mousePosNegative, vec2i(-1,1), wrappingWidth);
