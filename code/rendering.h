@@ -21,8 +21,6 @@ struct MakeShaderInfo {
 };
 
 struct Shader {
-	char* name;
-
 	uint program;
 	uint vertex;
 	uint fragment;

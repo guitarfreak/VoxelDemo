@@ -1489,9 +1489,7 @@ void resetVoxelHashAndMeshes(VoxelData* vd) {
 void drawCubeMap(char* skybox, Entity* player, Entity* camera, bool playerMode, int fieldOfView, float aspectRatio, VoxelWorldSettings* voxelSettings, bool reflection) {
 
 	bindShader(SHADER_CUBEMAP);
-	// glBindTextures(0, 1, &getCubemap(skyBoxId)->id);
 	glBindTextures(0, 1, &getTexture(skybox)->id);
-	// glBindSampler(0, 1, theGraphicsState->samplers);
 	glBindSampler(0, 0);
 
 

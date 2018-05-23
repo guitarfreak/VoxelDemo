@@ -537,8 +537,6 @@ const char* vertexShaderCubeMap = GLSL (
 
 		if(clipPlane) {
 			gl_ClipDistance[0] = dot(cPlane, vec4(pos,1));
-			// pos.z *= -1;
-			// pos.y *= -1;
 		}
 
 		gl_Position = proj*view*vec4(pos,1);
@@ -553,7 +551,6 @@ const char* fragmentShaderCubeMap = GLSL (
 	out vec4 color;
 
 	uniform bool clipPlane = false;
-
 	uniform vec4 fogColor;
 
 	float mapRange01(float value, float min, float max) {
@@ -564,7 +561,6 @@ const char* fragmentShaderCubeMap = GLSL (
 	void main() {
 		vec3 clipPos = pos;
 		if(clipPlane) clipPos.y *= -1;
-		color = texture(s, vec4(clipPos, 0));
 
 		float d0 = -0.01f;
 		if(clipPos.y <= 0) {

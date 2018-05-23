@@ -33,9 +33,10 @@
   We could have multiple equal jobs in thread queue.
 - Simulate earth curvature in shader.
 - Make horizon work. The cubemap solution is not good.
+- Don't clamp cubemap to player position.
+- Cubemap not seemless.
 - DirectX.
 - Fix selection algorithm.
-- Cubemap not seemless.
 - Sound starts to glitch when under 30 hz because audio buffer is 2*framrate.
 - Remove command lists.
 - Creative mode.
@@ -675,7 +676,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->chunkOffset = vec2i(0,0);
 
 		// ad->skyBoxId = CUBEMAP_5;
-		ad->skybox = "skyboxes\\skybox1.png";
+		ad->skybox = getPStringCpy("skyboxes\\skybox1.png");
 		ad->bombFireInterval = 0.1f;
 		ad->bombButtonDown = false;
 
