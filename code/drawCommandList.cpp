@@ -17,21 +17,29 @@ enum Polygon_Mode {
 	POLYGON_MODE_POINT,
 };
 
+#define Command_List(func) \
+	func(State) \
+	func(Enable) \
+	func(Disable) \
+	func(Cube) \
+	func(Line) \
+	func(Line2d) \
+	func(Quad) \
+	func(Quad2d) \
+	func(Rect) \
+	func(RoundedRect) \
+	func(RoundedRectGradient) \
+	func(RoundedRectOutline) \
+	func(Text) \
+	func(TextSelection) \
+	func(Scissor) \
+	func(Blend) \
+	func(PolygonOffset) \
+	func(Triangle) \
+
+#define Make_Enum(name) Draw_Command_Type_##name,
 enum DrawListCommand {
-	Draw_Command_State_Type,
-	Draw_Command_Enable_Type,
-	Draw_Command_Disable_Type,
-	Draw_Command_Cube_Type,
-	Draw_Command_Line_Type,
-	Draw_Command_Line2d_Type,
-	Draw_Command_Quad_Type,
-	Draw_Command_Quad2d_Type,
-	Draw_Command_Rect_Type,
-	Draw_Command_RoundedRect_Type,
-	Draw_Command_Text_Type,
-	Draw_Command_Scissor_Type,
-	Draw_Command_Blend_Type,
-	Draw_Command_PolygonOffset_Type,
+	Command_List(Make_Enum)
 };
 
 struct DrawCommandList {
@@ -48,162 +56,187 @@ void drawCommandListInit(DrawCommandList* cl, char* data, int maxBytes) {
 	cl->maxBytes = maxBytes;
 }
 
+//
+
 #pragma pack(push,1)
-struct Draw_Command_Cube {
-	Vec3 trans;
-	Vec3 scale;
-	Vec4 color;
-	float degrees;
-	Vec3 rot;
-};
 
-struct Draw_Command_Line {
-	Vec3 p0, p1;
-	Vec4 color;
-};
+#define func(type, name) type name;
+#define Make_Command_Struct(name) \
+	struct Draw_Command_##name { \
+		List_##name \
+	};
 
-struct Draw_Command_Line2d {
-	Vec2 p0, p1;
-	Vec4 color;
-};
+#define LIST_FUNC(type, name) type name;
 
-struct Draw_Command_Quad {
-	Vec3 p0, p1, p2, p3;
-	Vec4 color;
-	int textureId;
-	Rect uv;
-	int texZ;
-};
+#define List_Enable
+#define List_Disable
 
-struct Draw_Command_Quad2d {
-	Vec2 p0, p1, p2, p3;
-	Vec4 color;
-	int textureId;
-	Rect uv;
-	int texZ;
-};
+#define List_Cube \
+	LIST_FUNC( Vec3, trans )\
+	LIST_FUNC( Vec3, scale )\
+	LIST_FUNC( Vec4, color )\
+	LIST_FUNC( float, degrees )\
+	LIST_FUNC( Vec3, rot)
 
-struct Draw_Command_Rect {
-	Rect r, uv;
-	Vec4 color;
-	int textureId;
-	int texZ;
-};
+#define List_Line \
+	LIST_FUNC( Vec3, p0 )\
+	LIST_FUNC( Vec3, p1 )\
+	LIST_FUNC( Vec4, color )\
 
-struct Draw_Command_RoundedRect {
-	Rect r;
-	Vec4 color;
+#define List_Line2d \
+	LIST_FUNC( Vec2, p0 )\
+	LIST_FUNC( Vec2, p1 )\
+	LIST_FUNC( Vec4, color )\
 
-	float steps;
-	float size;
-};
+#define List_Quad \
+	LIST_FUNC( Vec3, p0  )\
+	LIST_FUNC( Vec3, p1  )\
+	LIST_FUNC( Vec3, p2  )\
+	LIST_FUNC( Vec3, p3 )\
+	LIST_FUNC( Vec4, color )\
+	LIST_FUNC( int, textureId )\
+	LIST_FUNC( Rect, uv )\
+	LIST_FUNC( int, texZ )\
 
-struct Font;
-struct Draw_Command_Text {
-	char* text;
-	Font* font;
-	Vec2 pos;
-	Vec4 color;
+#define List_Quad2d \
+	LIST_FUNC( Vec2, p0 )\
+	LIST_FUNC( Vec2, p1 )\
+	LIST_FUNC( Vec2, p2 )\
+	LIST_FUNC( Vec2, p3 )\
+	LIST_FUNC( Vec4, color )\
+	LIST_FUNC( int, textureId )\
+	LIST_FUNC( Rect, uv )\
+	LIST_FUNC( int, texZ )\
 
-	int vAlign;
-	int hAlign;
-	int shadow;
-	Vec4 shadowColor;
+#define List_Rect \
+	LIST_FUNC( Rect, r )\
+	LIST_FUNC( Rect, uv )\
+	LIST_FUNC( Vec4, color )\
+	LIST_FUNC( int, textureId )\
+	LIST_FUNC( int, texZ )\
 
-	int wrapWidth;
-	float cullWidth;
-};
+#define List_RoundedRect \
+	LIST_FUNC( Rect, r )\
+	LIST_FUNC( Vec4, color )\
+	LIST_FUNC( float, steps )\
+	LIST_FUNC( float, size )\
 
-struct Draw_Command_Scissor {
-	Rect rect;
-};
+#define List_RoundedRectGradient \
+	LIST_FUNC( Rect, r )\
+	LIST_FUNC( Vec4, color )\
+	LIST_FUNC( float, steps )\
+	LIST_FUNC( float, size )\
+	LIST_FUNC( Vec4, off )\
+
+#define List_RoundedRectOutline \
+	LIST_FUNC( Rect, r )\
+	LIST_FUNC( Vec4, color )\
+	LIST_FUNC( float, steps )\
+	LIST_FUNC( float, size )\
+	LIST_FUNC( float, offset )\
+
+#define List_Text \
+	LIST_FUNC( char*, text )\
+	LIST_FUNC( Vec2, pos )\
+	LIST_FUNC( Vec2i, align )\
+	LIST_FUNC( int, wrapWidth )\
+	LIST_FUNC( TextSettings, settings )\
+
+#define List_TextSelection \
+	LIST_FUNC( char*, text )\
+	LIST_FUNC( Font*, font )\
+	LIST_FUNC( Vec2, startPos )\
+	LIST_FUNC( int, index1 )\
+	LIST_FUNC( int, index2 )\
+	LIST_FUNC( Vec4, color )\
+	LIST_FUNC( Vec2i, align )\
+	LIST_FUNC( int, wrapWidth )\
+
+#define List_Scissor \
+	LIST_FUNC( Rect, rect )\
+
+#define List_Int \
+	LIST_FUNC( int, state )\
+
+#define List_State \
+	LIST_FUNC( int, state )\
+	LIST_FUNC( int, value )\
+
+#define List_Blend \
+	LIST_FUNC( int, sourceColor )\
+	LIST_FUNC( int, destinationColor )\
+	LIST_FUNC( int, sourceAlpha )\
+	LIST_FUNC( int, destinationAlpha )\
+	LIST_FUNC( int, functionColor )\
+	LIST_FUNC( int, functionAlpha )\
+
+#define List_PolygonOffset \
+	LIST_FUNC( float, factor )\
+	LIST_FUNC( float, units )\
+
+#define List_Triangle \
+	LIST_FUNC( Vec2, p )\
+	LIST_FUNC( float, size )\
+	LIST_FUNC( Vec2, dir )\
+	LIST_FUNC( Vec4, color )\
+
+Command_List(Make_Command_Struct)
 
 struct Draw_Command_Int {
 	int state;
 };
 
-struct Draw_Command_State {
-	int state;
-	int value;
-};
-
-struct Draw_Command_Blend {
-	int sourceColor;
-	int destinationColor;
-	int sourceAlpha;
-	int destinationAlpha;
-	int functionColor;
-	int functionAlpha;
-};
-
-struct Draw_Command_PolygonOffset {
-	float factor;
-	float units;
-};
 #pragma pack(pop)
 
+//
 
-#define PUSH_DRAW_COMMAND(commandType, structType) \
+#define PUSH_DRAW_COMMANDS(commandType, structType) \
 	if(!drawList) drawList = theCommandList; \
 	char* list = (char*)drawList->data + drawList->bytes; \
-	*((int*)list) = Draw_Command_##commandType##_Type; \
+	*((int*)list) = Draw_Command_Type_##commandType; \
 	list += sizeof(int); \
 	Draw_Command_##structType* command = (Draw_Command_##structType*)list; \
 	drawList->count++; \
 	drawList->bytes += sizeof(Draw_Command_##structType) + sizeof(int); \
 	assert(sizeof(Draw_Command_##structType) + drawList->bytes < drawList->maxBytes);
 
+#define PUSH_DRAW_COMMAND(commandStructType) \
+	PUSH_DRAW_COMMANDS(commandStructType, commandStructType)
+
+#define PUSH_DRAW_COMMANDS_AUTO(commandType, structType) \
+	PUSH_DRAW_COMMANDS(commandType, structType) \
+	List_##structType
+
+#define PUSH_DRAW_COMMAND_AUTO(commandStructType) \
+	PUSH_DRAW_COMMANDS(commandStructType, commandStructType) \
+	List_##commandStructType
+
+#define LIST_FUNC(type, name) command->name = name;
+
+//
 
 void dcCube(Vec3 trans, Vec3 scale, Vec4 color, float degrees = 0, Vec3 rot = vec3(0,0,0), DrawCommandList* drawList = 0) {
-	PUSH_DRAW_COMMAND(Cube, Cube);
-
-	command->trans = trans;
-	command->scale = scale;
-	command->color = color;
-	command->degrees = degrees;
-	command->rot = rot;
+	PUSH_DRAW_COMMAND_AUTO(Cube);
 }
 
 void dcLine(Vec3 p0, Vec3 p1, Vec4 color, DrawCommandList* drawList = 0) {
-	PUSH_DRAW_COMMAND(Line, Line);
-
-	command->p0 = p0;
-	command->p1 = p1;
-	command->color = color;
+	PUSH_DRAW_COMMAND_AUTO(Line);
 }
 
 void dcLine2d(Vec2 p0, Vec2 p1, Vec4 color, DrawCommandList* drawList = 0) {
-	PUSH_DRAW_COMMAND(Line2d, Line2d);
-
-	command->p0 = p0;
-	command->p1 = p1;
-	command->color = color;
+	PUSH_DRAW_COMMAND_AUTO(Line2d);
 }
 
 void dcQuad2d(Vec2 p0, Vec2 p1, Vec2 p2, Vec2 p3, Vec4 color, int textureId = -1, Rect uv = rect(0,0,1,1), int texZ = -1, DrawCommandList* drawList = 0) {
-	PUSH_DRAW_COMMAND(Quad2d, Quad2d);
+	PUSH_DRAW_COMMAND_AUTO(Quad2d);
 
-	command->p0 = p0;
-	command->p1 = p1;
-	command->p2 = p2;
-	command->p3 = p3;
-	command->color = color;
 	command->textureId = textureId == -1 ? theGraphicsState->textureWhite->id : textureId;
-	command->uv = uv;
-	command->texZ = texZ;
 }
 
 void dcQuad(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec4 color, int textureId = -1, Rect uv = rect(0,0,1,1), int texZ = -1, DrawCommandList* drawList = 0) {
-	PUSH_DRAW_COMMAND(Quad, Quad);
+	PUSH_DRAW_COMMAND_AUTO(Quad);
 
-	command->p0 = p0;
-	command->p1 = p1;
-	command->p2 = p2;
-	command->p3 = p3;
-	command->color = color;
 	command->textureId = textureId == -1 ? theGraphicsState->textureWhite->id : textureId;
-	command->uv = uv;
-	command->texZ = texZ;
 }
 void dcQuad(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec4 color, char* textureName, Rect uv = rect(0,0,1,1), int texZ = -1, DrawCommandList* drawList = 0) {
 	int textureId = strLen(textureName) ? getTexture(textureName)->id : -1;
@@ -211,146 +244,104 @@ void dcQuad(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec4 color, char* textureName, R
 }
 
 void dcRect(Rect r, Rect uv, Vec4 color, int textureId = -1, int texZ = -1, DrawCommandList* drawList = 0) {
-	PUSH_DRAW_COMMAND(Rect, Rect);
-
-	command->r = r;
-	command->uv = uv;
-	command->color = color;
-	command->textureId = textureId;
-	command->texZ = texZ;
+	PUSH_DRAW_COMMAND_AUTO(Rect);
 }
 void dcRect(Rect r, Rect uv, Vec4 color, char* textureName, int texZ = -1, DrawCommandList* drawList = 0) {
-	int textureId = getTexture(textureName)->id;
-	dcRect(r, uv, color, textureId, texZ, drawList);
+	dcRect(r, uv, color, getTexture(textureName)->id, texZ, drawList);
 }
 void dcRect(Rect r, Vec4 color, DrawCommandList* drawList = 0) {
-	PUSH_DRAW_COMMAND(Rect, Rect);
-
-	command->r = r;
-	command->uv = rect(0,0,1,1);
-	command->color = color;
-	command->textureId = theGraphicsState->textureWhite->id;
-	command->texZ = -1;
+	dcRect(r, rect(0,0,1,1), color, theGraphicsState->textureWhite->id, -1, drawList);
 }
 
 void dcRoundedRect(Rect r, Vec4 color, float size, float steps = 0, DrawCommandList* drawList = 0) {
-	PUSH_DRAW_COMMAND(RoundedRect, RoundedRect);
+	PUSH_DRAW_COMMAND_AUTO(RoundedRect);
+}
 
-	command->r = r;
-	command->color = color;
-	command->steps = steps;
-	command->size = size;
+void dcRoundedRectGradient(Rect r, Vec4 color, float size, Vec4 off, float steps = 0, DrawCommandList* drawList = 0) {
+	PUSH_DRAW_COMMAND_AUTO(RoundedRectGradient);
+}
+
+void dcRoundedRectOutline(Rect r, Vec4 color, float size, float offset = -1, float steps = 0, DrawCommandList* drawList = 0) {
+	PUSH_DRAW_COMMAND_AUTO(RoundedRectOutline);
+}
+
+void dcText(char* text, Vec2 pos, Vec2i align, int wrapWidth, TextSettings settings, DrawCommandList* drawList = 0) {
+	PUSH_DRAW_COMMAND_AUTO(Text);
+}
+void dcText(char* text, Vec2 pos, Vec2i align, TextSettings settings, DrawCommandList* drawList = 0) {
+	int wrapWidth = 0;
+	PUSH_DRAW_COMMAND_AUTO(Text);
+}
+void dcText(char* text, Vec2 pos, TextSettings settings, DrawCommandList* drawList = 0) {
+	Vec2i align = vec2i(-1,1);
+	int wrapWidth = 0;
+	PUSH_DRAW_COMMAND_AUTO(Text);
 }
 
 void dcText(char* text, Font* font, Vec2 pos, Vec4 color, Vec2i align = vec2i(-1,1), int wrapWidth = 0, int shadow = 0, Vec4 shadowColor = vec4(0,0,0,1), DrawCommandList* drawList = 0) {
-	PUSH_DRAW_COMMAND(Text, Text);
 
-	command->text = text;
-	command->font = font;
-	command->pos = pos;
-	command->color = color;
-	command->vAlign = align.x;
-	command->hAlign = align.y;
-	command->shadow = shadow;
-	command->shadowColor = shadowColor;
-	command->wrapWidth = wrapWidth;
-	command->cullWidth = -1;
+	int cullWidth = -1;
+
+	if(cullWidth == -1) {
+		int shadowType = TEXTSHADOW_MODE_NOSHADOW;
+		if(shadow != 0) shadowType = TEXTSHADOW_MODE_SHADOW;
+		TextSettings ts = textSettings(font, color, shadowType, vec2(shadow,-shadow), len(vec2(shadow,-shadow)), shadowColor);
+
+		dcText(text, pos, align, wrapWidth, ts);
+
+	} else {
+		TextSettings ts = textSettings(font, color, TEXTSHADOW_MODE_SHADOW, vec2(shadow,-shadow), len(vec2(shadow,-shadow)), shadowColor);
+		ts.cull = true;
+
+		dcText(text, pos, align, cullWidth, ts);
+	}
 }
 
 void dcTextLine(char* text, Font* font, Vec2 pos, Vec4 color, Vec2i align = vec2i(-1,1), int cullWidth = -1, int shadow = 0, Vec4 shadowColor = vec4(0,0,0,1), DrawCommandList* drawList = 0) {
-	PUSH_DRAW_COMMAND(Text, Text);
+	dcText(text, font, pos, color, align, 0, shadow, shadowColor);
+}
 
-	command->text = text;
-	command->font = font;
-	command->pos = pos;
-	command->color = color;
-	command->vAlign = align.x;
-	command->hAlign = align.y;
-	command->shadow = shadow;
-	command->shadowColor = shadowColor;
-	command->wrapWidth = 0;
-	command->cullWidth = cullWidth;
+void dcTextSelection(char* text, Font* font, Vec2 startPos, int index1, int index2, Vec4 color, Vec2i align = vec2i(-1,1), int wrapWidth = 0, DrawCommandList* drawList = 0) {
+	PUSH_DRAW_COMMAND_AUTO(TextSelection);
 }
 
 void dcScissor(Rect rect, DrawCommandList* drawList = 0) {
-	PUSH_DRAW_COMMAND(Scissor, Scissor);
-
-	command->rect = rect;
+	PUSH_DRAW_COMMAND_AUTO(Scissor);
 }
 
 void dcState(int state, int value, DrawCommandList* drawList = 0) {
-	PUSH_DRAW_COMMAND(State, State);
-
-	command->state = state;
-	command->value = value;
+	PUSH_DRAW_COMMAND_AUTO(State);
 }
 
 void dcEnable(int state, DrawCommandList* drawList = 0) {
-	PUSH_DRAW_COMMAND(Enable, Int);
-
-	command->state = state;
+	PUSH_DRAW_COMMANDS_AUTO(Enable, Int);
 }
 
 void dcDisable(int state, DrawCommandList* drawList = 0) {
-	PUSH_DRAW_COMMAND(Disable, Int);
-
-	command->state = state;
+	PUSH_DRAW_COMMANDS_AUTO(Disable, Int);
 }
 
 void dcBlend(int sourceColor, int destinationColor, int sourceAlpha, int destinationAlpha, int functionColor, int functionAlpha, DrawCommandList* drawList = 0) {
-	PUSH_DRAW_COMMAND(Blend, Blend);
-
-	command->sourceColor = sourceColor;
-	command->destinationColor = destinationColor;
-	command->sourceAlpha = sourceAlpha;
-	command->destinationAlpha = destinationAlpha;
-
-	command->functionColor = functionColor;
-	command->functionAlpha = functionAlpha;
+	PUSH_DRAW_COMMAND_AUTO(Blend);
 }
 
 void dcBlend(int source, int destination, int function, DrawCommandList* drawList = 0) {
-	PUSH_DRAW_COMMAND(Blend, Blend);
+	PUSH_DRAW_COMMAND(Blend);
 
 	command->sourceColor = source;
 	command->destinationColor = destination;
 	command->sourceAlpha = source;
 	command->destinationAlpha = destination;
-
 	command->functionColor = function;
 	command->functionAlpha = function;
 }
 
 void dcPolygonOffset(float factor, float units, DrawCommandList* drawList = 0) {
-	PUSH_DRAW_COMMAND(PolygonOffset, PolygonOffset);
-
-	command->factor = factor;
-	command->units = units;
+	PUSH_DRAW_COMMAND_AUTO(PolygonOffset);
 }
 
-
-//
-
-void scissorTest(Rect r) {
-	int left   = roundIntf(r.left);
-	int bottom = roundIntf(r.bottom);
-	int right  = roundIntf(r.right);
-	int top    = roundIntf(r.top);
-
-	// glScissor(left, bottom, right-left, top-bottom);
-	dcScissor(rect(left, bottom, right, top));
-}
-
-Rect scissorRectScreenSpace(Rect r, float screenHeight) {
-	Rect scissorRect = {r.min.x, r.min.y+screenHeight, r.max.x, r.max.y+screenHeight};
-	return scissorRect;
-}
-
-void scissorTestScreen(Rect r) {
-	Rect sr = scissorRectScreenSpace(r, theGraphicsState->screenRes.h);
-	if(rectW(sr) < 0 || rectH(sr) < 0) sr = rect(0,0,0,0);
-
-	scissorTest(sr);
+void dcTriangle(Vec2 p, float size, Vec2 dir, Vec4 color, DrawCommandList* drawList = 0) {
+	PUSH_DRAW_COMMAND_AUTO(Triangle);
 }
 
 //
@@ -365,9 +356,15 @@ int stateSwitch(int state) {
 	return 0;
 }
 
+#define CONCAT(a, b) a##b
+
 #define dcGetStructAndIncrement(structType) \
-	Draw_Command_##structType dc = *((Draw_Command_##structType*)drawListIndex); \
-	drawListIndex += sizeof(Draw_Command_##structType); \
+	CONCAT(Draw_Command_, structType) dc = *((CONCAT(Draw_Command_, structType)*)drawListIndex); \
+	drawListIndex += sizeof(CONCAT(Draw_Command_, structType)); \
+
+#define Make_Case(name) CONCAT(Draw_Command_Type_, name)
+
+//
 
 void executeCommandList(DrawCommandList* list, bool print = false, bool skipStrings = false) {
 	// TIMER_BLOCK();
@@ -385,45 +382,46 @@ void executeCommandList(DrawCommandList* list, bool print = false, bool skipStri
 			printf("%i ", command);
 		}
 
+		// #define Make_Case Draw_Command_Type_#CURRENT_NAME
+
 		switch(command) {
-			case Draw_Command_Cube_Type: {
-				dcGetStructAndIncrement(Cube);
+
+			#define CURRENT_NAME Cube
+			case Make_Case(CURRENT_NAME): {
+				dcGetStructAndIncrement(CURRENT_NAME);
 				drawCube(dc.trans, dc.scale, dc.color, dc.degrees, dc.rot);
 			} break;
 
-			case Draw_Command_Line_Type: {
-				dcGetStructAndIncrement(Line);
+			#define CURRENT_NAME Line
+			case Make_Case(CURRENT_NAME): {
+				dcGetStructAndIncrement(CURRENT_NAME);
 				drawLine(dc.p0, dc.p1, dc.color);
 			} break;
 
-			case Draw_Command_Line2d_Type: {
-				dcGetStructAndIncrement(Line2d);
+			#define CURRENT_NAME Line2d
+			case Make_Case(CURRENT_NAME): {
+				dcGetStructAndIncrement(CURRENT_NAME);
 
-				// Vec2 verts[] = {dc.p0, dc.p1};
-				Vec2 verts[] = {roundIntf(dc.p0.x)-0.5f, roundIntf(dc.p0.y)-0.5f, roundIntf(dc.p1.x)-0.5f, roundIntf(dc.p1.y)-0.5f};
-				pushUniform(SHADER_QUAD, 0, "verts", verts, 2);
-				pushUniform(SHADER_QUAD, 0, "setColor", linearToGamma(dc.color));
-				pushUniform(SHADER_QUAD, 0, "primitiveMode", 1);
-
-				glBindTextures(0,1,&theGraphicsState->textureWhite->id);
-
-				glDrawArrays(GL_LINES, 0, 2);
+				drawLine(dc.p0, dc.p1, dc.color);
 			} break;
 
-			case Draw_Command_Quad2d_Type: {
-				dcGetStructAndIncrement(Quad2d);
+			#define CURRENT_NAME Quad2d
+			case Make_Case(CURRENT_NAME): {
+				dcGetStructAndIncrement(CURRENT_NAME);
 
 				drawQuad(dc.p0, dc.p1, dc.p2, dc.p3, dc.color, dc.textureId, dc.uv, dc.texZ);
 			} break;
 
-			case Draw_Command_Quad_Type: {
-				dcGetStructAndIncrement(Quad);
+			#define CURRENT_NAME Quad
+			case Make_Case(CURRENT_NAME): {
+				dcGetStructAndIncrement(CURRENT_NAME);
 
 				drawQuad(dc.p0, dc.p1, dc.p2, dc.p3, dc.color, dc.textureId, dc.uv, dc.texZ);
 			} break;
 
-			case Draw_Command_State_Type: {
-				dcGetStructAndIncrement(State);
+			#define CURRENT_NAME State
+			case Make_Case(CURRENT_NAME): {
+				dcGetStructAndIncrement(CURRENT_NAME);
 
 				switch(dc.state) {
 					case STATE_POLYGONMODE: {
@@ -444,106 +442,96 @@ void executeCommandList(DrawCommandList* list, bool print = false, bool skipStri
 				}
 			} break;
 
-			case Draw_Command_Enable_Type: {
+			#define CURRENT_NAME Enable
+			case Make_Case(CURRENT_NAME): {
 				dcGetStructAndIncrement(Int);
 
 				int m = stateSwitch(dc.state);
 				glEnable(m);
 			} break;			
 
-			case Draw_Command_Disable_Type: {
+			#define CURRENT_NAME Disable
+			case Make_Case(CURRENT_NAME): {
 				dcGetStructAndIncrement(Int);
 
 				int m = stateSwitch(dc.state);
 				glDisable(m);
 			} break;	
 
-			case Draw_Command_Rect_Type: {
-				dcGetStructAndIncrement(Rect);
+			#define CURRENT_NAME Rect
+			case Make_Case(CURRENT_NAME): {
+				dcGetStructAndIncrement(CURRENT_NAME);
 				drawRect(dc.r, dc.color, dc.uv, dc.textureId, dc.texZ);
 			} break;
 
-			case Draw_Command_RoundedRect_Type: {
-				dcGetStructAndIncrement(RoundedRect);
-
-				if(dc.steps == 0) dc.steps = 6;
-
-				float s = dc.size;
-				Rect r = dc.r;
-				drawRect(rect(r.min.x+s, r.min.y, r.max.x-s, r.max.y), dc.color);
-				drawRect(rect(r.min.x, r.min.y+s, r.max.x, r.max.y-s), dc.color);
-
-				Vec2 verts[10];
-
-				pushUniform(SHADER_QUAD, 0, "primitiveMode", 1);
-				pushUniform(SHADER_QUAD, 0, "setColor", linearToGamma(dc.color));
-				glBindTextures(0,1,&theGraphicsState->textureWhite->id);
-
-				Rect rc = rectExpand(r, -vec2(s,s)*2);
-				Vec2 corners[] = {rc.max, vec2(rc.max.x, rc.min.y), rc.min, vec2(rc.min.x, rc.max.y)};
-				for(int cornerIndex = 0; cornerIndex < 4; cornerIndex++) {
-
-					Vec2 corner = corners[cornerIndex];
-					float round = s;
-					float start = M_PI_2*cornerIndex;
-
-					verts[0] = corner;
-
-					for(int i = 0; i < dc.steps; i++) {
-						float angle = start + i*(M_PI_2/(dc.steps-1));
-						Vec2 v = vec2(sin(angle), cos(angle));
-
-						verts[i+1] = corner + v*round;
-					}
-
-					pushUniform(SHADER_QUAD, 0, "verts", verts, dc.steps+1);
-					glDrawArraysInstancedBaseInstance(GL_TRIANGLE_FAN, 0, dc.steps+1, 1, 0);
-				}
-
+			#define CURRENT_NAME RoundedRect
+			case Make_Case(CURRENT_NAME): {
+				dcGetStructAndIncrement(CURRENT_NAME);
+				drawRectRounded(dc.r, dc.color, dc.size, dc.steps);
 			} break;
 
-			case Draw_Command_Text_Type: {
-				dcGetStructAndIncrement(Text);
+			#define CURRENT_NAME RoundedRectGradient
+			case Make_Case(CURRENT_NAME): {
+				dcGetStructAndIncrement(CURRENT_NAME);
+				drawRectRoundedGradient(dc.r, dc.color, dc.size, dc.off, dc.steps);
+			} break;
+
+			#define CURRENT_NAME RoundedRectOutline
+			case Make_Case(CURRENT_NAME): {
+				dcGetStructAndIncrement(CURRENT_NAME);
+				drawRectRoundedOutline(dc.r, dc.color, dc.size, dc.offset, dc.steps);
+			} break;
+
+			#define CURRENT_NAME Text
+			case Make_Case(CURRENT_NAME): {
+				dcGetStructAndIncrement(CURRENT_NAME);
 
 				if(skipStrings) break;
 
-				if(dc.cullWidth == -1) {
-					int shadowType = TEXTSHADOW_MODE_NOSHADOW;
-					if(dc.shadow != 0) shadowType = TEXTSHADOW_MODE_SHADOW;
-					TextSettings ts = textSettings(dc.font, dc.color, shadowType, vec2(dc.shadow,-dc.shadow), len(vec2(dc.shadow,-dc.shadow)), dc.shadowColor);
-
-					drawText(dc.text, dc.pos, vec2i(dc.vAlign, dc.hAlign), dc.wrapWidth, ts);
-
-				} else {
-					TextSettings ts = textSettings(dc.font, dc.color, TEXTSHADOW_MODE_SHADOW, vec2(dc.shadow,-dc.shadow), len(vec2(dc.shadow,-dc.shadow)), dc.shadowColor);
-					ts.cull = true;
-
-					drawText(dc.text, dc.pos, vec2i(dc.vAlign, dc.hAlign), dc.cullWidth, ts);
-				}
-
+				drawText(dc.text, dc.pos, dc.align, dc.wrapWidth, dc.settings);
 			} break;
 
-			case Draw_Command_Scissor_Type: {
-				dcGetStructAndIncrement(Scissor);
+			#define CURRENT_NAME TextSelection
+			case Make_Case(CURRENT_NAME): {
+				dcGetStructAndIncrement(CURRENT_NAME);
+
+				if(skipStrings) break;
+
+				drawTextSelection(dc.text, dc.font, dc.startPos, dc.index1, dc.index2, dc.color, dc.align, dc.wrapWidth);
+			} break;
+
+			#define CURRENT_NAME Scissor
+			case Make_Case(CURRENT_NAME): {
+				dcGetStructAndIncrement(CURRENT_NAME);
 				Rect r = dc.rect;
-				Vec2 dim = rectDim(r);
+				Vec2 dim = r.dim();
 				assert(dim.w >= 0 && dim.h >= 0);
 				glScissor(r.min.x, r.min.y, dim.x, dim.y);
 			} break;
 
-			case Draw_Command_Blend_Type: {
-				dcGetStructAndIncrement(Blend);
+			#define CURRENT_NAME Blend
+			case Make_Case(CURRENT_NAME): {
+				dcGetStructAndIncrement(CURRENT_NAME);
 				glBlendFuncSeparate(dc.sourceColor, dc.destinationColor, 
 				                    dc.sourceAlpha, dc.destinationAlpha);
 				glBlendEquationSeparate(dc.functionColor, dc.functionAlpha);
 			} break;
 
-			case Draw_Command_PolygonOffset_Type: {
-				dcGetStructAndIncrement(PolygonOffset);
+			#define CURRENT_NAME PolygonOffset
+			case Make_Case(CURRENT_NAME): {
+				dcGetStructAndIncrement(CURRENT_NAME);
 				glPolygonOffset(dc.factor, dc.units);
 			} break;
 
+			#define CURRENT_NAME Triangle
+			case Make_Case(CURRENT_NAME): {
+				dcGetStructAndIncrement(CURRENT_NAME);
+				drawTriangle(dc.p, dc.size, dc.dir, dc.color);
+			} break;
+
 			default: {} break;
+
+			#undef CURRENT_NAME
 		}
 	}
 

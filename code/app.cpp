@@ -17,7 +17,6 @@
 - antialiased pixel graphics with neighbour sampling 
 - level of detail for world gen back row, project to cubemap.
   
-- put in spaces for fillString
 - simplex noise instead of perlin noise
 
 - simd voxel generation
@@ -32,15 +31,15 @@
 - atomicAdd sections are not thread proof. 
   We could have multiple equal jobs in thread queue.
 - Simulate earth curvature in shader.
-- Make horizon work. The cubemap solution is not good.
-- Don't clamp cubemap to player position.
 - Cubemap not seemless.
-- DirectX.
+- Cubemap can't handle elevation.
 - Fix selection algorithm.
 - Sound starts to glitch when under 30 hz because audio buffer is 2*framrate.
 - Remove command lists.
 - Creative mode.
-- Fix texture reloading.
+- Should split up leaves and water in own mesh.
+- Recording: Mouse locks up. How to update game while also using mouse for debug stuff?
+- Gui: Cleanup.
 
 //-------------------------------------
 //               BUGS
@@ -63,25 +62,15 @@
 #include <gl\gl.h>
 // #include "external\glext.h"
 
-#if USE_DIRECT3D
-
-#include <D3D11.h>
-#include <D3DCommon.h>
-// #include <D3Dcompiler.h>
-// #include <D3DX11async.h>
-typedef ID3D10Blob ID3DBlob;
-
-#endif USE_DIRECT3D
-
 // Stb.
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
 #include "external\stb_image.h"
 
-// #define STB_IMAGE_WRITE_IMPLEMENTATION
-// #define STBI_ONLY_PNG
-// #include "external\stb_image_write.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#define STBI_ONLY_PNG
+#include "external\stb_image_write.h"
 
 #define STB_VOXEL_RENDER_IMPLEMENTATION
 // #define STBVOX_CONFIG_LIGHTING_SIMPLE
@@ -119,16 +108,25 @@ Timer*           theTimer;
 
 // Internal.
 
-#include "rt_types.cpp"
-#include "rt_timer.cpp"
-#include "rt_misc.cpp"
-#include "rt_math.cpp"
-#include "rt_memory.cpp"
-#include "rt_appMemory.cpp"
-#include "rt_misc2.cpp"
-#include "rt_hotload.cpp"
-#include "rt_misc_win32.cpp"
-#include "rt_platformWin32.cpp"
+#include "types.cpp"
+#include "misc.cpp"
+#include "string.cpp"
+#include "memory.cpp"
+#include "appMemory.cpp"
+#include "fileIO.cpp"
+#include "random.cpp"
+#include "mathBasic.cpp"
+#include "math.cpp"
+#include "color.cpp"
+#include "timer.cpp"
+#include "interpolation.cpp"
+#include "sort.cpp"
+#include "container.cpp"
+#include "misc2.cpp"
+#include "hotload.cpp"
+#include "threadQueue.cpp"
+#include "platformWin32.cpp"
+#include "input.cpp"
 
 #include "rendering.h"
 #include "font.h"
@@ -136,22 +134,24 @@ Timer*           theTimer;
 #include "openglDefines.cpp"
 #include "userSettings.cpp"
 
-#include "audio.cpp"
+#include "shader.cpp"
 #include "rendering.cpp"
+#include "audio.cpp"
 #include "font.cpp"
 #include "drawCommandList.cpp"
-#include "gui.cpp"
+#include "newGui.cpp"
+#include "console.cpp"
 
 #include "entity.cpp"
 #include "voxel.cpp"
 #include "menu.cpp"
 #include "inventory.cpp"
 
+#include "introspection.cpp"
 
-
+//
 
 struct AppData {
-	
 	// General.
 
 	SystemData systemData;
@@ -252,19 +252,17 @@ struct AppData {
 	Vec2i chunkOffset;
 	Vec3i voxelOffset;
 
-	// int skyBoxId;
 	char* skybox;
+
+	Vec2i* coordList;
+	int coordListSize;
+
+	bool cameraInWater;
 
 	bool reloadWorld;
 
 	int voxelDrawCount;
 	int voxelTriangleCount;
-
-	// Particles.
-
-	// GLuint testBufferId;
-	// char* testBuffer;
-	// int testBufferSize;
 };
 
 #include "debug.cpp"
@@ -298,16 +296,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 		MemoryArray* tMemoryDebug = &appMemory->memoryArrays[appMemory->memoryArrayCount++];
 		initMemoryArray(tMemoryDebug, megaBytes(30), baseAddress + gigaBytes(33));
 
-
+		//
 
 		MemoryArray* pDebugMemory = &appMemory->memoryArrays[appMemory->memoryArrayCount++];
 		initMemoryArray(pDebugMemory, megaBytes(50), 0);
 
 		MemoryArray* tMemory = &appMemory->memoryArrays[appMemory->memoryArrayCount++];
 		initMemoryArray(tMemory, megaBytes(30), 0);
-
-		ExtendibleMemoryArray* debugMemory = &appMemory->extendibleMemoryArrays[appMemory->extendibleMemoryArrayCount++];
-		initExtendibleMemoryArray(debugMemory, megaBytes(512), info.dwAllocationGranularity, baseAddress + gigaBytes(34));
 	}
 
 	// Setup memory and globals.
@@ -316,12 +311,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 	gMemory.pMemory = &appMemory->extendibleMemoryArrays[0];
 	gMemory.tMemory = &appMemory->memoryArrays[0];
 	gMemory.dMemory = &appMemory->extendibleBucketMemories[0];
-	gMemory.pDebugMemory = &appMemory->memoryArrays[1];
+	gMemory.pMemoryDebug = &appMemory->memoryArrays[1];
 	gMemory.tMemoryDebug = &appMemory->memoryArrays[2];
-	gMemory.debugMemory = &appMemory->extendibleMemoryArrays[1];
 	theMemory = &gMemory;
 
-	DebugState* ds = (DebugState*)getBaseMemoryArray(gMemory.pDebugMemory);
+	DebugState* ds = (DebugState*)getBaseMemoryArray(gMemory.pMemoryDebug);
 	AppData* ad = (AppData*)getBaseExtendibleMemoryArray(gMemory.pMemory);
 	GraphicsState* gs = &ad->graphicsState;
 
@@ -334,48 +328,32 @@ extern "C" APPMAINFUNCTION(appMain) {
 	theGraphicsState = &ad->graphicsState;
 	theAudioState = &ad->audioState;
 	theDebugState = ds;
-	theTimer = ds->timer;
+	theTimer = ds->profiler.timer;
 
-	// Init.
+	// @Init.
 
 	if(init) {
 
 		//
-		// DebugState.
+		// @DebugInit.
 		//
 
 		getPMemoryDebug(sizeof(DebugState));
 		*ds = {};
-		ds->assets = getPArrayDebug(Asset, 100);
 
-		ds->inputCapacity = 600;
-		ds->recordedInput = (Input*)getPMemoryDebug(sizeof(Input) * ds->inputCapacity);
-
-		ds->timer = getPStructDebug(Timer);
-		theTimer = ds->timer;
-		int timerSlots = 50000;
-		ds->timer->bufferSize = timerSlots;
-		ds->timer->timerBuffer = (TimerSlot*)getPMemoryDebug(sizeof(TimerSlot) * timerSlots);
-
-		ds->savedBufferMax = 20000;
-		ds->savedBufferIndex = 0;
-		ds->savedBufferCount = 0;
-		ds->savedBuffer = (GraphSlot*)getPMemoryDebug(sizeof(GraphSlot) * ds->savedBufferMax);
-
-
-		ds->gui = getPStructDebug(Gui);
-		ds->gui->init(rectCenDim(vec2(1300,1), vec2(300, ws->currentRes.h)), 0);
-
-		ds->gui2 = getPStructDebug(Gui);
-		ds->gui2->init(rectCenDim(vec2(1300,1), vec2(300, ws->currentRes.h)), 3);
+		ds->recState.init(600, theMemory->pMemory);
+		
+		ds->profiler.init(10000, 10000);
+		theTimer = ds->profiler.timer;
 
 		ds->input = getPStructDebug(Input);
+		initInput(ds->input);
+
 		ds->showMenu = false;
-		ds->showStats = false;
+		ds->showProfiler = false;
 		ds->showConsole = false;
 		ds->showHud = false;
-		// ds->guiAlpha = 0.95f;
-		ds->guiAlpha = 1;
+		ds->guiAlpha = 0.98f;
 
 		for(int i = 0; i < arrayCount(ds->notificationStack); i++) {
 			ds->notificationStack[i] = getPStringDebug(DEBUG_NOTE_LENGTH+1);
@@ -383,11 +361,21 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		ds->fontScale = 1.0f;
 
-		TIMER_BLOCK_NAMED("Init");
+		ds->console.init();
+
+		ds->swapTimer.init();
+		ds->frameTimer.init();
+		ds->debugTimer.init();
+
+		ds->expansionArray = getPArrayDebug(ExpansionIndex, 1000);
+
+		ds->panelGotActiveIndex = -1;
 
 		//
-		// AppData.
+		// @AppInit.
 		//
+
+		TIMER_BLOCK_NAMED("Init");
 
 		getPMemory(sizeof(AppData));
 		*ad = {};
@@ -395,6 +383,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		int windowStyle = WS_OVERLAPPEDWINDOW;
 		// int windowStyle = WS_OVERLAPPEDWINDOW & ~WS_SYSMENU;
 		initSystem(sd, ws, windowsData, vec2i(1920*0.85f, 1080*0.85f), windowStyle, 1);
+
+	    sd->messageFiber = CreateFiber(0, (PFIBER_START_ROUTINE)updateInput, sd);
 
 		windowHandle = sd->windowHandle;
 		SetWindowText(windowHandle, APP_NAME);
@@ -411,8 +401,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			ws->frameRate = 200;
 		#endif
 
-		initInput(&ad->input);
-		sd->input = &ad->input;
+		sd->input = ds->input;
 
 		#ifndef SHIPPING_MODE
 		if(!IsDebuggerPresent()) {
@@ -421,12 +410,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		#endif
 
 		ws->lastMousePosition = {0,0};
-
-		//
-		// Init Folder Handles.
-		//
-
-		initWatchFolders(sd->folderHandles, ds->assets, &ds->assetCount);
 
 		//
 		// Setup Textures.
@@ -444,7 +427,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				tex.name = getPStringCpy(fd.fileName);
 				tex.file = getPStringCpy(fd.filePath);
 
-				if(strFind(fd.fileName, "skyboxes\\") != -1) {
+				if(strFind(fd.fileName, CubeMap_Texture_Folder) != -1) {
 					loadCubeMapFromFile(&tex, fd.filePath, 5, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE);
 				} else {
 					loadTextureFromFile(&tex, fd.filePath, -1, INTERNAL_TEXTURE_FORMAT, GL_RGBA, GL_UNSIGNED_BYTE);
@@ -459,9 +442,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				Texture tex2;
 				tex2.name = getPStringCpy("voxelTextures2");
 
-				char* voxelTexturesFolder = "minecraft\\";
-
-				char* voxelTexturesPath = fillString("%s%s", App_Texture_Folder, voxelTexturesFolder);
+				char* voxelTexturesPath = fillString("%s%s", App_Texture_Folder, Voxel_Texture_Folder);
 				loadVoxelTextures(&tex, &tex2, voxelTexturesPath, ad->voxelSettings.waterAlpha, INTERNAL_TEXTURE_FORMAT);
 
 				gs->textures[gs->texturesCount++] = tex;
@@ -495,11 +476,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 			mesh->vertCount = meshMap->size / sizeof(Vertex);
 		}
 
-		// ad->testBufferSize = megaBytes(10);
-		// ad->testBuffer = getPArray(char, ad->testBufferSize);
-		// glCreateBuffers(1, &ad->testBufferId);
-		// glNamedBufferData(ad->testBufferId, ad->testBufferSize, ad->testBuffer, GL_STREAM_DRAW);
-
 		// 
 		// Samplers.
 		//
@@ -522,7 +498,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->dt = 1/(float)ws->frameRate;
 
 		//
-		// FrameBuffers.
+		// @FrameBuffers.
 		//
 
 		{
@@ -534,7 +510,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			fb = addFrameBuffer("3dMsaa");
 			attachToFrameBuffer(fb, FRAMEBUFFER_SLOT_COLOR, GL_RGBA8, 0, 0, ad->msaaSamples);
-			attachToFrameBuffer(fb, FRAMEBUFFER_SLOT_DEPTH_STENCIL, GL_DEPTH_STENCIL, 0, 0, ad->msaaSamples);
+			attachToFrameBuffer(fb, FRAMEBUFFER_SLOT_DEPTH_STENCIL, GL_DEPTH24_STENCIL8, 0, 0, ad->msaaSamples);
 
 			fb = addFrameBuffer("3dNoMsaa");
 			attachToFrameBuffer(fb, FRAMEBUFFER_SLOT_COLOR, GL_RGBA8, 0, 0);
@@ -544,14 +520,24 @@ extern "C" APPMAINFUNCTION(appMain) {
 			attachToFrameBuffer(fb, FRAMEBUFFER_SLOT_COLOR, GL_RGBA8, 0, 0);
 			attachToFrameBuffer(fb, FRAMEBUFFER_SLOT_DEPTH_STENCIL, GL_DEPTH24_STENCIL8, 0, 0);
 
-			fb = addFrameBuffer("2d");
+			fb = addFrameBuffer("2dMsaa");
+			attachToFrameBuffer(fb, FRAMEBUFFER_SLOT_COLOR, GL_RGBA8, 0, 0, ad->msaaSamples);
+			attachToFrameBuffer(fb, FRAMEBUFFER_SLOT_DEPTH_STENCIL, GL_DEPTH24_STENCIL8, 0, 0, ad->msaaSamples);
+
+			fb = addFrameBuffer("2dNoMsaa");
+			attachToFrameBuffer(fb, FRAMEBUFFER_SLOT_COLOR, GL_RGBA8, 0, 0);
+			attachToFrameBuffer(fb, FRAMEBUFFER_SLOT_DEPTH_STENCIL, GL_DEPTH24_STENCIL8, 0, 0);
+
+			fb = addFrameBuffer("2dTemp");
 			attachToFrameBuffer(fb, FRAMEBUFFER_SLOT_COLOR, GL_RGBA8, 0, 0);
 
 			fb = addFrameBuffer("DebugMsaa");
 			attachToFrameBuffer(fb, FRAMEBUFFER_SLOT_COLOR, GL_RGBA8, 0, 0, ad->msaaSamples);
+			attachToFrameBuffer(fb, FRAMEBUFFER_SLOT_STENCIL, GL_STENCIL_INDEX8, 0, 0, ad->msaaSamples);
 
 			fb = addFrameBuffer("DebugNoMsaa");
 			attachToFrameBuffer(fb, FRAMEBUFFER_SLOT_COLOR, GL_RGBA8, 0, 0);
+			attachToFrameBuffer(fb, FRAMEBUFFER_SLOT_STENCIL, GL_STENCIL_INDEX8, 0, 0);
 
 			ad->updateFrameBuffers = true;
 		}
@@ -578,6 +564,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 
 		//
+		// Init Folder Handles.
+		//
+
+		initWatchFolders(&sd->textureFolderHandle);
+
+		//
 		//
 		//
 
@@ -593,8 +585,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 				AppSessionSettings at = {};
 
 				Rect r = ws->monitors[0].workRect;
-				Vec2 center = vec2(rectCenX(r), (r.top - r.bottom)/2);
-				Vec2 dim = vec2(rectW(r), -rectH(r));
+				Vec2 center = vec2(r.cx(), (r.top - r.bottom)/2);
+				Vec2 dim = vec2(r.w(), -r.h());
 				at.windowRect = rectCenDim(center, dim*0.85f);
 
 				appWriteSessionSettings(App_Session_File, &at);
@@ -620,21 +612,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// @AppInit.
 		//
 
-		// Vec2 asdf = vec2(1,1);
-		// pushUniformX(0, 0, "asdf", &asdf);
-		// int sd = 234;;
-		// pushUniformX(0, 0, "asdf", &sd);
-		// test(2);
-
-		timerInit(&ds->swapTimer);
-		timerInit(&ds->frameTimer);
-		timerInit(&ds->tempTimer);
-
-		as->masterVolume = 0.4f;
+		as->masterVolume = 0.5f;
 
 		ad->gameMode = GAME_MODE_LOAD;
-		// ad->gameMode = GAME_MODE_TEST;
-		// ad->newGame = false;
 		ad->menu.activeId = 0;
 
 		#if SHIPPING_MODE
@@ -644,7 +624,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->debugMouse = true;
 		#endif
 
-		folderExistsCreate(SAVES_FOLDER);	
+		folderExistsCreate(Saves_Folder);	
 
 		ad->volumeFootsteps = 0.2f;
 		ad->volumeGeneral = 0.5f;
@@ -675,7 +655,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		ad->chunkOffset = vec2i(0,0);
 
-		// ad->skyBoxId = CUBEMAP_5;
 		ad->skybox = getPStringCpy("skyboxes\\skybox1.png");
 		ad->bombFireInterval = 0.1f;
 		ad->bombButtonDown = false;
@@ -706,12 +685,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 			Rect bounds = rect(0, 0, 64, 64);
 			Vec2* noiseSamples;
 			int noiseSamplesSize = blueNoise(bounds, treeRadius, &noiseSamples);
+			defer { free(noiseSamples); };
+			
 			for(int i = 0; i < noiseSamplesSize; i++) {
 				Vec2 s = noiseSamples[i];
 				Vec2i index = vec2i(s);
 				ad->voxelSettings.treeNoise[index.y*VOXEL_X + index.x] = 1;
 			}
-			free(noiseSamples);
 		}
 
 		// Load game settings.
@@ -726,7 +706,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				settings.volume = 0.5f;
 				settings.mouseSensitivity = 0.2f;
 				settings.fieldOfView = 60;
-				settings.viewDistance = 5;
+				settings.viewDistance = 8;
 
 				writeDataToFile((char*)&settings, sizeof(GameSettings), Game_Settings_File);
 			}
@@ -735,7 +715,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			{
 				GameSettings settings = {};
 
-				readDataFile((char*)&settings, Game_Settings_File);
+				readDataFromFile((char*)&settings, Game_Settings_File);
 
 				if(settings.fullscreen) setWindowMode(windowHandle, ws, WINDOW_MODE_FULLBORDERLESS);
 				else setWindowMode(windowHandle, ws, WINDOW_MODE_WINDOWED);
@@ -748,320 +728,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 				ad->voxelSettings.viewDistance = settings.viewDistance;
 			}
 		}
-
-		#if USE_DIRECT3D
-		{
-			//Set up DX swap chain
-			//--------------------------------------------------------------
-			 
-			DXGI_SWAP_CHAIN_DESC swapChainDesc;
-			ZeroMemory(&swapChainDesc, sizeof(swapChainDesc));
-			 
-			//set buffer dimensions and format
-			swapChainDesc.BufferCount = 2;
-			swapChainDesc.BufferDesc.Width = 1000;
-			swapChainDesc.BufferDesc.Height = 1000;
-			swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-			swapChainDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;;
-			swapChainDesc.BufferDesc.RefreshRate.Numerator = 60;
-			swapChainDesc.BufferDesc.RefreshRate.Denominator = 1;
-			swapChainDesc.SampleDesc.Quality = 0;
-			swapChainDesc.SampleDesc.Count = 1;
-			swapChainDesc.OutputWindow = windowHandle;
-			swapChainDesc.Windowed = true;
-			 
-			//Create the D3D device
-			//--------------------------------------------------------------
-			 
-			D3D_FEATURE_LEVEL featureLevels[] = {D3D_FEATURE_LEVEL_11_0};
-
-			IDXGISwapChain* swapChain;
-			ID3D11Device* d3dDevice;
-			if ( FAILED( D3D11CreateDeviceAndSwapChain( NULL,
-			                                            D3D_DRIVER_TYPE_HARDWARE,
-			                                            NULL,
-			                                            D3D11_CREATE_DEVICE_DEBUG, // D3D11_CREATE_DEVICE_DEBUG,
-			                                            featureLevels,
-			                                            arrayCount(featureLevels),
-			                                            D3D11_SDK_VERSION,
-			                                            &swapChainDesc,
-			                                            &swapChain,
-			                                            &d3dDevice,
-			                                            0,
-			                                            0) ) ) 
-				printf("D3D device creation failed");
-
-
-			//Create render target view
-			//--------------------------------------------------------------
-			 
-			//try to get the back buffer
-			ID3D11Texture2D* backBuffer;
-			 
-			if ( FAILED( swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)(&backBuffer)) ) ) 
-				printf("Could not get back buffer");
-			 
-			ID3D11RenderTargetView* renderTargetView;
-
-			//try to create render target view
-			if ( FAILED( d3dDevice->CreateRenderTargetView(backBuffer, NULL, &renderTargetView) ) ) 
-				printf("Could not create render target view");
-			 
-			//release the back buffer
-			backBuffer->Release();
-			 
-			ID3D11DeviceContext* d3dDeviceContext;
-			d3dDevice->GetImmediateContext(&d3dDeviceContext);
-
-			//set the render target
-			d3dDeviceContext->OMSetRenderTargets(1, &renderTargetView, NULL);
-
-			//create viewport structure
-			
-			D3D11_VIEWPORT viewPort;
-			viewPort.Width = 1000;
-			viewPort.Height = 1000;
-			viewPort.MinDepth = 0.0f;
-			viewPort.MaxDepth = 1.0f;
-			viewPort.TopLeftX = 0;
-			viewPort.TopLeftY = 0;
-			 
-			//set the viewport
-
-			d3dDeviceContext->RSSetViewports(1, &viewPort);
-
-
-			sd->swapChain = swapChain;
-			sd->d3dDevice = d3dDevice;
-			sd->d3dDeviceContext = d3dDeviceContext;
-			sd->renderTargetView = renderTargetView;
-
-			// 
-
-		    ID3DBlob* blobError;
-
-		    ID3DBlob* vertexShaderBlob;
-		    uint result = D3D10CompileShader( d3dShader, strlen( d3dShader ), NULL, NULL, NULL, "vertexShader", "vs_4_0", 0, &vertexShaderBlob, &blobError );
-		    {
-		    	if (blobError != nullptr)
-		    		printf((char*)blobError->GetBufferPointer());
-		    	if (blobError) blobError->Release();
-		    }
-
-		    ID3D11VertexShader* vertexShader;
-		    d3dDevice->CreateVertexShader(vertexShaderBlob->GetBufferPointer(), vertexShaderBlob->GetBufferSize(), 0, &vertexShader);
-		    d3dDeviceContext->VSSetShader(vertexShader, 0, 0);
-
-
-		    ID3DBlob* pixelShaderBlob;
-		    result = D3D10CompileShader( d3dShader, strlen( d3dShader ), NULL, NULL, NULL, "pixelShader", "ps_4_0", 0, &pixelShaderBlob, &blobError );
-		    {
-		    	if (blobError != nullptr)
-		    		printf((char*)blobError->GetBufferPointer());
-		    	if (blobError) blobError->Release();
-		    }
-
-		    ID3D11PixelShader* pixelShader;
-		    d3dDevice->CreatePixelShader(pixelShaderBlob->GetBufferPointer(), pixelShaderBlob->GetBufferSize(), 0, &pixelShader);
-		    d3dDeviceContext->PSSetShader(pixelShader, 0, 0);
-
-			//
-
-			D3D11_INPUT_ELEMENT_DESC layout[] = {
-			    { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-			    { "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT,0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-			    { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,0, 28, D3D11_INPUT_PER_VERTEX_DATA, 0 }
-			};
-
-			ID3D11InputLayout* vertexLayout;
-			if ( FAILED( d3dDevice->CreateInputLayout( layout,
-			                                            arrayCount(layout),
-			                                            vertexShaderBlob->GetBufferPointer(),
-			                                            vertexShaderBlob->GetBufferSize(),
-			                                            &vertexLayout ) ) ) 
-				printf("Could not create Input Layout!");
-			 
-			// Set the input layout
-			d3dDeviceContext->IASetInputLayout( vertexLayout );
-
-			//
-
-			//create vertex buffer (space for 100 vertices)
-			//---------------------------------------------
-			 
-			UINT numVertices = 100;
-			 
-			D3D11_BUFFER_DESC bd;
-			bd.Usage = D3D11_USAGE_DYNAMIC;
-			bd.ByteWidth = sizeof( DVertex ) * numVertices; //total size of buffer in bytes
-			bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-			bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-			bd.MiscFlags = 0;
-
-			ID3D11Buffer* vertexBuffer;
-			if ( FAILED( d3dDevice->CreateBuffer( &bd, NULL, &vertexBuffer ) ) ) 
-				printf("Could not create vertex buffer!");
-			 
-			// Set vertex buffer
-			UINT stride = sizeof( DVertex );
-			UINT offset = 0;
-			d3dDeviceContext->IASetVertexBuffers( 0, 1, &vertexBuffer, &stride, &offset );
-
-			//
-
-			D3D11_RASTERIZER_DESC rasterizerState;
-			rasterizerState.CullMode = D3D11_CULL_NONE;
-			rasterizerState.FillMode = D3D11_FILL_SOLID;
-			rasterizerState.FrontCounterClockwise = true;
-			rasterizerState.DepthBias = false;
-			rasterizerState.DepthBiasClamp = 0;
-			rasterizerState.SlopeScaledDepthBias = 0;
-			rasterizerState.DepthClipEnable = true;
-			rasterizerState.ScissorEnable = false;
-			rasterizerState.MultisampleEnable = false;
-			rasterizerState.AntialiasedLineEnable = true;
-			 
-			ID3D11RasterizerState* pRS;
-			d3dDevice->CreateRasterizerState( &rasterizerState, &pRS);
-			d3dDeviceContext->RSSetState(pRS);
-
-			//
-
-			//fill vertex buffer with vertices
-			numVertices = 3;
-			DVertex* v = NULL;
-			 
-			//lock vertex buffer for CPU use
-			d3dDeviceContext->Map(vertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, (D3D11_MAPPED_SUBRESOURCE*) &v);
-
-			v[0] = { vec3(-0.5f,-0.5f,0), vec4(1,0,0,1), vec2(0,0)};
-			v[1] = { vec3(-0.5f, 0.5f,0), vec4(0,1,0,1), vec2(1,0)};
-			v[2] = { vec3( 0.5f,-0.5f,0), vec4(1,1,1,1), vec2(0,1)};
-			v[3] = { vec3( 0.5f, 0.5f,0), vec4(0,0,1,1), vec2(1,1)};
-
-			d3dDeviceContext->Unmap(vertexBuffer, 0);
-
-			//
-
-			// Set primitive topology
-			d3dDeviceContext->IASetPrimitiveTopology( D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP );
-
-			//
-
-			ID3D11Texture2D* texture;
-			ID3D11ShaderResourceView* textureView;
-			// if(false)
-			{
-				DXGI_SAMPLE_DESC sampleDesc;
-				sampleDesc.Count = 1;
-				sampleDesc.Quality = 0;
-
-				Vec2i texDim = vec2i(2,2);
-
-				D3D11_TEXTURE2D_DESC texDesc;
-				texDesc.Width = texDim.w;
-				texDesc.Height = texDim.h;
-				texDesc.MipLevels = 1;
-				texDesc.ArraySize = 1;
-				// texDesc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
-				texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-				// texDesc.Format = DXGI_FORMAT_R8G8B8A8_UINT;
-				// texDesc.Format = DXGI_FORMAT_R8G8B8A8_TYPELESS;
-				texDesc.SampleDesc = sampleDesc;
-				texDesc.Usage = D3D11_USAGE_DEFAULT;
-				texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-				texDesc.CPUAccessFlags = 0;
-				texDesc.MiscFlags = 0;
-
-				// uint texData[] = {255,0,0,255, 0,255,0,255, 
-				//                   0,0,255,255, 0,0,255,255,};
-
-				uchar texData[] = {255,0,0,255, 0,255,0,255, 
-				                  0,0,255,255, 255,255,255,255,};
-
-				// uchar texData[] = {255,255,255,255, 255,255,255,255, 
-				//                    255,255,255,255, 255,255,255,255,};
-
-				// Vec4 texData[] = {vec4(1,0,0,1),vec4(0,1,0,1),
-				// 				  vec4(0,0,1,1),vec4(1,1,1,1)};
-
-                int typeSize = sizeof(uint);
-
-				D3D11_SUBRESOURCE_DATA texResourceData;
-				texResourceData.pSysMem = texData;
-				texResourceData.SysMemPitch = texDim.w*typeSize;
-				texResourceData.SysMemSlicePitch = texDim.w*texDim.h*typeSize;
-
-				uint result = d3dDevice->CreateTexture2D(&texDesc, &texResourceData, &texture);
-
-				D3D11_TEX2D_SRV srv;
-				srv.MostDetailedMip = 0;
-				srv.MipLevels = -1;
-				D3D11_SHADER_RESOURCE_VIEW_DESC viewDesc;
-				// viewDesc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
-				// viewDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-				// viewDesc.Format = DXGI_FORMAT_R8G8B8A8_UINT;
-				viewDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-				viewDesc.Texture2D = srv;
-
-				d3dDevice->CreateShaderResourceView(texture, &viewDesc, &textureView);
-			}
-
-			ID3D11SamplerState* sampler;
-			{
-				D3D11_SAMPLER_DESC samplerDesc;
-				samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
-				// samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-				samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
-				samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
-				samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-				samplerDesc.MipLODBias = 0;
-				samplerDesc.MaxAnisotropy = 1;
-				samplerDesc.ComparisonFunc = D3D11_COMPARISON_LESS_EQUAL;
-				samplerDesc.BorderColor[0] = 0;
-				samplerDesc.BorderColor[1] = 0;
-				samplerDesc.BorderColor[2] = 0;
-				samplerDesc.BorderColor[3] = 0;
-				samplerDesc.MinLOD = 0;
-				samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
-
-				d3dDevice->CreateSamplerState(&samplerDesc, &sampler);
-			}
-
-			d3dDeviceContext->PSSetShaderResources(0, 1, &textureView);
-			d3dDeviceContext->PSSetSamplers(0, 1, &sampler);
-
-			// //create world matrix
-			// static float r;
-			// D3DXMATRIX w;
-			// D3DXMatrixIdentity(&w);
-			// D3DXMatrixRotationY(&w, r);
-			// r += 0.001f;
-
-			// //set effect matrices
-			// pWorldMatrixEffectVariable->SetMatrix(w);
-			// pViewMatrixEffectVariable->SetMatrix(viewMatrix);
-			// pProjectionMatrixEffectVariable->SetMatrix(projectionMatrix);
-
-			//
-
-				//get technique desc
-				// D3D11_TECHNIQUE_DESC techDesc;
-				// pBasicTechnique->GetDesc( &techDesc );
-				 
-				// pWorldMatrixEffectVariable->SetMatrix(w);
-				// pViewMatrixEffectVariable->SetMatrix(viewMatrix);
-				// pProjectionMatrixEffectVariable->SetMatrix(projectionMatrix);
-				 
-				// for( UINT p = 0; p < techDesc.Passes; ++p ) {
-				//       //apply technique
-				//       pBasicTechnique->GetPassByIndex( p )->Apply( 0 );
-				 
-				//       //draw
-				//       d3dDevice->Draw( numVertices, 0 );
-				// }
-		}
-		#endif
 	}
 
 	// @AppStart.
@@ -1099,10 +765,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 	// Update timer.
 	{
 		if(init) {
-			timerStart(&ds->frameTimer);
-			ds->dt = 1/(float)60;
+			ds->frameTimer.start();
+			ds->dt = 1/(float)ws->refreshRate;
 		} else {
-			ds->dt = timerUpdate(&ds->frameTimer);
+			ds->dt = ds->frameTimer.update();
 			ds->time += ds->dt;
 
 			ds->fpsTime += ds->dt;
@@ -1124,9 +790,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 	drawCommandListInit(&ad->commandList2d, (char*)getTMemory(clSize), clSize);
 	theCommandList = &ad->commandList3d;
 
-	// Hotload changed files.
+	//
 
-	reloadChangedFiles(sd->folderHandles, ds->assets, ds->assetCount);
+	reloadChangedFiles(sd->textureFolderHandle);
 
 	// Update input.
 	{
@@ -1135,17 +801,40 @@ extern "C" APPMAINFUNCTION(appMain) {
 		if(ws->vsync) wglSwapIntervalEXT(1);
 		else wglSwapIntervalEXT(0);
 
-		inputPrepare(input);
+		inputPrepare(ds->input);
 		SwitchToFiber(sd->messageFiber);
 
+		// Beware, changes to ad->input have no effect on the next frame, 
+		// because we override it every time.
+		ad->input = *ds->input;
 		if(ad->input.closeWindow) *isRunning = false;
 
-		// ad->input = *ds->input;
-		*ds->input = ad->input;
+		// Stop debug gui game interaction.
+		{
+			bool blockInput = false;
+			bool blockMouse = false;
 
-		if(ds->console.isActive) {
-			memSet(ad->input.keysPressed, 0, sizeof(ad->input.keysPressed));
-			memSet(ad->input.keysDown, 0, sizeof(ad->input.keysDown));
+			if(newGuiSomeoneActive(&ds->gui) || newGuiSomeoneHot(&ds->gui)) {
+				blockInput = true;
+				blockMouse = true;
+			}
+
+			Console* con = &ds->console;
+			if(pointInRect(ds->input->mousePosNegative, con->consoleRect)) blockMouse = true;
+			if(con->isActive) blockInput = true;
+
+
+			if(blockMouse) {
+				input->mousePos = vec2(-1,-1);
+				input->mousePosNegative = vec2(-1,-1);
+				input->mousePosScreen = vec2(-1,-1);
+				input->mousePosNegativeScreen = vec2(-1,-1);
+			}
+
+			if(blockInput) {
+				memset(ad->input.keysPressed, 0, sizeof(ad->input.keysPressed));
+				memset(ad->input.keysDown, 0, sizeof(ad->input.keysDown));
+			}
 		}
 
 		ad->dt = ds->dt;
@@ -1156,31 +845,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		sd->fontHeight = getSystemFontHeight(sd->windowHandle);
 		ds->fontHeight = roundInt(ds->fontScale*sd->fontHeight);
 		ds->fontHeightScaled = roundInt(ds->fontHeight * ws->windowScale);
-	}
 
-	// Handle recording.
-	{
-		if(ds->recordingInput) {
-			memCpy(ds->recordedInput + ds->inputIndex, &ad->input, sizeof(Input));
-			ds->inputIndex++;
-			if(ds->inputIndex >= ds->inputCapacity) {
-				ds->recordingInput = false;
-			}
-		}
-
-		if(ds->playbackInput && !ds->playbackPause) {
-			ad->input = ds->recordedInput[ds->playbackIndex];
-			ds->playbackIndex = (ds->playbackIndex+1)%ds->inputIndex;
-			if(ds->playbackIndex == 0) ds->playbackSwapMemory = true;
-		}
-	} 
-
-	if(ds->playbackPause) goto endOfMainLabel;
-
-	if(ds->playbackBreak) {
-		if(ds->playbackBreakIndex == ds->playbackIndex) {
-			ds->playbackPause = true;
-		}
+		if(mouseInClientArea(windowHandle)) updateCursorIcon(ws);
 	}
 
     if((input->keysPressed[KEYCODE_F11] || input->altEnter) && !sd->maximized) {
@@ -1189,12 +855,12 @@ extern "C" APPMAINFUNCTION(appMain) {
     }
 
 
-	if(input->resize || init) {
+	if(ds->input->resize || init) {
 		if(!windowIsMinimized(windowHandle)) {
 			updateResolution(windowHandle, ws);
 			ad->updateFrameBuffers = true;
 		}
-		input->resize = false;
+		ds->input->resize = false;
 	}
 
 	if(ad->updateFrameBuffers) {
@@ -1203,6 +869,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		ad->updateFrameBuffers = false;
 		ad->aspectRatio = ws->aspectRatio;
 		
+		gs->screenRes = ws->currentRes;
 		ad->cur3dBufferRes = ws->currentRes;
 		if(ad->resolutionScale < 1.0f) {
 			ad->cur3dBufferRes = ad->cur3dBufferRes * ad->resolutionScale;
@@ -1214,7 +881,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 		setDimForFrameBufferAttachmentsAndUpdate("3dMsaa", s.w, s.h);
 		setDimForFrameBufferAttachmentsAndUpdate("3dNoMsaa", s.w, s.h);
 		setDimForFrameBufferAttachmentsAndUpdate("Reflection", reflectionRes.w, reflectionRes.h);
-		setDimForFrameBufferAttachmentsAndUpdate("2d", ws->currentRes.w, ws->currentRes.h);
+		setDimForFrameBufferAttachmentsAndUpdate("2dMsaa", ws->currentRes.w, ws->currentRes.h);
+		setDimForFrameBufferAttachmentsAndUpdate("2dNoMsaa", ws->currentRes.w, ws->currentRes.h);
+		setDimForFrameBufferAttachmentsAndUpdate("2dTemp", ws->currentRes.w, ws->currentRes.h);
 		setDimForFrameBufferAttachmentsAndUpdate("DebugMsaa", ws->currentRes.w, ws->currentRes.h);
 		setDimForFrameBufferAttachmentsAndUpdate("DebugNoMsaa", ws->currentRes.w, ws->currentRes.h);
 	}
@@ -1236,7 +905,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		int bufSize = 1000;
 		char* messageLog = getTString(bufSize);
 
-		memSet(messageLog, 0, bufSize);
+		memset(messageLog, 0, bufSize);
 
 		uint fetchedLogs = 1;
 		while(fetchedLogs = glGetDebugMessageLog(count, bufSize, &sources, &types, &ids, &severities, &lengths, messageLog)) {
@@ -1262,14 +931,18 @@ extern "C" APPMAINFUNCTION(appMain) {
 		clearFrameBuffer("3dMsaa",      vec4(1), bits);
 		clearFrameBuffer("3dNoMsaa",    vec4(1), bits);
 		clearFrameBuffer("Reflection",  vec4(1), bits);
-		clearFrameBuffer("2d",          vec4(0), bits);
+		clearFrameBuffer("2dMsaa",      vec4(0), bits);
+		clearFrameBuffer("2dNoMsaa",    vec4(0), bits);
 		clearFrameBuffer("DebugMsaa",   vec4(0), bits);
 		clearFrameBuffer("DebugNoMsaa", vec4(0), bits);
 	}
 
 	// Setup opengl.
 	{
-		// glDepthRange(-1.0,1.0);
+		glDisableVertexAttribArray(0);
+		glDisableVertexAttribArray(1);
+		glDisableVertexAttribArray(2);
+
 		glFrontFace(GL_CW);
 		glEnable(GL_DEPTH_TEST);
 		glEnable(GL_CULL_FACE);
@@ -1287,6 +960,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 
 	TIMER_BLOCK_END(openglInit);
+
+	// Handle recording.
+	{
+		ds->recState.update(&ad->input);
+
+		if(ds->recState.playbackPaused) {
+			if(!ds->recState.justPaused) goto endOfMainLabel;
+		}
+	} 
 
 	// Mouse capture.
 	if(!init)
@@ -1358,9 +1040,9 @@ extern "C" APPMAINFUNCTION(appMain) {
 		theCommandList = &ad->commandList2d;
 
 		Rect sr = getScreenRect(ws);
-		Vec2 top = rectT(sr);
-		float rHeight = rectH(sr);
-		float rWidth = rectW(sr);
+		Vec2 top = sr.t();
+		float rHeight = sr.h();
+		float rWidth = sr.w();
 
 		int titleFontHeight = ds->fontHeightScaled * 6.0f;
 		int optionFontHeight = titleFontHeight * 0.45f;
@@ -1435,7 +1117,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			bool gameRunning = menu->gameRunning;
 
 			int optionCount = gameRunning ? 4 : 3;
-			p.y = rectCen(sr).y + ((optionCount-1)*optionOffset)/2;
+			p.y = sr.c().y + ((optionCount-1)*optionOffset)/2;
 
 			if(gameRunning) {
 				if(menuOption(menu, "Resume", p, vec2i(0,0)) || 
@@ -1476,7 +1158,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			dcText("Settings", titleFont, p, cTitle, vec2i(0,0), 0, titleShadowSize, cTitleShadow);
 
 			int optionCount = 7;
-			p.y = rectCen(sr).y + ((optionCount-1)*optionOffset)/2;
+			p.y = sr.c().y + ((optionCount-1)*optionOffset)/2;
 
 
 			// List settings.
@@ -1571,7 +1253,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		Rect sr = getScreenRect(ws);
 
 		dcRect(sr, vec4(0,1));
-		dcText("Loading", titleFont, rectCen(sr), vec4(1,1), vec2i(0,-1));
+		dcText("Loading", titleFont, sr.c(), vec4(1,1), vec2i(0,-1));
 
 		// @InitNewGame.
 
@@ -1579,7 +1261,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			ad->loading = true;
 
 			bool hasSaveState;
-			char* saveFile = fillString("%s%s", SAVES_FOLDER, SAVE_STATE1);
+			char* saveFile = fillString("%s%s", Saves_Folder, Save_State1);
 			if(fileExists(saveFile)) hasSaveState = true;
 
 			// Pre work.
@@ -1657,6 +1339,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 				if(ad->playerMode) ad->chunkOffset = player->chunk;
 				else ad->chunkOffset = camera->chunk;
+
+				ad->inventory.show = false;
 
 			} else {
 
@@ -1887,14 +1571,25 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 				bool onGroundStart = player->onGround;
 
+				bool inWater = false;
+				collisionVoxelBox(&ad->voxelData, player->pos, player->dim, player->chunk, 0, 0, &inWater);
+
+				if(inWater) e->acc *= 0.5f;
+
 				if(input->keysDown[KEYCODE_SPACE]) {
-					if(player->onGround) {
-						player->vel += up*7.0f;
-						player->onGround = false;
-					}
+						if(player->onGround) {
+							float jumpSpeed = 7.0f;
+							if(inWater) jumpSpeed = jumpSpeed*0.25f;
+							player->vel += up * jumpSpeed;
+							player->onGround = false;
+						}
+
+						if(inWater) e->acc.z = 15;
 				}
 
 				float gravity = 20.0f;
+				if(inWater) gravity *= 0.5f;
+
 				if(!e->onGround) e->acc += -up*gravity;
 				e->vel = e->vel + e->acc*dt;
 				float friction = 0.01f;
@@ -1980,15 +1675,28 @@ extern "C" APPMAINFUNCTION(appMain) {
 						int footstepType = blockTypeFootsteps[groundCollisionBlockType];
 						FootstepArray fa = footstepFiles[footstepType];
 						char** files = fa.files;
-						int filesCount = fa.count;
+						int fileCount = fa.count;
 
-						int soundId = randomInt(0,filesCount-1);
+						int soundId = randomInt(0,fileCount-1);
 						if(soundId == ad->lastFootstepSoundId) 
-							soundId = (soundId+1)%(filesCount-1);
+							soundId = (soundId+1)%(fileCount-1);
 
-						addTrack(files[soundId], ad->volumeFootsteps, true, 2.0f);
+						bool inWater = false;
+						collisionVoxelBox(&ad->voxelData, player->pos, player->dim, player->chunk, 0, 0, &inWater);
+
+						if(!inWater) {
+							addTrack(files[soundId], ad->volumeFootsteps, true, 2.0f);
+
+						} else {
+							// Mix in "water footstep" with normal footstep.
+							FootstepArray faw = footstepFiles[blockTypeFootsteps[BT_Water]];
+
+							float volume = ad->volumeFootsteps;
+							addTrack(files[soundId], volume*0.75f, true, 2.0f);
+							addTrack(faw.files[randomInt(0, faw.count-1)], volume*0.75f, true, 2.0f);
+						}
+
 						ad->footstepSoundValue = 0;
-						
 						ad->lastFootstepSoundId = soundId;
 					}
 				}
@@ -2176,7 +1884,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 								Vec3i coord = vec3i(x,y,z);
 								uchar* block = getBlockFromVoxel(&ad->voxelData, coord);
 
-								if(*block > 0) {
+								if(*block > 1) {
 									collisionBox = voxelToVoxelCoord(coord);
 									collision = true;
 									goto forGoto;
@@ -2340,7 +2048,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 					Vec3i voxel = coordToVoxel(block);
 					uchar* blockType = getBlockFromVoxel(&ad->voxelData, voxel + ad->voxelOffset);
 
-					if(blockType && *blockType > 0) {
+					if(blockType && *blockType > 1) {
 						Vec3 iBox = voxelToVoxelCoord(voxel);
 						int face;
 						Vec3 intersectionPoint;
@@ -2470,7 +2178,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 						}
 					}
 				} else if(breakedBlock) {
-					if(*block > 0) {
+					if(*block > 1) {
 
 						uchar blockType = *block;
 
@@ -2546,11 +2254,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		bindFrameBuffer("3dMsaa");
 
-		// pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_VIEW, view);
-		// pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_PROJ, proj);
+		// pushUniform(SHADER_Cube, 0, CUBE_UNIFORM_VIEW, view);
+		// pushUniform(SHADER_Cube, 0, CUBE_UNIFORM_PROJ, proj);
 
-		pushUniform(SHADER_CUBE, 0, "view", &view);
-		pushUniform(SHADER_CUBE, 0, "proj", &proj);
+		pushUniform(SHADER_Cube, 0, "view", &view);
+		pushUniform(SHADER_Cube, 0, "proj", &proj);
 	}	
 
 	// Draw cubemap.
@@ -2564,14 +2272,14 @@ extern "C" APPMAINFUNCTION(appMain) {
 		threadQueueComplete(threadQueue);
 
 		resetVoxelHashAndMeshes(&ad->voxelData);
-
-		for(int i = 0; i < ad->entityList.size; i++) ad->entityList.e[i].init = false;
 	}
 
 	TIMER_BLOCK_BEGIN_NAMED(world, "Upd World");
 
-	Vec2i* coordList = (Vec2i*)getTMemory(sizeof(Vec2i)*2000);
-	int coordListSize = 0;
+	int maxCoords = pow(ad->voxelSettings.viewDistance+1, 2);
+	ad->coordList = getTArray(Vec2i, maxCoords);
+	ad->coordListSize = 0;
+	Vec2i* coordList = ad->coordList;
 
 	VoxelWorldSettings* vs = &ad->voxelSettings;
 
@@ -2710,7 +2418,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 				}
 
 				if(isIntersecting) {
-					coordList[coordListSize++] = m->coord;
+					coordList[ad->coordListSize++] = m->coord;
 
 					ad->voxelTriangleCount += m->quadCount/(float)2;
 					ad->voxelDrawCount++;
@@ -2719,21 +2427,25 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 	}
 
-	SortPair* sortList = (SortPair*)getTMemory(sizeof(SortPair)*coordListSize);
-	int sortListSize = 0;
-
 	// Sort voxel meshes.
 	{
-		for(int i = 0; i < coordListSize; i++) {
+		int size = ad->coordListSize;
+		Pair<Vec2i,float>* list = (Pair<Vec2i,float>*)malloc(sizeof(Pair<Vec2i,float>)*size);
+
+		for(int i = 0; i < size; i++) {
 			Vec2 c = meshToMeshCoord(coordList[i]).xy;
+
 			float distanceToCamera = len(ad->activeCam.pos.xy - c);
-			sortList[sortListSize++] = {distanceToCamera, i};
+			list[i] = {coordList[i], distanceToCamera};
 		}
 
-		radixSortPair(sortList, sortListSize);
+		auto getKey = [](void* a) { return (int*)(&((Pair<Vec2i,float>*)a)->b); };
+		radixSort(list, size, getKey);
 
-		// for(int i = 0; i < sortListSize-1; i++) {
-		// 	assert(sortList[i].key <= sortList[i+1].key);
+		for(int i = 0; i < size; i++) coordList[i] = list[i].a;
+
+		// for(int i = 0; i < size-1; i++) {
+		// 	assert(list[i].b <= list[i+1].b);
 		// }
 	}
 
@@ -2792,8 +2504,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// TIMER_BLOCK_NAMED("D World");
 		// draw world without water
 		{
-			for(int i = 0; i < sortListSize; i++) {
-				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coordList[sortList[i].index]);
+			for(int i = 0; i < ad->coordListSize; i++) {
+				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coordList[i]);
 				drawVoxelMesh(m, ad->chunkOffset, 2);
 			}
 		}
@@ -2811,13 +2523,13 @@ extern "C" APPMAINFUNCTION(appMain) {
 			glEnable(GL_CLIP_DISTANCE0);
 			glEnable(GL_CLIP_DISTANCE1);
 
-			pushUniform(SHADER_VOXEL, 0, "clipPlane", true);
-			pushUniform(SHADER_VOXEL, 0, "cPlane", 0,0,1,-waterLevelHeight);
-			pushUniform(SHADER_VOXEL, 0, "cPlane2", 0,0,-1,waterLevelHeight);
-			pushUniform(SHADER_VOXEL, 1, "alphaTest", 0.5f);
+			pushUniform(SHADER_Voxel, 0, "clipPlane", true);
+			pushUniform(SHADER_Voxel, 0, "cPlane", 0,0,1,-waterLevelHeight);
+			pushUniform(SHADER_Voxel, 0, "cPlane2", 0,0,-1,waterLevelHeight);
+			pushUniform(SHADER_Voxel, 1, "alphaTest", 0.5f);
 
-			for(int i = 0; i < sortListSize; i++) {
-				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coordList[sortList[i].index]);
+			for(int i = 0; i < ad->coordListSize; i++) {
+				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coordList[i]);
 				drawVoxelMesh(m, ad->chunkOffset, 1);
 			}
 
@@ -2848,15 +2560,15 @@ extern "C" APPMAINFUNCTION(appMain) {
 			glFrontFace(GL_CCW);
 
 			setupVoxelUniforms(ad->activeCam.pos, view, proj, vs->fogColor.rgb, vs->viewDistance, vec3(0,0,waterLevelHeight*2 + 0.01f), vec3(1,1,-1));
-			pushUniform(SHADER_VOXEL, 0, "clipPlane", true);
-			pushUniform(SHADER_VOXEL, 0, "cPlane", 0,0,-1,waterLevelHeight);
+			pushUniform(SHADER_Voxel, 0, "clipPlane", true);
+			pushUniform(SHADER_Voxel, 0, "cPlane", 0,0,-1,waterLevelHeight);
 
-			for(int i = 0; i < sortListSize; i++) {
-				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coordList[sortList[i].index]);
+			for(int i = 0; i < ad->coordListSize; i++) {
+				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coordList[i]);
 				drawVoxelMesh(m, ad->chunkOffset, 2);
 			}
-			for(int i = sortListSize-1; i >= 0; i--) {
-				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coordList[sortList[i].index]);
+			for(int i = ad->coordListSize-1; i >= 0; i--) {
+				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coordList[i]);
 				drawVoxelMesh(m, ad->chunkOffset, 1);
 			}
 
@@ -2871,22 +2583,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 			bindFrameBuffer("3dMsaa");
 			glDisable(GL_DEPTH_TEST);
 
-			bindShader(SHADER_QUAD);
-			drawRect(rect(0, -ws->currentRes.h, ws->currentRes.w, 0), vec4(1,1,1,ad->voxelSettings.reflectionAlpha), rect(0,1,1,0), 
-			         getFrameBuffer("Reflection")->colorSlot[0]->id);
+			bindShader(SHADER_Quad);
+			drawRect(rect(0, -ws->currentRes.h, ws->currentRes.w, 0), vec4(1,1,1,ad->voxelSettings.reflectionAlpha), rect(0,1,1,0), getFrameBuffer("Reflection")->colorSlot[0]->id);
 
 			glEnable(GL_DEPTH_TEST);
-		}
-
-		// draw water
-		{
-			setupVoxelUniforms(ad->activeCam.pos, view, proj, vs->fogColor.rgb, vs->viewDistance);
-			pushUniform(SHADER_VOXEL, 1, "alphaTest", 0.5f);
-
-			for(int i = sortListSize-1; i >= 0; i--) {
-				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coordList[sortList[i].index]);
-				drawVoxelMesh(m, ad->chunkOffset, 1);
-			}
 		}
 	}
 
@@ -2894,6 +2594,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 	// Draw player and selected block.
 	{
+		glBindSamplers(0,3,theGraphicsState->samplers + SAMPLER_VOXEL_1);
+
 		if(!ad->playerMode) {
 			Vec3i voxelOffset = chunkOffsetToVoxelOffset(player->chunk) - ad->voxelOffset;
 			Vec3 pos = player->pos + vec3(voxelOffset);
@@ -2913,11 +2615,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 			dcState(STATE_POLYGONMODE, POLYGON_MODE_LINE);
 			dcCube(pos, player->dim, vec4(1,1,1,1), 0, vec3(0,0,0));
 			dcState(STATE_POLYGONMODE, POLYGON_MODE_FILL);
+
 		} else {
 
 			// @DrawBreakingBlock.
 			if(ad->breakingBlockTime > 0)
-			{
+			{				
 				float breakingOverlayAlpha = 0.5f;
 				uchar* blockType = getBlockFromVoxel(&ad->voxelData, ad->breakingBlock);
 				float blockTime = blockTypeHardness[*blockType]*ad->hardnessModifier;
@@ -2952,7 +2655,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 			// @SelectedBlock.
 			if(ad->blockSelected) 
 			{
-
 				dcBlend(GL_DST_COLOR, GL_ONE, GL_ZERO, GL_ONE, GL_FUNC_ADD, GL_FUNC_ADD);
 				dcEnable(STATE_POLYGON_OFFSET);
 
@@ -2976,6 +2678,30 @@ extern "C" APPMAINFUNCTION(appMain) {
 				dcDisable(STATE_POLYGON_OFFSET);
 				dcBlend(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_FUNC_ADD);
 			}
+		}
+	}
+
+	// Underwater cam "effect".
+	{
+		ad->cameraInWater = false;
+		{
+			Vec2i chunk = ad->playerMode ? ad->player->chunk : ad->cameraEntity->chunk;
+			Vec3i voxel = coordToVoxel(ad->activeCam.pos) + getVoxelOffsetFromChunk(chunk);
+			uchar* block = getBlockFromVoxel(&ad->voxelData, voxel);
+
+			if(block && *block == BT_Water) ad->cameraInWater = true;
+		}
+
+		if(ad->cameraInWater) {
+			int texId = getTexture("minecraft\\water inverted.png")->id;
+			Vec4 c = vec4(0,1,1, 0.3f);
+
+			Rect r = getScreenRect(ws);
+			Vec2 d = r.dim()/2;
+			dcRect(rectTLDim(r.tl(), d), rect(0,0,1,1), c, texId, -1, &ad->commandList2d);
+			dcRect(rectTLDim(r.t(),  d), rect(0,0,1,1), c, texId, -1, &ad->commandList2d);
+			dcRect(rectTLDim(r.l(),  d), rect(0,0,1,1), c, texId, -1, &ad->commandList2d);
+			dcRect(rectTLDim(r.c(),  d), rect(0,0,1,1), c, texId, -1, &ad->commandList2d);
 		}
 	}
 
@@ -3022,10 +2748,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 				rowCount = slotCount / rowWidth;
 				if(slotCount % rowWidth != 0) rowCount++;
 
-				r = rectCenDim(rectCen(sr), vec2(cellSize * rowWidth, cellSize * rowCount));
+				r = rectCenDim(sr.c(), vec2(cellSize * rowWidth, cellSize * rowCount));
 
-				topLeft = rectTL(r);
-				rectExpand(&r, vec2(cellMargin));
+				topLeft = r.tl();
+				r = r.expand(vec2(cellMargin));
 				r = round(r);
 
 				// 
@@ -3037,7 +2763,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 					char* text = "Inventory";
 					Vec2 td = getTextDim(text, fTitle) + vec2(fTitle->height*0.5f,fTitle->height*0.05f);
 
-					Vec2 p = rectT(r) - vec2(0,td.h*0.1f);
+					Vec2 p = r.t() - vec2(0,td.h*0.1f);
 					dcRect(round(rectBDim(p, td * vec2(1,0.5f))), cBackground);
 					dcRoundedRect(round(rectBDim(p, td)), cBackground, rounding);
 					dcText(text, fTitle, p, cFont, vec2i(0,-1), 0, 1, cFontShadow);
@@ -3051,10 +2777,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 				rowWidth = slotCount;
 				rowCount = 1;
 
-				r = rectBDim(rectB(sr) + vec2(0,quickBarOffset), vec2(cellSize * rowWidth, cellSize * rowCount));
+				r = rectBDim(sr.b() + vec2(0,quickBarOffset), vec2(cellSize * rowWidth, cellSize * rowCount));
 
-				topLeft = rectTL(r);
-				rectExpand(&r, vec2(cellMargin));
+				topLeft = r.tl();
+				r = r.expand(vec2(cellMargin));
 
 				// 
 					
@@ -3067,7 +2793,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 				Vec2 off = vec2(x*cellSize, -y*cellSize);
 				Rect cellRect = rectTLDim(topLeft + off, vec2(cellSize));
-				Rect cellRectSmall = rectExpand(cellRect, -vec2(cellMargin));
+				Rect cellRectSmall = cellRect.expand(-vec2(cellMargin));
 
 				bool mouseOver = false;
 				if(!ad->fpsMode) {
@@ -3119,7 +2845,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 									inv->slots[slotIndex].count = 0;
 								}
 
-								inv->dragMouseOffset = rectCen(cellRect) - input->mousePosNegative;
+								inv->dragMouseOffset = cellRect.c() - input->mousePosNegative;
 							}
 						}
 
@@ -3167,7 +2893,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 				if(slotIndex >= inv->slotCount) {
 
-					Vec2 p = rectT(cellRectSmall) + vec2(0,cellMargin * 0.5f);
+					Vec2 p = cellRectSmall.t() + vec2(0,cellMargin * 0.5f);
 					char* t = fillString("%i", slotIndex - inv->slotCount);
 
 					dcRect(rectCenDim(p+vec2(0,fQuick->height*0.05f),vec2(fQuick->height*1.2f)), rect(0,0,1,1), cBackground, "misc\\circle.png");
@@ -3197,8 +2923,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		theCommandList = &ad->commandList3d;
 	}
 
-	// Start fading.
-
+	// @FadingIntro.
 	if(ad->startFade < 1.0f) {
 		float v = ad->startFade;
 
@@ -3221,363 +2946,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 		dcRect(getScreenRect(ws), c, &ad->commandList2d);
 	}
 
-
-	#if 0
-	// Particle test.
-
-	{
-		bindShader(SHADER_CUBE);
-
-		Vec3 ep = vec3(0,0,80);
-
-		static ParticleEmitter emitter;
-		static bool emitterInit = true; 
-		if(emitterInit) {
-			emitter = {};
-			// emitter.particleListSize = 1024;
-			// emitter.particleListSize = 100000;
-			emitter.particleListSize = 100000;
-			emitter.particleList = getPArray(Particle, emitter.particleListSize);
-			// emitter.spawnRate = 0.0001f;
-			// emitter.spawnRate = 0.001f;
-			emitter.spawnRate = 0.005f;
-			// emitter.spawnRate = 0.0001f;
-
-			emitter.pos = vec3(0,0,70);
-			emitter.friction = 0.5f;
-
-			emitterInit = false;
-		}
-
-		static float dt = 0;
-		// dt += ad->dt;
-		emitter.pos = ep + vec3(sin(dt),0,0);
-		// drawCube(emitter.pos, vec3(0.5f), vec4(0,0,0,0.2f), 0, vec3(0,0,0));
-
-		if(0)
-		{
-			ParticleEmitter* e = &emitter;
-			float dt = ad->dt;
-
-			e->dt += dt;
-			while(e->dt >= 0.1f) {
-				e->dt -= e->spawnRate;
-
-				if(e->particleListCount < e->particleListSize) {
-					Particle p = {};
-
-					p.pos = e->pos;
-					Vec3 dir = norm(vec3(randomFloat(-1,1,0.01f), randomFloat(-1,1,0.01f), randomFloat(-1,1,0.01f)));
-					// p.vel = dir * 1.0f;
-					p.vel = dir * 5.0f;
-					// p.acc = dir*0.2f;
-					// p.acc = -dir*0.2f;
-					p.acc = -dir*1.0f;
-
-					// p.color = vec4(0.8f, 0.1f, 0.6f, 1.0f);
-					// p.accColor = vec4(-0.15f,0,0.15f,-0.05f);
-					p.color = vec4(0.8f, 0.8f, 0.1f, 1.0f);
-					p.accColor = vec4(+0.10f,-0.15f,0,-0.05f);
-
-
-					// p.size = vec3(0.1f);
-					p.size = vec3(0.1f, 0.1f, 0.005f);
-
-					p.rot = 0;
-					p.rot2 = degreeToRadian(randomInt(0,360));
-					p.velRot = 20.0f;
-					p.accRot = -4.0f;
-
-					p.timeToLive = 5;
-					// p.timeToLive = randomFloat(2.0f,6.0f, 0.01f);
-
-					e->particleList[e->particleListCount++] = p;
-				}
-			}
-		}
-
-			// particleEmitterUpdate(&emitter, ad->dt);
-
-		// glDisable(GL_CULL_FACE);
-
-		// Vec2 quadUVs[] = {{0,0}, {0,1}, {1,1}, {1,0}};
-		// pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_UV, quadUVs, 4);
-		// pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODE, true);
-
-		// uint tex[2] = {getTexture(TEXTURE_CIRCLE)->id, 0};
-		// glBindTextures(0,2,tex);
-
-		// for(int i = 0; i < emitter.particleListCount; i++) {
-		// 	Particle* p = emitter.particleList + i;
-
-		// 	Vec3 normal = norm(p->vel);
-
-		// 	float size = 0.1f;
-		// 	Vec4 color = p->color;
-		// 	Vec3 base = p->pos;
-
-		// 	Vec3 dir1 = norm(cross(normal, vec3(1,0,0)));
-		// 	rotateVec3(&dir1, p->rot2, normal);
-		// 	rotateVec3(&normal, p->rot, dir1);
-		// 	Vec3 dir2 = norm(cross(normal, dir1));
-
-		// 	dir1 *= size*0.5f;
-		// 	dir2 *= size*0.5f;
-
-		// 	Vec3 verts[4] = {base + dir1+dir2, base + dir1+(-dir2), base + (-dir1)+(-dir2), base + (-dir1)+dir2};
-
-		// 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_VERTICES, verts[0].e, arrayCount(verts));
-		// 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, &color);
-
-		// 	glDrawArrays(GL_QUADS, 0, arrayCount(verts));
-		// }
-		// glEnable(GL_CULL_FACE);
-
-
-
-		// glDisable(GL_CULL_FACE);
-
-		// // Vec2 quadUVs[] = {{0,0}, {0,1}, {1,1}, {1,0}};
-		// // pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_UV, quadUVs, 4);
-		// // pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODE, true);
-
-		// uint tex[2] = {getTexture(TEXTURE_CIRCLE)->id, 0};
-		// glBindTextures(0,2,tex);
-
-		// Mesh* mesh = getMesh(MESH_QUAD);
-		// glBindBuffer(GL_ARRAY_BUFFER, mesh->bufferId);
-
-		// glVertexAttribPointer(0, 3, GL_FLOAT, 0, sizeof(Vertex), (void*)0);
-		// glEnableVertexAttribArray(0);
-		// glVertexAttribPointer(1, 2, GL_FLOAT, 0, sizeof(Vertex), (void*)(sizeof(Vec3)));
-		// glEnableVertexAttribArray(1);
-		// glVertexAttribPointer(2, 3, GL_FLOAT, 0, sizeof(Vertex), (void*)(sizeof(Vec3) + sizeof(Vec2)));
-		// glEnableVertexAttribArray(2);
-
-		// pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODE, false);
-
-		// for(int i = 0; i < emitter.particleListCount; i++) {
-		// 	Particle* p = emitter.particleList + i;
-
-		// 	Vec3 normal = norm(p->vel);
-
-		// 	float size = 0.1f;
-		// 	Vec4 color = p->color;
-		// 	Vec3 base = p->pos;
-
-		// 	Vec3 dir1 = norm(cross(normal, vec3(1,0,0)));
-		// 	rotateVec3(&dir1, p->rot2, normal);
-		// 	rotateVec3(&normal, p->rot, dir1);
-		// 	Vec3 dir2 = norm(cross(normal, dir1));
-
-		// 	dir1 *= size*0.5f;
-		// 	dir2 *= size*0.5f;
-
-		// 	// Vec3 verts[4] = {base + dir1+dir2, base + dir1+(-dir2), base + (-dir1)+(-dir2), base + (-dir1)+dir2};
-
-		// 	// pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_VERTICES, verts[0].e, arrayCount(verts));
-		// 	// pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, &color);
-
-		// 	// glDrawArrays(GL_QUADS, 0, arrayCount(verts));
-
-
-
-		// 	Mat4 model = modelMatrix(p->pos, p->size, p->rot, normal);
-		// 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_MODEL, model.e);
-		// 	pushUniform(SHADER_CUBE, 0, CUBE_UNIFORM_COLOR, color.e);
-
-		// 	glDrawArrays(GL_QUADS, 0, mesh->vertCount);
-
-		// }
-		// glEnable(GL_CULL_FACE);
-
-
-
-
-		#if 1
-
-
-			bindShader(SHADER_PARTICLE);
-			pushUniform(SHADER_PARTICLE, 0, PARTICLE_UNIFORM_VIEW, view);
-			pushUniform(SHADER_PARTICLE, 0, PARTICLE_UNIFORM_PROJ, proj);
-
-			uint tex[2] = {getTexture(TEXTURE_CIRCLE)->id, 0};
-			glBindTextures(0,1,tex);
-			glBindSamplers(0,1,gs->samplers);
-
-
-			static float timer = 1;
-			timer += ad->dt;
-
-			// if(timer >= 1) {
-
-				int bufferOffset = 0;
-
-				for(int i = 0; i < emitter.particleListCount; i++) {
-					Particle* p = emitter.particleList + i;
-					Vec3 normal = norm(p->vel);
-
-					Mat4 model = modelMatrix(p->pos, p->size, p->rot, normal);
-					// Mat4 model = modelMatrix(p->pos, vec3(p->size.x, p->size.x, p->size.x), p->rot, normal);
-					rowToColumn(&model);
-
-					memCpy(ad->testBuffer + bufferOffset, model.e, sizeof(model)); bufferOffset += sizeof(model);
-					memCpy(ad->testBuffer + bufferOffset, p->color.e, sizeof(p->color)); bufferOffset += sizeof(p->color);
-				}
-
-				// printf("f%i \n", emitter.particleListCount);
-
-
-				timer = 0;
-				glNamedBufferData(ad->testBufferId, ad->testBufferSize, 0, GL_STREAM_DRAW);
-				glNamedBufferSubData(ad->testBufferId, 0, bufferOffset, ad->testBuffer);
-			// }
-
-			// glNamedBufferData(ad->testBufferId, ad->testBufferSize, 0, GL_STREAM_DRAW);
-			// glNamedBufferSubData(ad->testBufferId, 0, bufferOffset, ad->testBuffer);
-
-			Vec3 verts[] = {vec3(-0.5f, -0.5f, 0),vec3(-0.5f, 0.5f, 0),vec3(0.5f, 0.5f, 0),vec3(0.5f, -0.5f, 0)};
-			glProgramUniform3fv(getShader(SHADER_PARTICLE)->vertex, 0, 4, verts[0].e);
-			
-			Vec2 quadUVs[] = {{0,0}, {0,1}, {1,1}, {1,0}};
-			glProgramUniform2fv(getShader(SHADER_PARTICLE)->vertex, 4, 4, quadUVs[0].e);
-
-			glBindBuffer(GL_ARRAY_BUFFER, ad->testBufferId);
-
-			glEnableVertexAttribArray(8);
-			glVertexAttribPointer(8, 4, GL_FLOAT, 0, sizeof(Mat4)+sizeof(Vec4), (void*)(sizeof(Mat4)));
-
-			glEnableVertexAttribArray(9);
-			glVertexAttribPointer(9, 4, GL_FLOAT, 0, sizeof(Mat4)+sizeof(Vec4), (void*)0);
-			glEnableVertexAttribArray(10);
-			glVertexAttribPointer(10, 4, GL_FLOAT, 0, sizeof(Mat4)+sizeof(Vec4), (void*)(sizeof(Vec4)*1));
-			glEnableVertexAttribArray(11);
-			glVertexAttribPointer(11, 4, GL_FLOAT, 0, sizeof(Mat4)+sizeof(Vec4), (void*)(sizeof(Vec4)*2));
-			glEnableVertexAttribArray(12);
-			glVertexAttribPointer(12, 4, GL_FLOAT, 0, sizeof(Mat4)+sizeof(Vec4), (void*)(sizeof(Vec4)*3));
-
-			glVertexAttribDivisor(8, 1);
-			glVertexAttribDivisor(9, 1);
-			glVertexAttribDivisor(10, 1);
-			glVertexAttribDivisor(11, 1);
-			glVertexAttribDivisor(12, 1);
-
-			glDisable(GL_CULL_FACE);
-			// glDrawArrays(GL_QUADS, 0, emitter.particleListCount * 4);
-			glDrawArraysInstanced(GL_QUADS, 0, 4, emitter.particleListCount);
-			// glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, emitter.particleListCount);
-			glEnable(GL_CULL_FACE);
-
-		#endif 
 	}
-	#endif
-
-	}
-
-	#if 0
-	{
-		theCommandList = &ad->commandList2d;
-
-		static Vec3* colorArray = 0;
-		static Vec2i dim;
-
-		if(init || reload)
-		{
-			int n;
-
-			unsigned char* stbData = stbi_load("C:\\Projects\\VoxelGame\\text.png", &dim.w, &dim.h, &n, 0);
-
-			colorArray = getPArray(Vec3, dim.w*dim.h);
-			for(int i = 0; i < dim.w*dim.h; i++) {
-				colorArray[i].r = stbData[i*n + 0] / 255.0f;
-				colorArray[i].g = stbData[i*n + 1] / 255.0f;
-				colorArray[i].b = stbData[i*n + 2] / 255.0f;
-			}
-
-		}
-
-		Vec3 fontColor = vec3(0.0f);
-		Vec3 backgroundColor = vec3(1.0f);
-
-		dcRect(rectTLDim(vec2(0,0),vec2(10000,100000)), vec4(backgroundColor,1));
-
-		// float fi[] = {1/9.0f, 2/9.0f, 3/9.0f, 2/9.0f, 1/9.0f, };
-		float fi[] = { 0x08/256.0f, 0x4D/256.0f, 0x56/256.0f, 0x4D/256.0f, 0x08/256.0f, };
-
-		Vec2 pos = vec2(10,-10);
-		Vec2 pos2 = vec2(100,-300);
-		float cellDim = 10;
-		float gap = 0;
-		for(int y = 0; y < dim.h; y++) {
-			for(int x = 0; x < dim.w; x++) {
-				Vec3 cm = colorArray[y*dim.w + x];
-
-				Vec3 cl = x-1<0?vec3(0,0,0) : colorArray[y*dim.w + x-1];
-				Vec3 cr = x+1>=dim.w?vec3(0,0,0) : colorArray[y*dim.w + x+1];
-
-				Vec3 finalColor;
-				finalColor.r = cl.g*fi[0] + cl.b*fi[1] + cm.r*fi[2] + cm.g*fi[3] + cm.b*fi[4];
-				finalColor.g = cl.b*fi[0] + cm.r*fi[1] + cm.g*fi[2] + cm.b*fi[3] + cr.r*fi[4];
-				finalColor.b = cm.r*fi[0] + cm.g*fi[1] + cm.b*fi[2] + cr.r*fi[3] + cr.g*fi[4];
-
-				finalColor = backgroundColor * (vec3(1)-finalColor) + fontColor * finalColor;
-				// finalColor = srgbToLinear(vec4(finalColor,1)).rgb;
-				// finalColor = linearToGamma(vec4(finalColor,1)).rgb;
-
-
-
-				Vec2 p = pos + vec2(x,-y)*cellDim;
-
-				Rect r = rectCenDim(p, vec2(cellDim));
-				rectExpand(&r, vec2(-gap*2));
-
-				dcRect(r, vec4(finalColor,1));
-
-
-
-				Vec2 p2 = pos2 + vec2(x,-y)*1;
-				dcRect(rectTLDim(p2, vec2(1,1)), vec4(finalColor,1));
-			}
-		}
-
-		// dcRect(rectCenDim(100,-100,100,100), vec4(1,0,0,1));
-
-		theCommandList = &ad->commandList3d;
-	}
-	#endif
-
-	#if 0
-	{
-		theCommandList = &ad->commandList2d;
-
-		static Font font;
-		static Font font2;
-		if(init || reload) {
-			font = {};
-			font2 = {};
-			char* file = "Merriweather-Regular.ttf";
-			int size = 15;
-			fontInitSubpixel(&font,  file, size);
-			fontInit(&font2, file, size+1);
-		}
-
-		Vec2 pos = vec2(10,-30);
-		Vec4 c  = vec4(1,1);
-		Vec4 cb = vec4(0,1);
-
-		dcRect(rectTLDim(0,0,100000,100000), cb);
-
-		char* text = "The Quick Brown Fox Jumps Over The Lazy Dog. 123";
-		dcText(text, &font2, pos, c, vec2i(-1,0));
-		dcText(text, &font,  pos - vec2(0,30), c, vec2i(-1,0));
-
-		theCommandList = &ad->commandList3d;
-	}
-	#endif
 
 	#if 0
 	// Visualize chunk storing/restoring.
-
 	{
 		VoxelData* vd = &ad->voxelData;
 
@@ -3621,45 +2993,102 @@ extern "C" APPMAINFUNCTION(appMain) {
 	}
 	#endif
 
+	updateAudio(&ad->audioState, ad->dt);
+
 	endOfMainLabel:
 
 
 
-	updateAudio(&ad->audioState, ad->dt);
-
-	// Render.
+	// @Blit.
 	{
 		TIMER_BLOCK_NAMED("Render");
 
-		bindShader(SHADER_CUBE);
+		bindShader(SHADER_Cube);
 		executeCommandList(&ad->commandList3d);
 
-		bindShader(SHADER_QUAD);
+		// Draw water.
+		{
+			// We draw this here so the blending looks correct.
+			// And we can't make a draw command for it right now.
+
+			Mat4 view, proj;
+			viewMatrix(&view, ad->activeCam.pos, -ad->activeCam.look, ad->activeCam.up, ad->activeCam.right);
+			projMatrix(&proj, degreeToRadian(ad->fieldOfView), ad->aspectRatio, ad->nearPlane, ad->farPlane);
+
+			{
+				Vec2i chunk = ad->playerMode ? ad->player->chunk : ad->cameraEntity->chunk;
+				Vec3i voxel = coordToVoxel(ad->activeCam.pos) + getVoxelOffsetFromChunk(chunk);
+				uchar* block = getBlockFromVoxel(&ad->voxelData, voxel);
+
+				if(block && *block == BT_Water) ad->cameraInWater = true;
+			}
+
+			if(ad->cameraInWater) {
+				glEnable(GL_POLYGON_OFFSET_FILL);
+				glPolygonOffset(-1,-1);
+				glFrontFace(GL_CCW);
+			}
+
+			VoxelWorldSettings* vs = &ad->voxelSettings;
+			setupVoxelUniforms(ad->activeCam.pos, view, proj, vs->fogColor.rgb, vs->viewDistance);
+			pushUniform(SHADER_Voxel, 1, "alphaTest", 0.5f);
+
+			for(int i = ad->coordListSize-1; i >= 0; i--) {
+				VoxelMesh* m = getVoxelMesh(&ad->voxelData, ad->coordList[i]);
+				drawVoxelMesh(m, ad->chunkOffset, 1);
+			}
+
+			if(ad->cameraInWater) {
+				glFrontFace(GL_CW);
+				glDisable(GL_POLYGON_OFFSET_FILL);
+			}
+		}
+
+		bindShader(SHADER_Quad);
 		glDisable(GL_DEPTH_TEST);
 		ortho(rect(0, -ws->currentRes.h, ws->currentRes.w, 0));
 		blitFrameBuffers("3dMsaa", "3dNoMsaa", ad->cur3dBufferRes, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 
-
-		bindFrameBuffer("2d");
+		bindFrameBuffer("2dMsaa");
 		glViewport(0,0, ws->currentRes.x, ws->currentRes.y);
 		drawRect(rect(0, -ws->currentRes.h, ws->currentRes.w, 0), vec4(1), rect(0,1,1,0), 
 		         getFrameBuffer("3dNoMsaa")->colorSlot[0]->id);
-		// executeCommandList(&ad->commandList2d);
+		executeCommandList(&ad->commandList2d);
 
+		blitFrameBuffers("2dMsaa", "2dNoMsaa", ws->currentRes, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+
+		if(ds->recState.state == REC_STATE_PLAYING) {
+			if(!ds->recState.playbackPaused || ds->recState.justPaused) {
+				if(ds->recState.justPaused) ds->recState.justPaused = false;
+				blitFrameBuffers("2dNoMsaa", "2dTemp", ws->currentRes, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+				
+			} else {
+				blitFrameBuffers("2dTemp", "2dNoMsaa", ws->currentRes, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+			}
+		}
 
 		glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
 		glBlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
 
 		bindFrameBuffer("DebugMsaa");
-		executeCommandList(&ad->commandList2d);
 
-		static double tempTime = 0;
-		timerInit(&ds->tempTimer);
+		{
+			static double tempTime = 0;
+			static int tempCount = 0;
+			static double tempStamp = 0;
+			ds->debugTimer.start();
+
 			executeCommandList(&ds->commandListDebug, false, reload);
-		tempTime += ds->dt;
-		if(tempTime >= 1) {
-			ds->debugRenderTime = timerStop(&ds->tempTimer);
-			tempTime = 0;
+
+			tempTime += ds->dt;
+			tempCount++;
+			tempStamp += ds->debugTimer.stop();
+			if(tempTime >= 1) {
+				ds->debugRenderTime = tempStamp/tempCount;
+				tempTime = 0;
+				tempCount = 0;
+				tempStamp = 0;
+			}
 		}
 
 		blitFrameBuffers("DebugMsaa", "DebugNoMsaa", ws->currentRes, GL_COLOR_BUFFER_BIT, GL_LINEAR);
@@ -3668,13 +3097,12 @@ extern "C" APPMAINFUNCTION(appMain) {
 		glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 		glBlendEquation(GL_FUNC_ADD);
 
-		bindFrameBuffer("2d");
+		bindFrameBuffer("2dNoMsaa");
 		drawRect(rect(0, -ws->currentRes.h, ws->currentRes.w, 0), vec4(1,1,1,ds->guiAlpha), rect(0,1,1,0), 
 		         getFrameBuffer("DebugNoMsaa")->colorSlot[0]->id);
 
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		glBlendEquation(GL_FUNC_ADD);
-
 
 
 		#if USE_SRGB 
@@ -3683,7 +3111,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 		drawRect(rect(0, -ws->currentRes.h, ws->currentRes.w, 0), vec4(1), rect(0,1,1,0), 
-		         getFrameBuffer("2d")->colorSlot[0]->id);
+		         getFrameBuffer("2dNoMsaa")->colorSlot[0]->id);
 
 		#if USE_SRGB
 			glDisable(GL_FRAMEBUFFER_SRGB);
@@ -3697,7 +3125,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		if(!ws->vsync) sd->vsyncTempTurnOff = false;
 
 		// Sleep until monitor refresh.
-		double frameTime = timerStop(&ds->swapTimer);
+		double frameTime = ds->swapTimer.stop();
 		int sleepTimeMS = 0;
 		if(!init && ws->vsync && !sd->vsyncTempTurnOff) {
 			double fullFrameTime = ((double)1/ws->frameRate);
@@ -3725,7 +3153,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 		swapBuffers(sd);
 		glFinish();
 
-		timerStart(&ds->swapTimer);
+		ds->swapTimer.start();
 
 		if(sd->vsyncTempTurnOff) {
 			wglSwapIntervalEXT(1);
@@ -3733,33 +3161,20 @@ extern "C" APPMAINFUNCTION(appMain) {
 		}
 	}
 
-	// Directx
-	#if USE_DIRECT3D		
-	{
-		//clear scene
-		Vec4 color = vec4(0.1f,1);
-		sd->d3dDeviceContext->ClearRenderTargetView( sd->renderTargetView, color.e);
-		
-		sd->d3dDeviceContext->Draw( 4, 0 );
-
-		//flip buffers
-		sd->swapChain->Present(1,0);
-	}
-	#endif
-
-	TIMER_INFO_COUNT = __COUNTER__;
-	debugMain(ds, appMemory, ad, reload, isRunning, init, threadQueue);
-
-	// debugUpdatePlayback(ds, appMemory);
+	debugMain(ds, appMemory, ad, reload, isRunning, init, threadQueue, __COUNTER__, mouseInClientArea(windowHandle));
 
 	// Save game.
 	if(*isRunning == false)
 	{
 		threadQueueComplete(theThreadQueue);
 
+		#define getSaveTime 1
+
+		#if getSaveTime
 		MSTimer timer;
-		timerInit(&timer);
-		timerStart(&timer);
+		timer.init();
+		timer.start();
+		#endif
 
 		DArray<VoxelMesh>* voxels = &ad->voxelData.voxels;
 
@@ -3792,9 +3207,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		threadQueueComplete(theThreadQueue);
 
-		float dt = timerUpdate(&timer);
+		#if getSaveTime
+		float dt = timer.update();
+		#endif
 
-		char* saveFile = fillString("%s%s", SAVES_FOLDER, SAVE_STATE1);
+		char* saveFile = fillString("%s%s", Saves_Folder, Save_State1);
 		FILE* file = fopen(saveFile, "wb");
 		if(file) {
 			fwrite(&ad->inventory, sizeof(Inventory), 1, file);
@@ -3827,8 +3244,10 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		}
 
-		float dt2 = timerUpdate(&timer);
-		// printf("%f %f\n", dt, dt2);
+		#if getSaveTime
+		float dt2 = timer.update();
+		printf("%f %f\n", dt, dt2);
+		#endif
 	}
 
 	// Save game settings.
@@ -3858,7 +3277,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 		at.windowRect = windowRect;
 		saveAppSettings(at);
 	}
-
 
 	// @AppEnd.
 }

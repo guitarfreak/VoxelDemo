@@ -91,9 +91,9 @@ void inventoryDrawIcon(InventorySlot slot, Rect r, Font* font, Vec4 cFont, Vec4 
 	// Draw resource.
 
 	float iconMargin = 0.5f;
-	float iconSize = rectW(r) * iconMargin;
+	float iconSize = r.w() * iconMargin;
 
-	Vec3 pos = vec3(rectCen(r), 0);
+	Vec3 pos = vec3(r.c(), 0);
 
 	Vec4 color = vec4(1,1);
 	int colorPalleteIndex = blockColor[slot.type];
@@ -135,7 +135,7 @@ void inventoryDrawIcon(InventorySlot slot, Rect r, Font* font, Vec4 cFont, Vec4 
 		Vec2 tOffset = font->height * (vec2(-0.25f,0) + vec2(0.0f)*vec2(-1,1));
 
 		char* t = fillString("%i", slot.count);
-		dcText(t, font, rectBR(r) + tOffset, cFont, vec2i(1,-1), 0, 1, cShadow);
+		dcText(t, font, r.br() + tOffset, cFont, vec2i(1,-1), 0, 1, cShadow);
 	}
 }
 

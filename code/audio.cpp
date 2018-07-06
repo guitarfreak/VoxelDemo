@@ -264,8 +264,6 @@ void updateAudio(AudioState* as, float dt) {
 			float* buffer;
 			as->renderClient->GetBuffer(numFramesAvailable, (BYTE**)&buffer);
 
-			// Clear to zero.
-
 			for(int i = 0; i < numFramesAvailable*2; i++) buffer[i] = 0.0f;
 
 			for(int trackIndex = 0; trackIndex < arrayCount(as->tracks); trackIndex++) {

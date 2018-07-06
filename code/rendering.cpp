@@ -31,7 +31,7 @@ struct GraphicsState {
 };
 
 //
-// Textures.
+// @Textures.
 // 
 
 Texture* getTexture(char* name) {
@@ -94,7 +94,7 @@ void loadCubeMapFromFile(Texture* texture, char* filePath, int mipLevels, int in
 		texture->levels = 6;
 		texture->type = TEXTURE_TYPE_CUBEMAP;
 
-		glCreateTextures(GL_TEXTURE_CUBE_MAP_ARRAY, CUBEMAP_SIZE, &texture->id);
+		glCreateTextures(GL_TEXTURE_CUBE_MAP_ARRAY, 1, &texture->id);
 		glTextureStorage3D(texture->id, mipLevels, internalFormat, skySize, skySize, 6);
 	}
 
@@ -135,8 +135,43 @@ void recreateTexture(Texture* t) {
 	glTextureStorage2D(t->id, 1, t->internalFormat, t->dim.w, t->dim.h);
 }
 
+#ifdef STB_IMAGE_WRITE_IMPLEMENTATION
+void writeTextureToFile(Texture* tex, char* path) {
+	int w = tex->dim.w;
+	int h = tex->dim.h;
+
+	int bufSize = w*h*4;
+	char* buffer = mallocArray(char, bufSize); 
+	defer {free(buffer);};
+
+	int texId = tex->id;
+	glGetTextureImage(texId, 0, GL_RGBA, GL_UNSIGNED_BYTE, bufSize, buffer);
+
+	int result = stbi_write_png(path, w, h, 4, buffer, w*4);
+}
+#endif
+
 //
-// Framebuffers.
+// @Sampler.
+//
+
+uint createSampler(float ani, int wrapS, int wrapT, int magF, int minF, int wrapR = GL_CLAMP_TO_EDGE) {
+	uint result;
+	glCreateSamplers(1, &result);
+
+	glSamplerParameteri(result, GL_TEXTURE_MAX_ANISOTROPY_EXT, ani);
+	glSamplerParameteri(result, GL_TEXTURE_WRAP_S, wrapS);
+	glSamplerParameteri(result, GL_TEXTURE_WRAP_T, wrapT);
+	glSamplerParameteri(result, GL_TEXTURE_MAG_FILTER, magF);
+	glSamplerParameteri(result, GL_TEXTURE_MIN_FILTER, minF);
+
+	glSamplerParameteri(result, GL_TEXTURE_WRAP_R, wrapR);
+
+	return result;
+}
+
+//
+// @Framebuffers.
 //
 
 FrameBuffer* getFrameBuffer(char* name) {
@@ -228,7 +263,7 @@ void blitFrameBuffers(char* name1, char* name2, Vec2i dim, int bufferBit, int fi
 	FrameBuffer* fb1 = getFrameBuffer(name1);
 	FrameBuffer* fb2 = getFrameBuffer(name2);
 
-	glBlitNamedFramebuffer (fb1->id, fb2->id, 0,0, dim.x, dim.y, 0,0, dim.x, dim.y, bufferBit, filter);
+	glBlitNamedFramebuffer(fb1->id, fb2->id, 0,0, dim.x, dim.y, 0,0, dim.x, dim.y, bufferBit, filter);
 }
 
 void bindFrameBuffer(char* name, int slot = GL_FRAMEBUFFER) {
@@ -262,7 +297,7 @@ void clearFrameBuffer(char* name, Vec4 c, int bits) {
 }
 
 //
-// Mesh.
+// @Mesh.
 //
 
 Mesh* getMesh(int meshId) {
@@ -270,6 +305,8 @@ Mesh* getMesh(int meshId) {
 	return m;
 }
 
+//
+// @Shader.
 //
 
 Shader* getShader(int shaderId) {
@@ -417,16 +454,18 @@ void pushUniform(uint shaderId, int shaderStage, char* name, Mat4* m) {
 };
 
 //
+// @Drawing.
+//
 
 void drawRect(Rect r, Vec4 color, Rect uv = rect(0,0,1,1), int texture = -1, float texZ = -1) {	
-	pushUniform(SHADER_QUAD, 0, "primitiveMode", 0);
+	pushUniform(SHADER_Quad, 0, "primitiveMode", 0);
 
-	Rect cd = rectCenDim(r);
+	Rect cd = r.cenDim();
 
-	pushUniform(SHADER_QUAD, 0, "mod", cd);
-	pushUniform(SHADER_QUAD, 0, "setUV", uv.min.x, uv.max.x, uv.max.y, uv.min.y);
-	pushUniform(SHADER_QUAD, 0, "setColor", linearToGamma(color));
-	pushUniform(SHADER_QUAD, 0, "texZ", texZ);
+	pushUniform(SHADER_Quad, 0, "mod", cd);
+	pushUniform(SHADER_Quad, 0, "setUV", uv.min.x, uv.max.x, uv.max.y, uv.min.y);
+	pushUniform(SHADER_Quad, 0, "setColor", linearToGamma(color));
+	pushUniform(SHADER_Quad, 0, "texZ", texZ);
 
 	if(texture == -1) texture = theGraphicsState->textureWhite->id;
 
@@ -434,83 +473,217 @@ void drawRect(Rect r, Vec4 color, Rect uv = rect(0,0,1,1), int texture = -1, flo
 	glBindTextures(0,2,tex);
 	glBindSamplers(0, 1, theGraphicsState->samplers);
 
-	glDrawArraysInstancedBaseInstance(GL_TRIANGLE_STRIP, 0, 4, 1, 0);
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 }
 
-void drawFont(Rect r, Vec4 color, Rect uv = rect(0,0,1,1), int texture = -1, float texZ = -1) {	
-	Rect cd = rectCenDim(r);
+void drawLine(Vec2 p0, Vec2 p1, Vec4 color) {
+	Vec2 verts[] = { roundIntf(p0.x)-0.5f, roundIntf(p0.y)-0.5f, 
+		             roundIntf(p1.x)-0.5f, roundIntf(p1.y)-0.5f };
+	Vec4 colors[] = { vec4(1), vec4(1), };
 
-	glBlendColor(color.r, color.g, color.b, color.a);
+	glBindTextures(0,1,&theGraphicsState->textureWhite->id);
 
-	glBlendFuncSeparate(GL_CONSTANT_COLOR, GL_ONE_MINUS_SRC_COLOR, GL_ONE, GL_ONE);
-	glBlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
+	pushUniform(SHADER_Quad, 0, "primitiveMode", true);
+	pushUniform(SHADER_Quad, 0, "verts", verts, arrayCount(verts));
+	pushUniform(SHADER_Quad, 0, "colors", colors, arrayCount(colors));
+	pushUniform(SHADER_Quad, 0, "setColor", linearToGamma(color));
 
-	pushUniform(SHADER_FONT, 0, "mod", cd);
-	pushUniform(SHADER_FONT, 0, "setUV", uv.min.x, uv.max.x, uv.max.y, uv.min.y);
+	glDrawArrays(GL_LINES, 0, 2);
+}
 
-	float uvstep = (1/rectW(r)) * rectW(uv);
-	pushUniform(SHADER_FONT, 1, "uvstep", uvstep);
+void drawRectRounded(Rect r, Vec4 color, int size, int steps = 0) {
+	if(steps == 0) steps = 6;
 
-	if(texture == -1) texture = theGraphicsState->textureWhite->id;
+	float s = size;
+	drawRect(rect(r.min.x+s, r.min.y, r.max.x-s, r.max.y), color);
+	drawRect(rect(r.min.x, r.min.y+s, r.max.x, r.max.y-s), color);
 
-	uint tex[2] = {texture, texture};
-	glBindTextures(0,2,tex);
-	glBindSamplers(0, 1, theGraphicsState->samplers);
+	Vec2 verts[10];
+	Vec4 colors[10];
+	for(int i = 0; i < arrayCount(colors); i++) colors[i] = vec4(1);
 
-	glDrawArraysInstancedBaseInstance(GL_TRIANGLE_STRIP, 0, 4, 1, 0);
+	glBindTextures(0,1,&theGraphicsState->textureWhite->id);
 
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	glBlendEquation(GL_FUNC_ADD);
+	pushUniform(SHADER_Quad, 0, "primitiveMode", true);
+	pushUniform(SHADER_Quad, 0, "colors", colors, arrayCount(colors));
+	pushUniform(SHADER_Quad, 0, "setColor", linearToGamma(color));
+
+	Rect rc = r.expand(-vec2(s,s)*2);
+	Vec2 corners[] = {rc.max, vec2(rc.max.x, rc.min.y), rc.min, vec2(rc.min.x, rc.max.y)};
+	for(int cornerIndex = 0; cornerIndex < 4; cornerIndex++) {
+
+		Vec2 corner = corners[cornerIndex];
+		float round = s;
+		float start = M_PI_2*cornerIndex;
+
+		verts[0] = corner;
+
+		for(int i = 0; i < steps; i++) {
+			float angle = start + i*(M_PI_2/(steps-1));
+			Vec2 v = vec2(sin(angle), cos(angle));
+
+			verts[i+1] = corner + v*round;
+		}
+
+		pushUniform(SHADER_Quad, 0, "verts", verts, steps+1);
+		glDrawArrays(GL_TRIANGLE_FAN, 0, steps+1);
+	}
+}
+
+void drawRectRoundedOutline(Rect r, Vec4 color, int size, float offset = -1, int steps = 0) {
+	// if(size == 0) {
+	// 	drawRectOutline(r, dc.color);
+	// 	return;
+	// }
+
+	#define Rounding_Mod 1/2
+	steps = round(M_PI_2 * size * Rounding_Mod);
+
+	if(steps == 0) steps = 6;
+
+	float s = size;
+	s = min(s, min(r.w()/2, r.h()/2));
+
+	//
+
+	Vec2 verts[32];
+	Vec4 colors[32];
+	for(int i = 0; i < arrayCount(colors); i++) colors[i] = vec4(1);
+
+	glBindTextures(0,1,&theGraphicsState->textureWhite->id);
+
+	pushUniform(SHADER_Quad, 0, "primitiveMode", 1);
+	pushUniform(SHADER_Quad, 0, "colors", colors, arrayCount(colors));
+	pushUniform(SHADER_Quad, 0, "setColor", linearToGamma(color));
+
+	float off = offset*0.5f;
+	Rect rc = r.expand(-vec2(s-off,s-off)*2);
+	Vec2 corners[] = { rc.tr(), rc.br(), rc.bl(), rc.tl() };
+	int index = 0;
+	for(int cornerIndex = 0; cornerIndex < 4; cornerIndex++) {
+
+		Vec2 corner = corners[cornerIndex];
+		float round = s;
+		float start = M_PI_2*cornerIndex;
+
+		for(int i = 0; i < steps; i++) {
+			float angle = start + i*(M_PI_2/(steps-1));
+			Vec2 v = vec2(sin(angle), cos(angle));
+
+			verts[index++] = corner + v*round;
+		}
+	}
+
+	int size = index+1;
+	verts[index] = verts[0];
+	pushUniform(SHADER_Quad, 0, "verts", verts, size);
+	glDrawArrays(GL_LINE_STRIP, 0, size);
+}
+
+void drawRectNewColored(Rect r, Vec4 c0, Vec4 c1, Vec4 c2, Vec4 c3) {	
+	Vec2 verts[] = { r.bl(), r.tl(), r.tr(), r.br() };
+	Vec4 colors[] = { linearToGamma(c0), linearToGamma(c1), 
+		              linearToGamma(c2), linearToGamma(c3) };
+
+	glBindTextures(0,1,&theGraphicsState->textureWhite->id);
+
+	pushUniform(SHADER_Quad, 0, "primitiveMode", true);
+	pushUniform(SHADER_Quad, 0, "verts", verts, arrayCount(verts));
+	pushUniform(SHADER_Quad, 0, "colors", colors, arrayCount(colors));
+	pushUniform(SHADER_Quad, 0, "setColor", vec4(1));
+
+	glDrawArrays(GL_QUADS, 0, arrayCount(verts));
+}
+
+void drawRectNewColoredH(Rect r, Vec4 c0, Vec4 c1) {	
+	drawRectNewColored(r, c0, c1, c1, c0);
+}
+void drawRectNewColoredW(Rect r, Vec4 c0, Vec4 c1) {	
+	drawRectNewColored(r, c0, c0, c1, c1);
+}
+
+void drawRectRoundedGradient(Rect r, Vec4 color, int size, Vec4 off, int steps = 0) {	
+	glEnable(GL_STENCIL_TEST);
+
+	glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+	glStencilFunc(GL_ALWAYS, 1, 0xFF);
+	glStencilMask(0xFF);
+
+	drawRectRounded(r, color, size);
+
+	glStencilFunc(GL_EQUAL, 1, 0xFF);
+	glStencilMask(0x00); 
+
+	// setSRGB(false); @fix
+	drawRectNewColoredH(r, color - off, color + off);
+	// setSRGB(true); @fix
+
+	glStencilMask(0xFF); 
+	glDisable(GL_STENCIL_TEST);
+}
+
+void drawTriangle(Vec2 p, float size, Vec2 dir, Vec4 color) {
+	Vec2 verts[3];
+
+	dir = norm(dir) * size;
+	verts[0] = p + dir;
+	verts[1] = p + rotateVec2(dir, degreeToRadian(360/3));
+	verts[2] = p + rotateVec2(dir, degreeToRadian(360/3*2));
+
+	Vec4 colors[] = { vec4(1), vec4(1), vec4(1), };
+
+	glBindTextures(0,1,&theGraphicsState->textureWhite->id);
+
+	pushUniform(SHADER_Quad, 0, "primitiveMode", true);
+	pushUniform(SHADER_Quad, 0, "verts", verts, arrayCount(verts));
+	pushUniform(SHADER_Quad, 0, "colors", colors, arrayCount(colors));
+	pushUniform(SHADER_Quad, 0, "setColor", linearToGamma(color));
+
+	glDrawArrays(GL_TRIANGLES, 0, arrayCount(verts));
 }
 
 void drawQuad(Vec2 p0, Vec2 p1, Vec2 p2, Vec2 p3, Vec4 color, int textureId, Rect uv, float texZ) {
 
-	// Disabling these arrays is very important.
-
-	glDisableVertexAttribArray(0);
-	glDisableVertexAttribArray(1);
-	glDisableVertexAttribArray(2);
-	
-	Vec2 verts[] = {p0, p1, p2, p3};
+	Vec2 verts[] = { p0, p1, p2, p3 };
 
 	// if(texZ == -1) textureId = getTexture(textureId)->id;
 	uint tex[2] = {textureId, textureId};
-
 	glBindTextures(0,2,tex);
 
 	glBindSamplers(0,1,&theGraphicsState->samplers[SAMPLER_NORMAL]);
 	glBindSamplers(1,1,&theGraphicsState->samplers[SAMPLER_NORMAL]);
 
-	Vec2 quadUVs[] = { rectBL(uv), rectTL(uv), rectTR(uv), rectBR(uv) };
+	Vec2 quadUVs[] = { uv.bl(), uv.tl(), uv.tr(), uv.br() };
+	Vec4 colors[] = { vec4(1), vec4(1), vec4(1), vec4(1), };
 
-	pushUniform(SHADER_QUAD, 0, "primitiveMode", true);
-	pushUniform(SHADER_QUAD, 0, "uvs", quadUVs, arrayCount(quadUVs));
-	pushUniform(SHADER_QUAD, 0, "setColor", linearToGamma(color));
-	pushUniform(SHADER_QUAD, 0, "texZ", texZ);
-	pushUniform(SHADER_QUAD, 0, "verts", verts, arrayCount(verts));
+	pushUniform(SHADER_Quad, 0, "primitiveMode", true);
+	pushUniform(SHADER_Quad, 0, "verts", verts, arrayCount(verts));
+	pushUniform(SHADER_Quad, 0, "uvs", quadUVs, arrayCount(quadUVs));
+	pushUniform(SHADER_Quad, 0, "colors", colors, arrayCount(colors));
+	pushUniform(SHADER_Quad, 0, "texZ", texZ);
+	pushUniform(SHADER_Quad, 0, "setColor", linearToGamma(color));
 
 	glDrawArrays(GL_QUADS, 0, arrayCount(verts));
 }
 
 void ortho(Rect r) {
-	r = rectCenDim(r);
+	r = r.cenDim();
 
-	pushUniform(SHADER_QUAD, 0, "camera", r);
-	pushUniform(SHADER_FONT, 0, "camera", r);
+	pushUniform(SHADER_Quad, 0, "camera", r);
 }
 
 void lookAt(Vec3 pos, Vec3 look, Vec3 up, Vec3 right) {
 	Mat4 view;
 	viewMatrix(&view, pos, look, up, right);
 
-	pushUniform(SHADER_CUBE, 0, "view", &view);
+	pushUniform(SHADER_Cube, 0, "view", &view);
 }
 
 void perspective(float fov, float aspect, float n, float f) {
 	Mat4 proj;
 	projMatrix(&proj, fov, aspect, n, f);
 
-	pushUniform(SHADER_CUBE, 0, "proj", &proj);
+	pushUniform(SHADER_Cube, 0, "proj", &proj);
 }
 
 //
@@ -518,7 +691,7 @@ void perspective(float fov, float aspect, float n, float f) {
 void drawCube(Vec3 trans, Vec3 scale, Vec4 color, float degrees, Vec3 rot) {
 	glBindTextures(0,1,&theGraphicsState->textureWhite->id);
 
-	Mesh* cubeMesh = getMesh(MESH_CUBE);
+	Mesh* cubeMesh = getMesh(MESH_Cube);
 	glBindBuffer(GL_ARRAY_BUFFER, cubeMesh->bufferId);
 
 	glVertexAttribPointer(0, 3, GL_FLOAT, 0, sizeof(Vertex), (void*)0);
@@ -529,10 +702,10 @@ void drawCube(Vec3 trans, Vec3 scale, Vec4 color, float degrees, Vec3 rot) {
 	glEnableVertexAttribArray(2);
 
 	Mat4 model = modelMatrix(trans, scale, degrees, rot);
-	pushUniform(SHADER_CUBE, 0, "model", &model);
-	pushUniform(SHADER_CUBE, 0, "setColor", linearToGamma(color));
-	pushUniform(SHADER_CUBE, 0, "mode", false);
-	pushUniform(SHADER_CUBE, 1, "texZ", -1.0f);
+	pushUniform(SHADER_Cube, 0, "model", &model);
+	pushUniform(SHADER_Cube, 0, "setColor", linearToGamma(color));
+	pushUniform(SHADER_Cube, 0, "mode", false);
+	pushUniform(SHADER_Cube, 1, "texZ", -1.0f);
 
 
 	glDrawArrays(GL_QUADS, 0, cubeMesh->vertCount);
@@ -551,12 +724,11 @@ void drawLine(Vec3 p0, Vec3 p1, Vec4 color) {
 
 	Vec3 verts[] = {p0, p1};
 	Vec2 quadUVs[] = {{0,0}, {0,1}};
-	pushUniform(SHADER_CUBE, 0, "setUV", quadUVs, arrayCount(quadUVs));
-	pushUniform(SHADER_CUBE, 0, "vertices", verts, arrayCount(verts));
-	pushUniform(SHADER_CUBE, 0, "setColor", linearToGamma(color));
-	pushUniform(SHADER_CUBE, 0, "mode", true);
-	pushUniform(SHADER_CUBE, 1, "texZ", -1.0f);
-
+	pushUniform(SHADER_Cube, 0, "setUV", quadUVs, arrayCount(quadUVs));
+	pushUniform(SHADER_Cube, 0, "vertices", verts, arrayCount(verts));
+	pushUniform(SHADER_Cube, 0, "setColor", linearToGamma(color));
+	pushUniform(SHADER_Cube, 0, "mode", true);
+	pushUniform(SHADER_Cube, 1, "texZ", -1.0f);
 
 	glDrawArrays(GL_LINES, 0, arrayCount(verts));
 }
@@ -578,12 +750,12 @@ void drawQuad(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec4 color, int textureId = 0,
 	// glBindSamplers(0, 1, theGraphicsState->samplers);
 
 	// Vec2 quadUVs[] = {{0,0}, {0,1}, {1,1}, {1,0}};
-	Vec2 quadUVs[] = { rectBL(uv), rectTL(uv), rectTR(uv), rectBR(uv) };
-	pushUniform(SHADER_CUBE, 0, "setUV", quadUVs, arrayCount(quadUVs));
-	pushUniform(SHADER_CUBE, 0, "vertices", verts, arrayCount(verts));
-	pushUniform(SHADER_CUBE, 0, "setColor", linearToGamma(color));
-	pushUniform(SHADER_CUBE, 1, "texZ", texZ);
-	pushUniform(SHADER_CUBE, 0, "mode", true);
+	Vec2 quadUVs[] = { uv.bl(), uv.tl(), uv.tr(), uv.br() };
+	pushUniform(SHADER_Cube, 0, "setUV", quadUVs, arrayCount(quadUVs));
+	pushUniform(SHADER_Cube, 0, "vertices", verts, arrayCount(verts));
+	pushUniform(SHADER_Cube, 0, "setColor", linearToGamma(color));
+	pushUniform(SHADER_Cube, 1, "texZ", texZ);
+	pushUniform(SHADER_Cube, 0, "mode", true);
 
 	glDrawArrays(GL_QUADS, 0, arrayCount(verts));
 }
@@ -608,20 +780,3 @@ void drawQuad(Vec3 p, Vec3 normal, float size, Vec4 color) {
 
 	drawQuad(verts[0], verts[1], verts[2], verts[3], color);
 }
-
-uint createSampler(float ani, int wrapS, int wrapT, int magF, int minF, int wrapR = GL_CLAMP_TO_EDGE) {
-	uint result;
-	glCreateSamplers(1, &result);
-
-	glSamplerParameteri(result, GL_TEXTURE_MAX_ANISOTROPY_EXT, ani);
-	glSamplerParameteri(result, GL_TEXTURE_WRAP_S, wrapS);
-	glSamplerParameteri(result, GL_TEXTURE_WRAP_T, wrapT);
-	glSamplerParameteri(result, GL_TEXTURE_MAG_FILTER, magF);
-	glSamplerParameteri(result, GL_TEXTURE_MIN_FILTER, minF);
-
-	glSamplerParameteri(result, GL_TEXTURE_WRAP_R, wrapR);
-
-	return result;
-}
-
-

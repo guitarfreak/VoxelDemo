@@ -1,7 +1,6 @@
 
 #define GL_ACTIVE_UNIFORMS                0x8B86
 #define GL_ACTIVE_UNIFORM_MAX_LENGTH      0x8B87
-
 #define GL_TEXTURE_CUBE_MAP_SEAMLESS      0x884F
 #define GL_FRAMEBUFFER_SRGB               0x8DB9
 #define GL_FRAMEBUFFER_SRGB               0x8DB9
@@ -25,7 +24,6 @@
 #define GL_RGBA8UI                        0x8D7C
 #define GL_R8                             0x8229
 #define GL_ARRAY_BUFFER                   0x8892
-
 #define GL_NUM_EXTENSIONS                 0x821D
 
 #define GL_CLAMP_TO_EDGE                  0x812F
@@ -44,6 +42,7 @@
 #define GL_RENDERBUFFER                   0x8D41
 #define GL_DEPTH_STENCIL                  0x84F9
 #define GL_DEPTH24_STENCIL8               0x88F0
+#define GL_STENCIL_INDEX8                 0x8D48
 #define GL_DEBUG_OUTPUT_SYNCHRONOUS       0x8242
 #define GL_DEBUG_SEVERITY_HIGH            0x9146
 #define GL_DEBUG_SEVERITY_MEDIUM          0x9147
@@ -60,7 +59,6 @@ typedef char GLchar;
 typedef ptrdiff_t GLsizeiptr;
 typedef ptrdiff_t GLintptr;
 #define GL_CONSTANT_COLOR                 0x8001
-
 
 #define makeGLFunction(returnType, name, ...) \
 	typedef returnType WINAPI name##Function(__VA_ARGS__); \
@@ -153,15 +151,15 @@ typedef ptrdiff_t GLintptr;
 	GLOP(void, DrawArraysInstanced, GLenum mode, GLint first, GLsizei count, GLsizei primcount) \
 	GLOP(void, VertexAttribDivisor, GLuint index, GLuint divisor) \
 	GLOP(void, GetProgramiv, GLuint program, GLenum pname, GLint *params) \
-	GLOP(void, GetActiveUniform, GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name)
+	GLOP(void, GetActiveUniform, GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name) \
+	GLOP(void, GetTextureImage, GLuint texture, GLint level, GLenum format, GLenum type, GLsizei bufSize, void *pixels)
 
 
+//
 
 #define GLOP(returnType, name, ...) makeGLFunction(returnType, name, __VA_ARGS__) 
 	GL_FUNCTION_LIST
 #undef GLOP
-
-
 
 // typedef HGLRC wglCreateContextAttribsARBFunction(HDC hDC, HGLRC hshareContext, const int *attribList);
 // wglCreateContextAttribsARBFunction* wglCreateContextAttribsARB;
@@ -170,15 +168,15 @@ wglGetSwapIntervalEXTFunction* wglGetSwapIntervalEXT;
 typedef int WINAPI wglSwapIntervalEXTFunction(int);
 wglSwapIntervalEXTFunction* wglSwapIntervalEXT;
 
-
-
 void loadFunctions() {
-#define GLOP(returnType, name, ...) loadGLFunction(name)
+	#define GLOP(returnType, name, ...) loadGLFunction(name)
+	
 	GL_FUNCTION_LIST
 
 	wglGetSwapIntervalEXT = (wglGetSwapIntervalEXTFunction*)wglGetProcAddress("wglGetSwapIntervalEXT");
 	wglSwapIntervalEXT = (wglSwapIntervalEXTFunction*)wglGetProcAddress("wglSwapIntervalEXT");
-#undef GLOP
+
+	#undef GLOP
 }
 
 void printGlExtensions() {

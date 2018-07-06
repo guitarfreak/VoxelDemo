@@ -1,4 +1,10 @@
 
+struct AssetInfo {
+	FILETIME lastWriteTime;
+};
+
+//
+
 enum UniformType {
 	UNIFORM_TYPE_VEC4 = 0,
 	UNIFORM_TYPE_VEC3,
@@ -51,6 +57,8 @@ struct Texture {
 
 	bool isRenderBuffer;
 	int msaa;
+
+	AssetInfo assetInfo;
 };
 
 struct Mesh {
@@ -87,3 +95,4 @@ struct FrameBuffer {
 		};
 	};
 };
+

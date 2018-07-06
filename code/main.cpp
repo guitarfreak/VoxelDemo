@@ -4,10 +4,10 @@
 #define NOMINMAX
 #include <windows.h>
 
-#include "rt_misc.cpp"
-#include "rt_memory.cpp"
-#include "rt_hotload.cpp"
-#include "rt_misc_win32.cpp"
+#include "misc.cpp"
+#include "memory.cpp"
+#include "hotload.cpp"
+#include "threadQueue.cpp"
 
 #else 
 
@@ -45,23 +45,22 @@ int CALLBACK WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR commandLi
     bool secondFrame = false;
     bool isRunning = true;
     while(isRunning) {
-
+    	
     	bool reload = false;
 
-	#ifndef SHIPPING_MODE
+		#ifndef SHIPPING_MODE
 
 		if(threadQueueFinished(&threadQueue)) reload = updateDll(&hotloadDll);
      	platform_appMain = (appMainType*)getDllFunction(&hotloadDll, "appMain");
         platform_appMain(firstFrame, reload, &isRunning, wData, &threadQueue, &appMemory);
 
-    #else 
+		#else 
 
         appMain(firstFrame, reload, &isRunning, wData, &threadQueue, &appMemory);
 
-    #endif
+		#endif
 
         if(firstFrame) firstFrame = false;
-
     }
 
 	return 0;

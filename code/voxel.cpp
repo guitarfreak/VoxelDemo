@@ -8,7 +8,6 @@
 #define VC_Z (VOXEL_Z + 2)
 #define VOXEL_CACHE_SIZE (VC_X*VC_Y*VC_Z)
 
-// #define voxelArray(x, y, z) (x)*VOXEL_Y*VOXEL_Z + (y)*VOXEL_Z + (z)
 #define voxelCacheArray(x, y, z) (x)*VC_Y*VC_Z + (y)*VC_Z + (z)
 
 // #define TEXTURE_CACHE_DISTANCE (VIEW_DISTANCE + 2)
@@ -176,7 +175,7 @@ int blockTypesInventory[] = {
 	BX_None, BX_Water, BX_Sand, BX_GrassBottom, BX_GrassTop, BX_Stone, BX_Snow, BX_TreeLogTop, BX_Leaves, BX_Glass, BX_GlowStone, BX_PumpkinTop,
 };
 
-const char* textureFilePaths[BX_Size] = {
+const char* voxelTextureFiles[BX_Size] = {
 	"minecraft\\none.png",
 	"minecraft\\water.png",
 	"minecraft\\sand.png",
@@ -195,7 +194,7 @@ const char* textureFilePaths[BX_Size] = {
 	"minecraft\\pumpkin_bottom.png",
 };
 
-const char* textureFilePaths2[BX2_Size] = {
+const char* voxelTextureFiles2[BX2_Size] = {
 	"minecraft\\none.png",
 	"minecraft\\grass_bottom.png",
 	"minecraft\\leaves.png",
@@ -380,7 +379,6 @@ static unsigned char colorPaletteCompact[64][3] =
 };
 
 static float colorPalette[64][4];
-
 
 void buildColorPalette() {
    int i;
@@ -579,8 +577,9 @@ void generateVoxelMeshThreaded(void* data) {
 		    		for(int z = blockHeight; z < waterLevelHeight; z++) {
 		    			voxels[voxelCacheArray(x,y,z)] = BT_Water;
 
-		    			Vec2i waterLightRange = vec2i(0,vs->globalLumen);
+		    			Vec2i waterLightRange = vec2i(30, vs->globalLumen);
 		    			int lightValue = mapRange(blockHeight, vs->worldMin, waterLevelHeight, waterLightRange.x, waterLightRange.y);
+
 		    			lighting[voxelCacheArray(x,y,z)] = lightValue;
 		    		}
 		    	}
@@ -968,6 +967,12 @@ uchar* getLightingFromCoord(VoxelData* voxelData, Vec3 coord) {
 	return getLightingFromVoxel(voxelData, coordToVoxel(coord));
 }
 
+Vec3i getVoxelOffsetFromChunk(Vec2i chunk) {
+	return vec3i(chunk * vec2i(VOXEL_X, VOXEL_Y), 0);
+}
+
+//
+
 void getVoxelQuadFromFaceDir(Vec3 p, Vec3 faceDir, Vec3 vs[4], float size);
 void drawVoxelCube(Vec3 pos, float size, Vec4 color, int type) {
 
@@ -1032,7 +1037,7 @@ void setupVoxelUniforms(Vec3 cameraPos, Mat4 view, Mat4 proj, Vec3 fogColor, int
 	Vec3 light[2] = { vec3(0,0,(amp/2)+start + sin(dtl)*amp), lColorBrightness };
 	// int loc = glGetUniformLocation(theGraphicsState->pipelineIds.voxelFragment, "light_source");
 	// glProgramUniform3fv(theGraphicsState->pipelineIds.voxelFragment, loc, 2, (GLfloat*)light);
-	pushUniform(SHADER_VOXEL, 1, VOXEL_UNIFORM_LIGHT_SOURCE, light, 2);
+	pushUniform(SHADER_Voxel, 1, VOXEL_UNIFORM_LIGHT_SOURCE, light, 2);
 	dcCube({light[0], vec3(3,3,3), vec4(lColor, 1), 0, vec3(0,0,0)});
 	#endif
 
@@ -1101,20 +1106,20 @@ void setupVoxelUniforms(Vec3 cameraPos, Mat4 view, Mat4 proj, Vec3 fogColor, int
 		else if(sui.type == STBVOX_UNIFORM_TYPE_vec3) type = UNIFORM_TYPE_VEC3;
 		else if(sui.type == STBVOX_UNIFORM_TYPE_vec4) type = UNIFORM_TYPE_VEC4;
 
-		pushUniform(SHADER_VOXEL, 2, sui.name, type, data, count);
+		pushUniform(SHADER_Voxel, 2, sui.name, type, data, count);
 	}	
 
 
 	Mat4 model = modelMatrix(trans, scale, 0, rotation);
 	Mat4 finalMat = proj*view*model;
 
-	pushUniform(SHADER_VOXEL, 1, "alphaTest", 0.0f);
+	pushUniform(SHADER_Voxel, 1, "alphaTest", 0.0f);
 
-	pushUniform(SHADER_VOXEL, 0, "clipPlane", false);
-	pushUniform(SHADER_VOXEL, 0, "cPlane", 0,0,0,0);
-	pushUniform(SHADER_VOXEL, 0, "cPlane2", 0,0,0,0);
-	pushUniform(SHADER_VOXEL, 0, "model", &model);
-	pushUniform(SHADER_VOXEL, 0, "model_view", &finalMat);
+	pushUniform(SHADER_Voxel, 0, "clipPlane", false);
+	pushUniform(SHADER_Voxel, 0, "cPlane", 0,0,0,0);
+	pushUniform(SHADER_Voxel, 0, "cPlane2", 0,0,0,0);
+	pushUniform(SHADER_Voxel, 0, "model", &model);
+	pushUniform(SHADER_Voxel, 0, "model_view", &finalMat);
 }
 
 void drawVoxelMesh(VoxelMesh* m, Vec2i chunkOffset, int drawMode = 0) {
@@ -1126,17 +1131,17 @@ void drawVoxelMesh(VoxelMesh* m, Vec2i chunkOffset, int drawMode = 0) {
 	textureUnits[0] = getTexture("voxelTextures")->id;
 	textureUnits[1] = getTexture("voxelTextures2")->id;
 
-	bindShader(SHADER_VOXEL);
+	bindShader(SHADER_Voxel);
 
 	stbvox_mesh_maker mm;
 	stbvox_set_mesh_coordinates(&mm, (-chunkOffset.x + m->coord.x)*VOXEL_X, (-chunkOffset.y + m->coord.y)*VOXEL_Y, 0);
 	stbvox_get_transform(&mm, m->transform);
 
-	pushUniform(SHADER_VOXEL, 2, "transform", UNIFORM_TYPE_VEC3, &m->transform[0], 3);
+	pushUniform(SHADER_Voxel, 2, "transform", UNIFORM_TYPE_VEC3, &m->transform[0], 3);
 
 	if(drawMode == 0 || drawMode == 2) {
 		glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
-		int vaLoc = glGetAttribLocation(getShader(SHADER_VOXEL)->vertex, "attr_vertex");
+		int vaLoc = glGetAttribLocation(getShader(SHADER_Voxel)->vertex, "attr_vertex");
 		glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 0, (void*)0);
 		glEnableVertexAttribArray(vaLoc);
 
@@ -1148,7 +1153,7 @@ void drawVoxelMesh(VoxelMesh* m, Vec2i chunkOffset, int drawMode = 0) {
 
 	if(drawMode == 0 || drawMode == 1) {
 		glBindBuffer(GL_ARRAY_BUFFER, m->bufferTransId);
-		int vaLoc = glGetAttribLocation(getShader(SHADER_VOXEL)->vertex, "attr_vertex");
+		int vaLoc = glGetAttribLocation(getShader(SHADER_Voxel)->vertex, "attr_vertex");
 		glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 0, (void*)0);
 		glEnableVertexAttribArray(vaLoc);
 
@@ -1167,8 +1172,6 @@ void loadVoxelTextures(Texture* texture, Texture* texture2, char* folderPath, fl
 	strClear(p);
 	strAppend(p, (char*)folderPath);
 
-	// Texture* texture = theGraphicsState->textures3d + 0;
-
 	if(!reload) {
 		texture->dim = vec2i(32,32);
 		texture->channels = 4;
@@ -1182,11 +1185,10 @@ void loadVoxelTextures(Texture* texture, Texture* texture2, char* folderPath, fl
 	for(int layerIndex = 0; layerIndex < BX_Size; layerIndex++) {
 		if(reload && layerIndex != levelToReload) continue;
 
-		char* textureName = (char*)textureFilePaths[layerIndex];
+		char* textureName = (char*)voxelTextureFiles[layerIndex];
 		char* path = getTexture(textureName)->file;
 		int x,y,n;
 		unsigned char* stbData = stbi_load(path, &x, &y, &n, 4);
-		// unsigned char* stbData = stbi_load(textureFilePaths[layerIndex], &x, &y, &n, 4);
 
 		if(layerIndex == BX_Water) {
 			uchar* data = stbData;
@@ -1264,11 +1266,10 @@ void loadVoxelTextures(Texture* texture, Texture* texture2, char* folderPath, fl
 		for(int layerIndex = 0; layerIndex < BX2_Size; layerIndex++) {
 			if(reload && layerIndex != levelToReload) continue;
 
-			char* textureName = (char*)textureFilePaths2[layerIndex];
+			char* textureName = (char*)voxelTextureFiles2[layerIndex];
 			char* path = getTexture(textureName)->file;
 			int x,y,n;
 			unsigned char* stbData = stbi_load(path, &x, &y, &n, 4);
-			// unsigned char* stbData = stbi_load(textureFilePaths2[layerIndex], &x, &y, &n, 4);
 			
 			glTextureSubImage3D(texture->id, 0, 0, 0, layerIndex, x, y, 1, GL_RGBA, GL_UNSIGNED_BYTE, stbData);
 			stbi_image_free(stbData);
@@ -1278,7 +1279,7 @@ void loadVoxelTextures(Texture* texture, Texture* texture2, char* folderPath, fl
 	glGenerateTextureMipmap(texture->id);
 }
 
-bool collisionVoxelBox(VoxelData* voxelData, Vec3 boxPos, Vec3 boxSize, Vec2i chunkOffset, float* minDistance = 0, Vec3* collisionVoxel = 0) {
+bool collisionVoxelBox(VoxelData* voxelData, Vec3 boxPos, Vec3 boxSize, Vec2i chunkOffset, float* minDistance = 0, Vec3* collisionVoxel = 0, bool* inWater = 0) {
 
 	// First get the mesh coords that touch the player box.
 
@@ -1301,8 +1302,8 @@ bool collisionVoxelBox(VoxelData* voxelData, Vec3 boxPos, Vec3 boxSize, Vec2i ch
 				Vec3i coord = vec3i(x,y,z);
 				uchar* block = getBlockFromVoxel(voxelData, coord + voxelOffset);
 
-				if(block) {
-					if(*block > 0) {
+				if(block) {					
+					if(*block > 1) {
 						if(checkDistance) {
 							Vec3 cBox = voxelToVoxelCoord(coord);
 							float distance = len(boxPos - cBox);
@@ -1315,6 +1316,8 @@ bool collisionVoxelBox(VoxelData* voxelData, Vec3 boxPos, Vec3 boxSize, Vec2i ch
 
 						collision = true;
 					}
+
+					if(*block == BT_Water && inWater) *inWater = true;
 				}
 			}
 		}
@@ -1403,7 +1406,7 @@ bool raycastGroundVoxelBox(VoxelData* voxelData, Vec3 pos, Vec3 size, Vec2i chun
 		uchar* blockType = getBlockFromVoxel(voxelData, voxel + voxelOffset);
 
 		if(blockType) {
-			if(*blockType > 0) {
+			if(*blockType > 1) {
 				groundCollision = true;
 				if(collisionBlockType) *collisionBlockType = *blockType;
 				break;
@@ -1488,34 +1491,29 @@ void resetVoxelHashAndMeshes(VoxelData* vd) {
 
 void drawCubeMap(char* skybox, Entity* player, Entity* camera, bool playerMode, int fieldOfView, float aspectRatio, VoxelWorldSettings* voxelSettings, bool reflection) {
 
-	bindShader(SHADER_CUBEMAP);
+	bindShader(SHADER_CubeMap);
 	glBindTextures(0, 1, &getTexture(skybox)->id);
 	glBindSampler(0, 0);
 
-
-	Vec3 skyBoxRot;
-	if(playerMode) skyBoxRot = player->rot;
-	else skyBoxRot = camera->rot;
+	Vec3 skyBoxRot = playerMode ? player->rot : camera->rot;
 	skyBoxRot.x += M_PI;
 
 	Camera skyBoxCam = getCamData(vec3(0,0,0), skyBoxRot, vec3(0,0,0), vec3(0,1,0), vec3(0,0,1));
-	pushUniform(SHADER_CUBEMAP, 0, "view", viewMatrix(skyBoxCam.pos, -skyBoxCam.look, skyBoxCam.up, skyBoxCam.right));
-	pushUniform(SHADER_CUBEMAP, 0, "proj", projMatrix(degreeToRadian(fieldOfView), aspectRatio, 0.001f, 2));
+	pushUniform(SHADER_CubeMap, 0, "view", viewMatrix(skyBoxCam.pos, -skyBoxCam.look, skyBoxCam.up, skyBoxCam.right));
+	pushUniform(SHADER_CubeMap, 0, "proj", projMatrix(degreeToRadian(fieldOfView), aspectRatio, 0.001f, 2));
 
-	pushUniform(SHADER_CUBEMAP, 2, "clipPlane", reflection);
+	pushUniform(SHADER_CubeMap, 2, "clipPlane", reflection);
 	if(reflection) {
-		pushUniform(SHADER_CUBEMAP, 0, "cPlane", 0,0,-1,	voxelSettings->waterLevelHeight);
+		pushUniform(SHADER_CubeMap, 0, "cPlane", 0,0,-1,	voxelSettings->waterLevelHeight);
 	}
 
-	pushUniform(SHADER_CUBEMAP, 2, "fogColor", voxelSettings->fogColor);
+	pushUniform(SHADER_CubeMap, 2, "fogColor", voxelSettings->fogColor);
 
 	glDisable(GL_DEPTH_TEST);
 	glFrontFace(GL_CCW);
 		glDrawArrays(GL_TRIANGLES, 0, 6*6);
 	glFrontFace(GL_CW);
 	glEnable(GL_DEPTH_TEST);
-
-	glDisable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 }
 
 void getVoxelQuadFromFaceDir(Vec3 p, Vec3 faceDir, Vec3 vs[4], float size) {
@@ -1586,25 +1584,26 @@ void entityWorldCollision(Entity* e, VoxelData* vd, float dt) {
 	return entityWorldCollision(&e->pos, e->dim, &e->vel, e->chunk, vd, dt);
 }
 
-// struct VoxelRaycastData { 
-// 	Vec3 voxel;
-// 	Vec3 pos;
-// 	Vec3 dir;
+#if 0
+struct VoxelRaycastData { 
+	Vec3 voxel;
+	Vec3 pos;
+	Vec3 dir;
 
-// 	float t;
+	float t;
 
-// 	Vec3 offset;
-// 	Vec3 maxOffset;
-// };
+	Vec3 offset;
+	Vec3 maxOffset;
+};
 
-// VoxelRaycastData voxelRaycastInit(Vec3 pos, Vec3 dir) {
-// 	VoxelRaycastData vd;
-// 	vd->pos = pos;
-// 	vd->dir = dir;
+VoxelRaycastData voxelRaycastInit(Vec3 pos, Vec3 dir) {
+	VoxelRaycastData vd;
+	vd->pos = pos;
+	vd->dir = dir;
 
-// 	vd->t = 0;
-// 	vd->offset = 
+	vd->t = 0;
+	vd->offset = 
 
-// 	return vd;
-// }
-
+	return vd;
+}
+#endif
