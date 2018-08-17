@@ -360,18 +360,10 @@ bool TypeTraverse::next() {
 			memberName = structMemberInfo->name;
 
 			if(structMemberInfo->arrayCount == 0) {
-				isArray = false;
-
-				if(!isArray) {
-					typeName = memberInfo->name;
-					stack[stackCount++] = {structMemberInfo->type, e->data + structMemberInfo->offset, 0, false};
-				} else {
-					typeName = getStructInfo(e->type)->name;
-					stack[stackCount++] = {e->type, e->data + structMemberInfo->offset, 0, false};
-				}
+				typeName = memberInfo->name;
+				stack[stackCount++] = {structMemberInfo->type, e->data + structMemberInfo->offset, 0, false};
 
 			} else {
-				isArray = true;
 				ArrayInfo aInfo = structMemberInfo->arrays[0];
 
 				char* arrayBase = castTypeArray(e->data + structMemberInfo->offset, aInfo);

@@ -25,6 +25,15 @@
 #define GL_R8                             0x8229
 #define GL_ARRAY_BUFFER                   0x8892
 #define GL_NUM_EXTENSIONS                 0x821D
+#define GL_MAX_INTEGER_SAMPLES            0x9110
+#define GL_MAX_SAMPLES                    0x821D
+#define GL_SAMPLE_ALPHA_TO_COVERAGE       0x809E
+
+#define WGL_CONTEXT_MAJOR_VERSION_ARB     0x2091
+#define WGL_CONTEXT_MINOR_VERSION_ARB     0x2092
+#define WGL_CONTEXT_PROFILE_MASK_ARB            0x9126
+#define WGL_CONTEXT_CORE_PROFILE_BIT_ARB        0x00000001
+#define WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB 0x00000002
 
 #define GL_CLAMP_TO_EDGE                  0x812F
 #define GL_TEXTURE_MAX_ANISOTROPY_EXT     0x84FE
@@ -152,7 +161,8 @@ typedef ptrdiff_t GLintptr;
 	GLOP(void, VertexAttribDivisor, GLuint index, GLuint divisor) \
 	GLOP(void, GetProgramiv, GLuint program, GLenum pname, GLint *params) \
 	GLOP(void, GetActiveUniform, GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name) \
-	GLOP(void, GetTextureImage, GLuint texture, GLint level, GLenum format, GLenum type, GLsizei bufSize, void *pixels)
+	GLOP(void, GetTextureImage, GLuint texture, GLint level, GLenum format, GLenum type, GLsizei bufSize, void *pixels) \
+	GLOP(void, SampleCoverage, GLfloat value, GLboolean invert)
 
 
 //
@@ -167,6 +177,8 @@ typedef int WINAPI wglGetSwapIntervalEXTFunction(void);
 wglGetSwapIntervalEXTFunction* wglGetSwapIntervalEXT;
 typedef int WINAPI wglSwapIntervalEXTFunction(int);
 wglSwapIntervalEXTFunction* wglSwapIntervalEXT;
+typedef HGLRC WINAPI wglCreateContextAttribsARBFunction(HDC hDC, HGLRC hshareContext, const int *attribList);
+wglCreateContextAttribsARBFunction* wglCreateContextAttribsARB;
 
 void loadFunctions() {
 	#define GLOP(returnType, name, ...) loadGLFunction(name)
@@ -175,6 +187,7 @@ void loadFunctions() {
 
 	wglGetSwapIntervalEXT = (wglGetSwapIntervalEXTFunction*)wglGetProcAddress("wglGetSwapIntervalEXT");
 	wglSwapIntervalEXT = (wglSwapIntervalEXTFunction*)wglGetProcAddress("wglSwapIntervalEXT");
+	wglCreateContextAttribsARB = (wglCreateContextAttribsARBFunction*)wglGetProcAddress("wglCreateContextAttribsARB");
 
 	#undef GLOP
 }

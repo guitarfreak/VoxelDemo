@@ -92,11 +92,19 @@ struct VoxelMesh {
 	uint textureTransId;
 	uint texBufferTransId;
 
+	char* meshBufferWater;
+	uint bufferWaterId;
+
+	char* texBufferWater;
+	uint textureWaterId;
+	uint texBufferWaterId;
+
 	//
 
 	float transform[3][3];
 	int quadCount;
 	int quadCountTrans;
+	int quadCountWater;
 	int bufferSizePerQuad;
 	int textureBufferSizePerQuad;
 };
@@ -308,7 +316,7 @@ uchar geometry[BT_Size] = {
 	STBVOX_MAKE_GEOMETRY(STBVOX_GEOM_solid,0,0),
 };
 
-uchar meshSelection[BT_Size] = {0,1,0,0,0,0,0,0,1,1,0,0};
+uchar meshSelection[BT_Size] = {0,2,0,0,0,0,0,0,1,1,0,0};
 
 Vec4 blockTypeParticleColor[] = {
 	vec4(0,0,0,1),
@@ -326,27 +334,28 @@ Vec4 blockTypeParticleColor[] = {
 };
 
 float blockHardnessType[] = {
-	0, // Air. 
-	1, // Leaves.
-	2, // Sand.
-	3, // Ground.
-	4, // Wood.
-	5, // Stone.
+	0,    // Air. 
+	0.2f, // Leaves.
+	0.5f,    // Glass.
+	1,    // Sand.
+	2,    // Ground.
+	3,    // Wood.
+	4,    // Stone.
 };
 
 float blockTypeHardness[] = {
 	blockHardnessType[0], // BT_None,
-	blockHardnessType[1], // BT_Water,
-	blockHardnessType[2], // BT_Sand,
-	blockHardnessType[3], // BT_Ground,
-	blockHardnessType[3], // BT_Grass,
-	blockHardnessType[5], // BT_Stone,
-	blockHardnessType[3], // BT_Snow,
-	blockHardnessType[4], // BT_TreeLog,
+	blockHardnessType[0], // BT_Water,
+	blockHardnessType[3], // BT_Sand,
+	blockHardnessType[4], // BT_Ground,
+	blockHardnessType[4], // BT_Grass,
+	blockHardnessType[6], // BT_Stone,
+	blockHardnessType[4], // BT_Snow,
+	blockHardnessType[5], // BT_TreeLog,
 	blockHardnessType[1], // BT_Leaves,
-	blockHardnessType[1], // BT_Glass,
-	blockHardnessType[4], // BT_GlowStone,
-	blockHardnessType[4], // BT_Pumpkin,
+	blockHardnessType[2], // BT_Glass,
+	blockHardnessType[5], // BT_GlowStone,
+	blockHardnessType[5], // BT_Pumpkin,
 };
 
 Vec3 voxelVertices[] = {
@@ -393,6 +402,7 @@ void buildColorPalette() {
 void allocVoxelGPUData(VoxelMesh* m) {
 	glCreateBuffers(1, &m->bufferId);
 	glCreateBuffers(1, &m->bufferTransId);
+	glCreateBuffers(1, &m->bufferWaterId);
 
 	if(STBVOX_CONFIG_MODE == 1) {
 		glCreateBuffers(1, &m->texBufferId);
@@ -400,6 +410,9 @@ void allocVoxelGPUData(VoxelMesh* m) {
 
 		glCreateBuffers(1, &m->texBufferTransId);
 		glCreateTextures(GL_TEXTURE_BUFFER, 1, &m->textureTransId);
+
+		glCreateBuffers(1, &m->texBufferWaterId);
+		glCreateTextures(GL_TEXTURE_BUFFER, 1, &m->textureWaterId);
 	}
 }
 
@@ -431,12 +444,15 @@ void freeVoxelGPUData(VoxelMesh* m) {
 	if(m->uploaded) {
 		glDeleteBuffers(1, &m->bufferId); m->bufferId = 0;
 		glDeleteBuffers(1, &m->bufferTransId); m->bufferTransId = 0;
+		glDeleteBuffers(1, &m->bufferWaterId); m->bufferWaterId = 0;
 
 		if(STBVOX_CONFIG_MODE == 1) {
 			glDeleteBuffers(1, &m->texBufferId); m->texBufferId = 0;
 			glDeleteBuffers(1, &m->texBufferTransId); m->texBufferTransId = 0;
+			glDeleteBuffers(1, &m->texBufferWaterId); m->texBufferWaterId = 0;
 			glDeleteTextures(1, &m->textureId); m->textureId = 0;
 			glDeleteTextures(1, &m->textureTransId); m->textureTransId = 0;
+			glDeleteTextures(1, &m->textureWaterId); m->textureWaterId = 0;
 		}
 	}	
 }
@@ -707,6 +723,8 @@ void makeMeshThreaded(void* data) {
 	int texBufferCapacity;
 	int meshBufferTransCapacity;
 	int texBufferTransCapacity;
+	int meshBufferWaterCapacity;
+	int texBufferWaterCapacity;
 
 	{
 		meshBufferCapacity = kiloBytes(500);
@@ -718,6 +736,11 @@ void makeMeshThreaded(void* data) {
 		m->meshBufferTrans = (char*)malloc(meshBufferTransCapacity);
 		texBufferTransCapacity = meshBufferTransCapacity/4;
 		m->texBufferTrans = (char*)malloc(texBufferTransCapacity);
+
+		meshBufferWaterCapacity = kiloBytes(500);
+		m->meshBufferWater = (char*)malloc(meshBufferWaterCapacity);
+		texBufferWaterCapacity = meshBufferWaterCapacity/4;
+		m->texBufferWater = (char*)malloc(texBufferWaterCapacity);
 	} 
 
 	stbvox_set_buffer(&mm, 0, 0, m->meshBuffer, meshBufferCapacity);
@@ -728,6 +751,11 @@ void makeMeshThreaded(void* data) {
 	stbvox_set_buffer(&mm, 1, 0, m->meshBufferTrans, meshBufferTransCapacity);
 	if(STBVOX_CONFIG_MODE == 1) {
 		stbvox_set_buffer(&mm, 1, 1, m->texBufferTrans, texBufferTransCapacity);
+	}
+
+	stbvox_set_buffer(&mm, 2, 0, m->meshBufferWater, meshBufferWaterCapacity);
+	if(STBVOX_CONFIG_MODE == 1) {
+		stbvox_set_buffer(&mm, 2, 1, m->texBufferWater, texBufferWaterCapacity);
 	}
 
 	// int count = stbvox_get_buffer_count(&mm);
@@ -760,6 +788,7 @@ void makeMeshThreaded(void* data) {
 
 	m->quadCount = stbvox_get_quad_count(&mm, 0);
 	m->quadCountTrans = stbvox_get_quad_count(&mm, 1);
+	m->quadCountWater = stbvox_get_quad_count(&mm, 2);
 
 	m->bufferSizePerQuad = stbvox_get_buffer_size_per_quad(&mm, 0);
 	m->textureBufferSizePerQuad = stbvox_get_buffer_size_per_quad(&mm, 1);
@@ -819,19 +848,23 @@ void makeMesh(VoxelMesh* m, VoxelData* voxelData, VoxelWorldSettings* vs) {
 	} 
 
 	glNamedBufferData(m->bufferId, m->bufferSizePerQuad*m->quadCount, m->meshBuffer, GL_STATIC_DRAW);
-
 	glNamedBufferData(m->texBufferId, m->textureBufferSizePerQuad*m->quadCount, m->texBuffer, GL_STATIC_DRAW);
 	glTextureBuffer(m->textureId, GL_RGBA8UI, m->texBufferId);
 
 	glNamedBufferData(m->bufferTransId, m->bufferSizePerQuad*m->quadCountTrans, m->meshBufferTrans, GL_STATIC_DRAW);
-
 	glNamedBufferData(m->texBufferTransId, m->textureBufferSizePerQuad*m->quadCountTrans, m->texBufferTrans, GL_STATIC_DRAW);
 	glTextureBuffer(m->textureTransId, GL_RGBA8UI, m->texBufferTransId);
+
+	glNamedBufferData(m->bufferWaterId, m->bufferSizePerQuad*m->quadCountWater, m->meshBufferWater, GL_STATIC_DRAW);
+	glNamedBufferData(m->texBufferWaterId, m->textureBufferSizePerQuad*m->quadCountWater, m->texBufferWater, GL_STATIC_DRAW);
+	glTextureBuffer(m->textureWaterId, GL_RGBA8UI, m->texBufferWaterId);
 
 	free(m->meshBuffer);
 	free(m->texBuffer);
 	free(m->meshBufferTrans);
 	free(m->texBufferTrans);
+	free(m->meshBufferWater);
+	free(m->texBufferWater);
 
 	m->uploaded = true;
 }
@@ -1122,7 +1155,7 @@ void setupVoxelUniforms(Vec3 cameraPos, Mat4 view, Mat4 proj, Vec3 fogColor, int
 	pushUniform(SHADER_Voxel, 0, "model_view", &finalMat);
 }
 
-void drawVoxelMesh(VoxelMesh* m, Vec2i chunkOffset, int drawMode = 0) {
+void drawVoxelMesh(VoxelMesh* m, Vec2i chunkOffset, int meshIndex) {
 	TIMER_BLOCK();
 
 	glBindSamplers(0,3,theGraphicsState->samplers + SAMPLER_VOXEL_1);
@@ -1139,7 +1172,7 @@ void drawVoxelMesh(VoxelMesh* m, Vec2i chunkOffset, int drawMode = 0) {
 
 	pushUniform(SHADER_Voxel, 2, "transform", UNIFORM_TYPE_VEC3, &m->transform[0], 3);
 
-	if(drawMode == 0 || drawMode == 2) {
+	if(meshIndex == 0) {
 		glBindBuffer(GL_ARRAY_BUFFER, m->bufferId);
 		int vaLoc = glGetAttribLocation(getShader(SHADER_Voxel)->vertex, "attr_vertex");
 		glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 0, (void*)0);
@@ -1149,9 +1182,8 @@ void drawVoxelMesh(VoxelMesh* m, Vec2i chunkOffset, int drawMode = 0) {
 		glBindTextures(0,3,textureUnits);
 
 		glDrawArrays(GL_QUADS, 0, m->quadCount*4);
-	}
 
-	if(drawMode == 0 || drawMode == 1) {
+	} else if(meshIndex == 1) {
 		glBindBuffer(GL_ARRAY_BUFFER, m->bufferTransId);
 		int vaLoc = glGetAttribLocation(getShader(SHADER_Voxel)->vertex, "attr_vertex");
 		glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 0, (void*)0);
@@ -1161,6 +1193,17 @@ void drawVoxelMesh(VoxelMesh* m, Vec2i chunkOffset, int drawMode = 0) {
 		glBindTextures(0,3,textureUnits);
 
 		glDrawArrays(GL_QUADS, 0, m->quadCountTrans*4);
+
+	} else if(meshIndex == 2) {
+		glBindBuffer(GL_ARRAY_BUFFER, m->bufferWaterId);
+		int vaLoc = glGetAttribLocation(getShader(SHADER_Voxel)->vertex, "attr_vertex");
+		glVertexAttribIPointer(vaLoc, 1, GL_UNSIGNED_INT, 0, (void*)0);
+		glEnableVertexAttribArray(vaLoc);
+
+		textureUnits[2] = m->textureWaterId;
+		glBindTextures(0,3,textureUnits);
+
+		glDrawArrays(GL_QUADS, 0, m->quadCountWater*4);
 	}
 }
 
@@ -1212,40 +1255,24 @@ void loadVoxelTextures(Texture* texture, Texture* texture2, char* folderPath, fl
 	{
 		int textureId = texture->id;
 
-		float alphaCoverage[mipMapCount] = {};
+		float factor = 1.5f;
+		float k = factor;
 		int size = 32;
 		Vec4* pixels = (Vec4*)getTMemory(sizeof(Vec4)*size*size);
-		for(int i = 0; i < mipMapCount; i++) {
-			glGetTextureSubImage(textureId, i, 0,0,BX_Leaves, size, size, 1, GL_RGBA, GL_FLOAT, size*size*sizeof(Vec4), &pixels[0]);
-
-			for(int y = 0; y < size; y++) {
-				for(int x = 1; x < size; x++) {
-					alphaCoverage[i] += pixels[y*size + x].a;
-				}
-			}
-		
-			alphaCoverage[i] = alphaCoverage[i] / (size*size);
-			size /= 2;
-		}
-
-		float alphaCoverage2[mipMapCount] = {};
 		size = 16;
 		for(int i = 1; i < mipMapCount; i++) {
 			glGetTextureSubImage(textureId, i, 0,0,BX_Leaves, size, size, 1, GL_RGBA, GL_FLOAT, size*size*sizeof(Vec4), &pixels[0]);
 
-			// float alphaScale = (size*size*alphaCoverage[0]) / (alphaCoverage[i]*size*size);
-			float alphaScale = (alphaCoverage[0]) / (alphaCoverage[i]);
-
 			for(int y = 0; y < size; y++) {
-				for(int x = 1; x < size; x++) {
-					pixels[y*size + x].a *= alphaScale;
-					alphaCoverage2[i] += pixels[y*size + x].a;
+				for(int x = 0; x < size; x++) {
+					float alpha = pixels[y*size + x].a / 256.0f;
+					alpha *= k;
+					pixels[y*size + x].a = alpha * 256;
 				}
 			}
+			k *= factor;
 		
 			glTextureSubImage3D(textureId, i, 0, 0, BX_Leaves, size, size, 1, GL_RGBA, GL_FLOAT, pixels);
-
-			alphaCoverage2[i] = alphaCoverage2[i] / (size*size);
 			size /= 2;
 		}
 	}

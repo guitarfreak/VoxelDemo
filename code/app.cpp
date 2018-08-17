@@ -5,14 +5,12 @@
 - Joysticks, Xinput-DirectInput
 - Data Package - Streaming
 - create simpler windows.h
-- remove c runtime library
 - ballistic motion on jumping
 - round collision
 - screen space reflections
 
 - implement sun and clouds that block beams of light
 - glowstone emmitting light
-- stb_voxel push alpha test in voxel vertex shader
 - rocket launcher
 - antialiased pixel graphics with neighbour sampling 
 - level of detail for world gen back row, project to cubemap.
@@ -25,7 +23,6 @@
 - 3d animation system. (Search Opengl vertex skinning.)
 - Sound perturbation.
 - When switching between text editor and debugger, synchronize open files.
-- Entity introspection in gui.
 - Shadow mapping, start with cloud texture projection.
 
 - atomicAdd sections are not thread proof. 
@@ -37,7 +34,6 @@
 - Sound starts to glitch when under 30 hz because audio buffer is 2*framrate.
 - Remove command lists.
 - Creative mode.
-- Should split up leaves and water in own mesh.
 - Recording: Mouse locks up. How to update game while also using mouse for debug stuff?
 - Gui: Cleanup.
 
@@ -384,12 +380,37 @@ extern "C" APPMAINFUNCTION(appMain) {
 		// int windowStyle = WS_OVERLAPPEDWINDOW & ~WS_SYSMENU;
 		initSystem(sd, ws, windowsData, vec2i(1920*0.85f, 1080*0.85f), windowStyle, 1);
 
-	    sd->messageFiber = CreateFiber(0, (PFIBER_START_ROUTINE)updateInput, sd);
+		sd->messageFiber = CreateFiber(0, (PFIBER_START_ROUTINE)updateInput, sd);
 
 		windowHandle = sd->windowHandle;
 		SetWindowText(windowHandle, APP_NAME);
 
 		loadFunctions();
+
+		GLint majorVersion, minorVersion;
+		glGetIntegerv(GL_MAJOR_VERSION, &majorVersion);
+		glGetIntegerv(GL_MINOR_VERSION, &minorVersion);
+
+		// Ask for specific opengl version.
+		{
+			GLint attribs[] = {
+				WGL_CONTEXT_MAJOR_VERSION_ARB, 4,
+				WGL_CONTEXT_MINOR_VERSION_ARB, 5,
+				// WGL_CONTEXT_PROFILE_MASK_ARB, WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
+				WGL_CONTEXT_PROFILE_MASK_ARB, WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB,
+				0
+			};
+
+			HGLRC compatibilityContext = wglCreateContextAttribsARB(sd->deviceContext, 0, attribs);
+			if (compatibilityContext && wglMakeCurrent(sd->deviceContext, compatibilityContext)) {
+				// sd->openglContext = compatibilityContext;
+			} else {
+
+				char* str = fillString("App requires Opengl version 4.5.\nAvailable version is: %i..%i\n", majorVersion, minorVersion);
+				MessageBox(0, str, "Error", MB_OK );
+				exit(0);
+			}
+		}
 
 		#if 1
 			wglSwapIntervalEXT(1);
@@ -482,8 +503,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 		gs->samplers[SAMPLER_NORMAL] = createSampler(16.0f, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
 
-		gs->samplers[SAMPLER_VOXEL_1] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_NEAREST, GL_NEAREST_MIPMAP_LINEAR);
-		gs->samplers[SAMPLER_VOXEL_2] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_NEAREST, GL_NEAREST_MIPMAP_LINEAR);
+		gs->samplers[SAMPLER_VOXEL_1] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_NEAREST, GL_LINEAR_MIPMAP_LINEAR);
+		gs->samplers[SAMPLER_VOXEL_2] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_NEAREST, GL_LINEAR_MIPMAP_LINEAR);
 		gs->samplers[SAMPLER_VOXEL_3] = createSampler(16.0f, GL_REPEAT, GL_REPEAT, GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR);
 
 		//
@@ -491,7 +512,17 @@ extern "C" APPMAINFUNCTION(appMain) {
 		//
 
 		ad->fieldOfView = 60;
-		ad->msaaSamples = 4;
+
+		{
+			int maxSamples;
+			int maxIntSamples;
+
+			glGetIntegerv(GL_MAX_SAMPLES, &maxSamples);
+			glGetIntegerv(GL_MAX_INTEGER_SAMPLES, &maxIntSamples);
+
+			ad->msaaSamples = min(4, maxIntSamples);
+		}
+
 		ad->resolutionScale = 1;
 		ad->nearPlane = 0.1f;
 		ad->farPlane = 3000;
@@ -872,7 +903,8 @@ extern "C" APPMAINFUNCTION(appMain) {
 		gs->screenRes = ws->currentRes;
 		ad->cur3dBufferRes = ws->currentRes;
 		if(ad->resolutionScale < 1.0f) {
-			ad->cur3dBufferRes = ad->cur3dBufferRes * ad->resolutionScale;
+			ad->cur3dBufferRes.w = roundInt(ad->cur3dBufferRes.w * ad->resolutionScale);
+			ad->cur3dBufferRes.h = roundInt(ad->cur3dBufferRes.h * ad->resolutionScale);
 		}
 
 		Vec2i s = ad->cur3dBufferRes;
@@ -891,6 +923,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 	TIMER_BLOCK_BEGIN_NAMED(openglInit, "Opengl Init");
 
 	// Opengl Debug settings.
+	#if !RELEASE_BUILD
 	{
 		glEnable(GL_DEBUG_OUTPUT);
 		glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
@@ -919,6 +952,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 			printf("\t%s \n", messageLog);
 		}
 	}
+	#endif
 
 	// Clear all the framebuffers and window backbuffer.
 	{
@@ -2506,7 +2540,19 @@ extern "C" APPMAINFUNCTION(appMain) {
 		{
 			for(int i = 0; i < ad->coordListSize; i++) {
 				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coordList[i]);
-				drawVoxelMesh(m, ad->chunkOffset, 2);
+				drawVoxelMesh(m, ad->chunkOffset, 0);
+			}
+
+			{
+				pushUniform(SHADER_Voxel, 1, "alphaTest", 0.0f);
+				glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE); defer{glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);};
+
+				glDisable(GL_BLEND); defer{glEnable(GL_BLEND);};
+
+				for(int i = ad->coordListSize-1; i >= 0; i--) {
+					VoxelMesh* m = getVoxelMesh(&ad->voxelData, coordList[i]);
+					drawVoxelMesh(m, ad->chunkOffset, 1);
+				}
 			}
 		}
 
@@ -2530,7 +2576,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			for(int i = 0; i < ad->coordListSize; i++) {
 				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coordList[i]);
-				drawVoxelMesh(m, ad->chunkOffset, 1);
+				drawVoxelMesh(m, ad->chunkOffset, 2);
 			}
 
 			glDisable(GL_CLIP_DISTANCE0);
@@ -2565,11 +2611,17 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			for(int i = 0; i < ad->coordListSize; i++) {
 				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coordList[i]);
-				drawVoxelMesh(m, ad->chunkOffset, 2);
+				drawVoxelMesh(m, ad->chunkOffset, 0);
 			}
-			for(int i = ad->coordListSize-1; i >= 0; i--) {
-				VoxelMesh* m = getVoxelMesh(&ad->voxelData, coordList[i]);
-				drawVoxelMesh(m, ad->chunkOffset, 1);
+
+			{
+				pushUniform(SHADER_Voxel, 1, "alphaTest", 0.0f);
+				glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE); defer{glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);};
+
+				for(int i = ad->coordListSize-1; i >= 0; i--) {
+					VoxelMesh* m = getVoxelMesh(&ad->voxelData, coordList[i]);
+					drawVoxelMesh(m, ad->chunkOffset, 1);
+				}
 			}
 
 			glFrontFace(GL_CW);
@@ -2656,7 +2708,11 @@ extern "C" APPMAINFUNCTION(appMain) {
 			if(ad->blockSelected) 
 			{
 				dcBlend(GL_DST_COLOR, GL_ONE, GL_ZERO, GL_ONE, GL_FUNC_ADD, GL_FUNC_ADD);
+
 				dcEnable(STATE_POLYGON_OFFSET);
+
+				defer{dcBlend(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_FUNC_ADD);};
+			 	defer{dcDisable(STATE_POLYGON_OFFSET);};
 
 				dcPolygonOffset(-2.0f,-2.0f);
 
@@ -2674,9 +2730,6 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 					dcQuad(vs[0], vs[1], vs[2], vs[3], vec4(c,0));
 				}
-
-				dcDisable(STATE_POLYGON_OFFSET);
-				dcBlend(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_FUNC_ADD);
 			}
 		}
 	}
@@ -3035,7 +3088,7 @@ extern "C" APPMAINFUNCTION(appMain) {
 
 			for(int i = ad->coordListSize-1; i >= 0; i--) {
 				VoxelMesh* m = getVoxelMesh(&ad->voxelData, ad->coordList[i]);
-				drawVoxelMesh(m, ad->chunkOffset, 1);
+				drawVoxelMesh(m, ad->chunkOffset, 2);
 			}
 
 			if(ad->cameraInWater) {
